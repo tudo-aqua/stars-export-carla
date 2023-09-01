@@ -1,0 +1,7 @@
+/generated-data
+
+# virtualenv
+venv/
+ENV/
+
+.idea/
