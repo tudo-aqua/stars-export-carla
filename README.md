@@ -3,11 +3,13 @@
 This repository consists of a handful of useful function to automatically extract simulation-runs from the
 [Carla Simulator](https://carla.org/) which then can be used by
 the [CARLA Importer](https://github.com/tudo-aqua/stars/tree/main/stars-import-carla)
-of the [STARS framework](https://github.com/tudo-aqua/stars).
+of the [STARS framework](https://github.com/tudo-aqua/stars). Examples of the resulting data can be
+found [here](https://zenodo.org/record/8131947).
 
 ## Setup
 
 ### Python
+
 <details>
 
   <summary>Linux/Mac</summary>
@@ -102,7 +104,8 @@ This will install all necessary requirements.
 
 ### Carla
 
-Firstly, you have to [install Carla](https://github.com/carla-simulator/carla/releases/tag/0.9.14). Currently, this repository
+Firstly, you have to [install Carla](https://github.com/carla-simulator/carla/releases/tag/0.9.14). Currently, this
+repository
 supports Carla 0.9.14
 
 Now update the project with the path to your local Carla installation in:
@@ -150,7 +153,7 @@ The functions in this repository generate three kinds of data types:
 
 ## Generation Scripts
 
-There are pre-defined scripts that automate the process of generating scenario data files. 
+There are pre-defined scripts that automate the process of generating scenario data files.
 
 - ``generate_data``: Generates recordings, and then monitors them and generates map data
 - ``generate_map_data``: Only generate map data for all currently supported Carla maps
@@ -217,6 +220,7 @@ scenarios.
 The map data will be generated into:  ``/simulation_runs/{map_name}/static_data_{mapName}.zip``
 
 Currently supported:
+
 - Town01
 - Town02
 - Town10
