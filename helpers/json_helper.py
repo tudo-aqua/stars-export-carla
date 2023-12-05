@@ -22,7 +22,7 @@ class JSONHelper:
 
     @staticmethod
     def get_experiment_data_folder() -> os.path:
-        stars_main_dir = Path(os.path.abspath(__file__))
+        stars_main_dir = Path(os.path.dirname(os.path.abspath(__file__))).parent
         recording_dir = os.path.join(stars_main_dir, "stars-experiments-data")
         return recording_dir
 
