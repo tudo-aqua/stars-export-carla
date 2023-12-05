@@ -75,7 +75,7 @@ class CarlaCameraRecorder:
 
         # Initialize necessary helper classes
         rasterizer = MapRasterizer(world)
-        api_helper = CarlaAPIHelper(client, world, rasterizer)
+        api_helper = CarlaAPIHelper(self.client, world, rasterizer)
 
         # Start replay of simulation
         api_helper.start_replaying(log_data_path)
@@ -205,7 +205,7 @@ if __name__ == '__main__':
         '-s', '--seed',
         metavar='S',
         type=str,
-        default=0,
+        default=16,
         help='Set seed for which the recording should be loaded')
     argparser.add_argument(
         '-v', '--vehicle-id',
@@ -217,25 +217,25 @@ if __name__ == '__main__':
         '-x', '--width',
         metavar='V',
         type=int,
-        default=640,
+        default=1920,
         help='Width of the resulting video')
     argparser.add_argument(
         '-y', '--height',
         metavar='V',
         type=int,
-        default=480,
+        default=1080,
         help='Height of the resulting video')
     argparser.add_argument(
         '-b', '--begin_at',
         metavar='B',
         type=float,
-        default=0.0,
+        default=0.5,
         help='Tick at which the video should start')
     argparser.add_argument(
         '-e', '--end_at',
         metavar='E',
         type=float,
-        default=sys.maxsize,
+        default=10,
         help='Tick at which the video should end')
     args = argparser.parse_args()
 
@@ -268,4 +268,4 @@ if __name__ == '__main__':
     finally:
         print("Convert images to video")
         CarlaCameraRecorder.save_video(seed=seed, vehicle_id=vehicle_id, begin_at=begin_at,
-                                       end_at=CarlaCameraRecorder.END_AT)
+                                       end_at=end_at)
