@@ -226,23 +226,12 @@ Currently supported:
 - Town10
 
 # Create Docker image
-A Docker image based on the `Dockerfile` can be created using the following command:
+A Docker container based on the `Dockerfile` can be created using the following command:
 ```bash
-docker build -t local/stars-export-carla:latest ./stars-export-carla.Dockerfile
+docker build -t local/stars-export-carla:latest .
 ```
 
-# Create Singularity description file based on Dockerfile
-<details>
-<summary>Windows</summary>
+The Docker container can then be saved to the disk using the following command:
 ```bash
-docker build -t local/build-singularity-description-file:latest -f ./singularity-setup.Dockerfile .dock
-docker run -v ${pwd}:/opt local/build-singularity-description-file:latest
+docker save -o stars-export-carla-container.tar.gz local/stars-export-carla:latest
 ```
-</details>
-<details>
-<summary>Linux</summary>
-```bash
-docker build -t local/build-singularity-description-file:latest -f ./singularity-setup.Dockerfile .dock
-docker run -v $(pwd):/opt local/build-singularity-description-file:latest
-```
-</details>
