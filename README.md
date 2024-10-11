@@ -226,12 +226,12 @@ Currently supported:
 - Town10
 
 # Create Docker image
-A Docker container based on the `Dockerfile` can be created using the following command:
+A Docker image based on the `Dockerfile` can be created using the following command:
 ```bash
 docker build -t local/stars-export-carla:latest .
 ```
 
-The Docker container can then be saved to the disk using the following command:
+The Docker image can then be saved to the disk using the following command:
 ```bash
 docker save -o stars-export-carla-container.tar.gz local/stars-export-carla:latest
 ```
