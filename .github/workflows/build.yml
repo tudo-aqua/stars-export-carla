@@ -17,4 +17,4 @@ jobs:
       run: docker pull quay.io/singularity/singularity:v4.1.0
 
     - name: Build singularity container
-      run: docker run --rm quay.io/singularity/singularity sudo singularity build container.sif Singularityfile.def
+      run: docker run --rm quay.io/singularity/singularity:v4.1.0 sudo singularity build container.sif Singularityfile.def
