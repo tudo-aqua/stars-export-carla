@@ -8,8 +8,13 @@ on:
 jobs:
   build-singularity-container:
     name: Build Singularity container
-    runs-on: quay.io/singularity/singularity
+    runs-on: ubuntu-latest
     steps:
-    - name: Install
-      run: |
-        sudo apt-get update
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Pull singularity
+      run: docker pull quay.io/singularity/singularity
+
+    - name: Build singularity container
+      run: docker run --rm quay.io/singularity/singularity sudo singularity build container.sif Singularityfile.def
