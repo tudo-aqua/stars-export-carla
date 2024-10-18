@@ -1,0 +1,19 @@
+name: Analyze, Build and Deploy
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+        - main
+  workflow_dispatch:
+
+jobs:
+  build-singularity-container:
+    name: Build Singularity container
+    runs-on: quay.io/singularity/singularity
+    steps:
+    - name: Install
+      run: |
+        apt-get update
