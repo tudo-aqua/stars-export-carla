@@ -20,4 +20,4 @@ jobs:
       run: |
         docker run --rm \
           -v ${{ github.workspace }}:/workspace \
-          quay.io/singularity/singularity:v4.1.0 singularity build container.sif Singularityfile.def
+          quay.io/singularity/singularity:v4.1.0 build container.sif Singularityfile.def
