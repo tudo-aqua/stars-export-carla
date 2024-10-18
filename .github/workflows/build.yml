@@ -8,7 +8,7 @@ on:
 jobs:
   build-singularity-container:
     name: Build Singularity container
-    runs-on: quay.io/singularity/singularity
+    runs-on: ubuntu-latest # quay.io/singularity/singularity
     steps:
     - name: Install
       run: |
