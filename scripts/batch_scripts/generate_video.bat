@@ -15,7 +15,7 @@ start %CARLA_HOME% -RenderOffScreen
 timeout /t 10 /nobreak
 set PYTHONPATH=.\..\..\
 
-call .\..\..\venv\Scripts\python.exe ./../../helpers/carla_camera_recorder.py -x 640 -y 480 -s 22 -v 391 -b 57 -e 102
+call .\..\..\venv\Scripts\python.exe ./../../helpers/carla_camera_recorder.py -x 1920 -y 1080 -e 1 -p %1 -d .\..\..\
 timeout /t 10 /nobreak
 
 ::Kill the new threads (but no other)
