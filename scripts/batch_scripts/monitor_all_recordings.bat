@@ -3,7 +3,7 @@ echo monitor_all_recordings.bat
 setlocal enabledelayedexpansion
 set ABS_PATH=%CD%
 echo abs: %ABS_PATH%
-for /D %%s in ("./../../generated-data/recordings"\*) do (
+for /D %%s in ("./../../scenarios"\*) do (
     echo "Map folder: %%s"
     for %%f in (%%s\*) do (
         call :monitor %%s %%f

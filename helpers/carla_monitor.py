@@ -40,6 +40,7 @@ class CarlaMonitor:
         @param folder_name: The folder in which the simulation is saved
         @return: DataWeatherParameters from given json file, or DataWeatherParameters. Default if file does not exist
         """
+        return DataWeatherParameters.from_weather(WeatherParameters.Default, DataWeatherParametersType.Default)
         # Get path for the weather json file (for some simulations runs, there is no weather data recorded)
         existing_file = JSONHelper.get_file_path_for_name(name=file_name, map_name=folder_name,
                                                           folder=JSONHelper.RECORDINGS_RUNS_FOLDER, file_ending="zip",
@@ -69,13 +70,13 @@ class CarlaMonitor:
         @return: None
         """
         print("Evaluate recorder data at path", file_path)
-        if ".log" in file_path:
-            JSONHelper.delete_file(file_path)
-            file_path = file_path.replace(".log", ".zip")
-        # Unzip recorder file at path
-        JSONHelper.extract_from_zip(file_path)
+        # if ".log" in file_path:
+        #     JSONHelper.delete_file(file_path)
+        #     file_path = file_path.replace(".log", ".zip")
+        # # Unzip recorder file at path
+        # JSONHelper.extract_from_zip(file_path)
         # Log file path
-        log_data_path = file_path.replace(".zip", ".log")
+        log_data_path = file_path
 
         try:
             # Get folder and file names
@@ -86,7 +87,7 @@ class CarlaMonitor:
             existing_file = JSONHelper.get_file_path_for_name(map_name=folder_name, name=file_name,
                                                               folder=JSONHelper.SIMULATION_RUNS_FOLDER,
                                                               prefix=JSONHelper.DYNAMIC_FILE_NAME_PREFIX,
-                                                              file_ending="zip")
+                                                              file_ending="log")
 
             # Check if the recording was already analyzed
             if not update_existing and os.path.exists(existing_file):
