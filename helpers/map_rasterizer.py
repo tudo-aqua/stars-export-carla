@@ -85,7 +85,7 @@ class MapRasterizer:
         d, i = self._kd_tree.query((location.x, location.y, location.z))
         return self._lane_midpoints[i]
 
-    def get_data_blocks(self, distance: float = 2.0) -> List[DataBlock]:
+    def get_data_blocks(self, distance: float = 0.1) -> List[DataBlock]:
         """
         Returns a list of fully filled DataBlock objects of the whole map
         @param distance: The distance for which the waypoints should be created
@@ -223,8 +223,9 @@ class MapRasterizer:
         roads_list = []
         road_is_junction = dict()
         block_lanes: List[DataLane] = []
+        junction_waypoints = junction.get_waypoints(LaneType.Any)
         # Loop over each waypoint in junction
-        for waypoint_tuple in junction.get_waypoints(LaneType.Driving):
+        for waypoint_tuple in junction_waypoints:
             waypoint = waypoint_tuple[0]
             road_id = waypoint.road_id
             road_is_junction[road_id] = waypoint.is_junction
