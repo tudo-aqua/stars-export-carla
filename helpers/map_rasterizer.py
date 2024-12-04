@@ -37,7 +37,7 @@ class MapRasterizer:
             raise RuntimeError("The blocks have not yet been calculated. Use method 'get_data_blocks'")
         JSONHelper.log_data_blocks(self._blocks, file_path)
 
-    def load_or_calculate_data_blocks(self, file_name: str, map_name: str, update_existing: bool) -> List[DataBlock]:
+    def load_or_calculate_data_blocks(self, log_file_path: str) -> List[DataBlock]:
         """
         Loads the DataBlocks for the current map if existing. Otherwise, they are calculated and
         saved to disk.
@@ -46,24 +46,13 @@ class MapRasterizer:
             print("Blocks are already calculated. Nothing new to be done.")
             return self._blocks
         # Load the collected static data from the json file
-        logfile_name = JSONHelper.get_file_path_for_name(name=file_name, prefix=JSONHelper.STATIC_FILE_NAME_PREFIX,
-                                                         folder=JSONHelper.SIMULATION_RUNS_FOLDER, map_name=map_name,
-                                                         file_ending="zip")
-        data_log_file = logfile_name.replace(".zip", ".json")
-        if not os.path.exists(logfile_name) or update_existing:
-            if update_existing:
-                print("Overwrite existing map data")
-            else:
-                print("The static information was not yet calculated. Calculate now.")
-            self._blocks = self.get_data_blocks()
-            self.save_data_blocks(file_path=data_log_file)
-            JSONHelper.zip_and_delete_file(data_log_file)
-        else:
-            print("The static information for the file", logfile_name, "has already been calculated. Load from file.")
-            JSONHelper.extract_from_zip(logfile_name)
-            data_blocks = JSONHelper.load_data_blocks(data_log_file)
-            self._blocks = data_blocks
-            JSONHelper.delete_file(data_log_file)
+        logfile_name = log_file_path
+        self._blocks = self.get_data_blocks()
+        file_name = os.path.basename(log_file_path).split(".")[0]
+        folder = JSONHelper.get_file_path_folder(file_name)
+        save_file_name = os.path.join(folder, f"{JSONHelper.STATIC_FILE_NAME_PREFIX}_{file_name}.json")
+        self.save_data_blocks(file_path=save_file_name)
+        JSONHelper.zip_and_delete_file(save_file_name)
 
         self._lane_midpoints = self.getLaneMidpointsArray()
         lane_midpoint_locations = list(

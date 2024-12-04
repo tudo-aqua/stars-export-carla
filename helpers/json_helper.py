@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from datetime import datetime
 from os.path import dirname
 from typing import List
@@ -126,14 +127,18 @@ class JSONHelper:
 
     @staticmethod
     def log_tick_data(ticks: List[TickData], path: os.path) -> None:
-        # Override existing files
+        directory = os.path.dirname(path)
+        if not os.path.exists(directory):
+            os.makedirs(directory)
         with open(path, "w") as logfile:
             json_string = TickData.list_to_json(ticks)
             logfile.write(json_string)
 
     @staticmethod
     def log_data_blocks(blocks: List[DataBlock], path: os.path) -> None:
-        # Override existing files
+        directory = os.path.dirname(path)
+        if not os.path.exists(directory):
+            os.makedirs(directory)
         with open(path, "w") as logfile:
             json_string = DataBlock.list_to_json(blocks)
             logfile.write(json_string)
@@ -163,6 +168,17 @@ class JSONHelper:
         with open(path, encoding="utf8") as logfile:
             data = json.loads(logfile.read())
             return DataWeatherParameters.from_dict(data)
+
+    @staticmethod
+    def load_weather_from_scenic(path: os.path) -> DataWeatherParameters:
+        # Read the file and extract the weather value
+        with open(path, "r") as file:
+            for line in file:
+                match = re.search(r'param weather = "(.*?)"', line)
+                if match:
+                    weather_value = match.group(1)
+                    print(f"Extracted weather value: {weather_value}")
+                    return DataWeatherParameters.from_enum_value(weather_value)
 
     @staticmethod
     def zip_and_delete_file(path: os.path) -> None:

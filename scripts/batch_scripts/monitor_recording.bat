@@ -23,7 +23,7 @@ echo Got Folder: %1
 echo Got File: %2
 
 echo "Call Python code"
-call .\..\..\venv\Scripts\python.exe ./../../helpers/carla_monitor.py --file=%2
+call .\..\..\venv\Scripts\python.exe ./../../helpers/carla_monitor.py --folder=%1
 timeout /t 10 /nobreak
 
 ::Kill the new threads (but no other)

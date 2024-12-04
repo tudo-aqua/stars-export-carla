@@ -20,11 +20,10 @@ from helpers.map_rasterizer import MapRasterizer
 
 class CarlaMonitor:
     FORCE_JSON_FILE_UPDATES = False
-    ONLY_TRACK_AT_SPECIFIC_INTERVAL = True
+    ONLY_TRACK_AT_SPECIFIC_INTERVAL = False
     SPECIFIC_TRACK_INTERVAL = 0.5  # in seconds
 
-    DEFAULT_LOG_FILE = "D:/aqua/stas-main/stars-experiments-data/recordings/_Game_Carla_Maps_Town01/_Game_Carla_Maps_Town01_seed2.zip"
-    DEFAULT_LOG_FOLDER = "D:/aqua/stas-main/stars-experiments-data/recordings/_Game_Carla_Maps_Town01"
+    DEFAULT_LOG_FOLDER = "C:/Users/Till/Downloads/scenarios/scenarios/scenario_1"
 
     def __init__(self, carla_client: Client):
         self.ego_vehicle = None
@@ -33,70 +32,34 @@ class CarlaMonitor:
         self.map = self.world.get_map()
 
     @staticmethod
-    def get_simulation_run_weather(file_name: str, folder_name: str) -> DataWeatherParameters:
+    def get_simulation_run_weather(weather_file: str) -> DataWeatherParameters:
         """
         Read Weather data from given json data into DataWeatherParameters data class
-        @param file_name: The file name for the simulation
-        @param folder_name: The folder in which the simulation is saved
         @return: DataWeatherParameters from given json file, or DataWeatherParameters. Default if file does not exist
         """
-        return DataWeatherParameters.from_weather(WeatherParameters.Default, DataWeatherParametersType.Default)
-        # Get path for the weather json file (for some simulations runs, there is no weather data recorded)
-        existing_file = JSONHelper.get_file_path_for_name(name=file_name, map_name=folder_name,
-                                                          folder=JSONHelper.RECORDINGS_RUNS_FOLDER, file_ending="zip",
-                                                          prefix=JSONHelper.WEATHER_FILE_NAME_PREFIX)
-        # Unzip recorder file at path
-        JSONHelper.extract_from_zip(existing_file)
-        # Log file path
-        log_data_path = existing_file.replace(".zip", ".json")
-        print("Evaluating weather data at path:", log_data_path)
+        print("Evaluating weather data at path:", weather_file)
         # Check if th weather file exists
-        if not os.path.exists(log_data_path):
+        if not os.path.exists(weather_file):
             # Take default weather as no weather was saved
-            print("There is no weather data for the recording file:", file_name,
+            print("There is no weather data for the recording file:", weather_file,
                   "Take Default")
             return DataWeatherParameters.from_weather(WeatherParameters.Default, DataWeatherParametersType.Default)
         # Load weather data from file
-        weather_data = JSONHelper.load_weather(log_data_path)
-        JSONHelper.delete_file(log_data_path)
+        weather_data = JSONHelper.load_weather_from_scenic(weather_file)
         return weather_data
 
-    def monitor_simulation_run(self, folder_path: str, file_path: str, update_existing: bool) -> None:
+    def monitor_simulation_run(self, file_path: str, weather_file_path: str) -> None:
         """
         Monitor the simulation run of the given file
-        @param folder_path: The folder in which the simulation is saved in (is necessary for weather data)
         @param file_path: The file name of the simulation run to monitor
-        @param update_existing: Decide whether existing monitor results should be overwritten
         @return: None
         """
         print("Evaluate recorder data at path", file_path)
-        # if ".log" in file_path:
-        #     JSONHelper.delete_file(file_path)
-        #     file_path = file_path.replace(".log", ".zip")
-        # # Unzip recorder file at path
-        # JSONHelper.extract_from_zip(file_path)
-        # Log file path
         log_data_path = file_path
 
         try:
-            # Get folder and file names
-            file_name = os.path.basename(file_path).split(".")[0]
-            folder_name = os.path.basename(folder_path)
-
-            # Build path to existing data
-            existing_file = JSONHelper.get_file_path_for_name(map_name=folder_name, name=file_name,
-                                                              folder=JSONHelper.SIMULATION_RUNS_FOLDER,
-                                                              prefix=JSONHelper.DYNAMIC_FILE_NAME_PREFIX,
-                                                              file_ending="log")
-
-            # Check if the recording was already analyzed
-            if not update_existing and os.path.exists(existing_file):
-               print("The dynamic information for the recording file:", file_name,
-                     "has already been calculated. Skip to next file.")
-               return
-
             # Check data from carla recording for validity
-            info = self.client.show_recorder_file_info(log_data_path, False)
+            info = self.client.show_recorder_file_info(log_data_path, True)
             if info == "File is not a CARLA recorder/n":
                 print("The file at path", file_path, "is not a CARLA recorder")
                 return
@@ -105,13 +68,20 @@ class CarlaMonitor:
                 print("The file at path", file_path, "cannot be found.")
                 return
 
+            # Get recording frequency in the recorded file using the recorder_file_info and split
+            recording_frequency = float(info.split("Frame 2 at ")[1].split(" seconds")[0])
+
+            print(f"Recording frequency: {recording_frequency}")
+
             # Get count of all ticks in the recorded file using the recorder_file_info and split
             replay_tick_count = int(info.split("Frames: ")[1].split("Duration")[0])
 
-            print("Create dynamic information for the recording file:", existing_file)
+            print(f"Replay Tick Count: {replay_tick_count}")
 
-            weather_parameters: DataWeatherParameters = CarlaMonitor.get_simulation_run_weather(file_name=file_name,
-                                                                                                folder_name=folder_name)
+            print("Create dynamic information for the recording file:", log_data_path)
+
+            weather_parameters: DataWeatherParameters = CarlaMonitor.get_simulation_run_weather(
+                weather_file=weather_file_path)
 
             # Get map name of recording
             map_name = info.split("Map: ")[1].split("\nDate")[0]
@@ -126,15 +96,14 @@ class CarlaMonitor:
             api_helper = CarlaAPIHelper(client, world, rasterizer)
 
             # Calculate the static data for the current map
-            blocks = rasterizer.load_or_calculate_data_blocks(map_name=folder_name, file_name=folder_name,
-                                                              update_existing=update_existing)
+            blocks = rasterizer.load_or_calculate_data_blocks(log_file_path=log_data_path)
 
             traffic_lights = rasterizer.get_all_traffic_lights()
 
             # Set synchronous mode settings
             new_settings = world.get_settings()
             new_settings.synchronous_mode = True
-            new_settings.fixed_delta_seconds = CarlaDataGenerator.SIMULATOR_FIXED_TICK_DELTA
+            new_settings.fixed_delta_seconds = recording_frequency
             world.apply_settings(new_settings)
 
             # Start replay of simulation
@@ -205,7 +174,7 @@ class CarlaMonitor:
                                                                          nearest_lane_midpoint.road_id)
                     if not wp_is_in_blocks:
                         print("The waypoint for the current actor is not in the rasterized blocks")
-                        JSONHelper.log_invalid_run(file_name)
+                        JSONHelper.log_invalid_run(log_data_path)
                         abort = True
                         raise KeyboardInterrupt
 
@@ -224,14 +193,15 @@ class CarlaMonitor:
                 ticks.append(tick)
             print("Analysis complete. Save to disk.")
             # Save Dynamic data to disk
-            dynamic_data_path = existing_file.replace(".zip", ".json")
-            saved_dynamic_data = api_helper.save_dynamic_data(ticks=ticks, file_path=dynamic_data_path)
-            if saved_dynamic_data:
-                JSONHelper.zip_and_delete_file(dynamic_data_path)
+            file_name = os.path.basename(log_data_path).split(".")[0]
+            folder = JSONHelper.get_file_path_folder(file_name)
+            save_file_name = os.path.join(folder, f"{JSONHelper.DYNAMIC_FILE_NAME_PREFIX}_{file_name}.json")
+            saved_dynamic_data = api_helper.save_dynamic_data(ticks=ticks, file_path=save_file_name)
+            JSONHelper.zip_and_delete_file(save_file_name)
         except RuntimeError as err:
             print("Logged failed Carla run")
             print(f"Unexpected {err}, {type(err)}")
-            JSONHelper.log_error("failed_run", name=file_name, error_message=f"{err}")
+            JSONHelper.log_error("failed_run", name=log_data_path, error_message=f"{err}")
         finally:
             settings = self.world.get_settings()
 
@@ -245,46 +215,33 @@ class CarlaMonitor:
             actors = self.world.get_actors()
             print(f"destroying {len(actors)} actors")
             self.client.apply_batch([carla.command.DestroyActor(x) for x in actors])
-            time.sleep(10)
-            print("Remove", log_data_path)
-            # Remove extracted zip content
-            JSONHelper.delete_file(log_data_path)
 
 
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser(description=__doc__)
     argparser.add_argument(
-        '-f', '--file',
+        '-f', '--folder',
         metavar='F',
         type=str,
-        default=CarlaMonitor.DEFAULT_LOG_FILE,
-        help='Set explicit recording file path')
-    argparser.add_argument(
-        '-a', '--seed',
-        metavar='S',
-        type=int,
-        default=-1,
-        help='Set explicit seed')
-    argparser.add_argument(
-        '-u', '--update-existing-files',
-        metavar='U',
-        type=bool,
-        default=False,
-        help='Decide whether existing files should be updated.')
+        default=CarlaMonitor.DEFAULT_LOG_FOLDER,
+        help='Set explicit recording folder path')
     args = argparser.parse_args()
+    folder_path = os.path.abspath(args.folder)
+    print("Analyze folder at:", folder_path)
 
-    seed = args.seed
-    if seed != -1:
-        file_path = JSONHelper.get_path_from_seed(seed=args.seed, recording=True)
-    else:
-        file_path = args.file
-    file_path = os.path.abspath(file_path)
-    print("Analyze file at:", file_path)
-    folder_name = os.path.dirname(file_path)
-    print("Analyze file in:", folder_name)
+    # Initialize variables
+    log_file = None
+    scenic_file = None
 
-    update_existing = args.update_existing_files or CarlaMonitor.FORCE_JSON_FILE_UPDATES
-    print("Update existing files:", update_existing)
+    # Search for the files
+    for file in os.listdir(folder_path):
+        if file.endswith(".log"):
+            log_file = os.path.join(folder_path, file)
+        elif file.endswith(".scenic"):
+            scenic_file = os.path.join(folder_path, file)
+
+    print(f"Got simulation file: {log_file}")
+    print(f"Got scenic file: {scenic_file}")
     print("Connect to Carla")
 
     try:
@@ -297,10 +254,10 @@ if __name__ == '__main__':
         monitor = CarlaMonitor(carla_client=client)
         print("Connected to carla")
 
-        print("Analyze recording", file_path)
-        monitor.monitor_simulation_run(folder_path=folder_name, file_path=file_path, update_existing=update_existing)
+        print("Analyze recording", log_file)
+        monitor.monitor_simulation_run(file_path=log_file, weather_file_path=scenic_file)
         print("Done with monitoring the recording")
     except RuntimeError as err:
         print("Logged failed Carla run in main")
         print(f"Unexpected {err}, {type(err)}")
-        JSONHelper.log_error("failed_run", name=file_path, error_message=f"{err}")
+        JSONHelper.log_error("failed_run", name=folder_path, error_message=f"{err}")
