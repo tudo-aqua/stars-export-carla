@@ -1,4 +1,4 @@
-carla~=0.9.14
+carla~=0.9.15
 numpy~=1.22
 dataclass-wizard
 opencv-python~=4.8.1.78
