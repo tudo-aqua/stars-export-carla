@@ -198,19 +198,30 @@ class MapRasterizer:
         road_id = waypoint.road_id
         # Extract all waypoints belonging to the road of the waypoint
         lane_waypoints = list(filter(lambda wp: wp.road_id == road_id, waypoints))
-        relevant_waypoints = []
-        for lane_waypoint in lane_waypoints:
-            already_in_list = False
-            # Check if the waypoint is also included in the road
-            for relevant_waypoint in relevant_waypoints:
-                if relevant_waypoint.lane_id == lane_waypoint.lane_id:
-                    already_in_list = True
-            # Only process lanes that are not yet tracked in the road
-            if not already_in_list:
-                relevant_waypoints.append(lane_waypoint)
+        # Get only one waypoint for each lane
+        unique_lane_ids_waypoints = list({wp.lane_id: wp for wp in lane_waypoints}.values())
+        # Get all lanes for the road
+        road_lanes = [x for xs in
+                      list(map(lambda wp: self.get_all_lanes_on_same_side_of_road(wp), unique_lane_ids_waypoints)) for x
+                      in xs]
         # Transform all relevant waypoints to DataLanes
-        data_lanes = list(map(lambda wp: self.get_data_lane_for_waypoint(wp, landmarks), relevant_waypoints))
+        data_lanes = list(map(lambda wp: self.get_data_lane_for_waypoint(wp, landmarks), road_lanes))
         return DataRoad(road_id, lanes=data_lanes, is_junction=waypoint.is_junction)
+
+    def get_all_lanes_on_same_side_of_road(self, starting_lane: Waypoint) -> List[Waypoint]:
+        """
+        This method returns all lanes that are on the same side of the given `starting_lane` waypoint.
+        :param starting_lane: The waypoint, representing the starting lane, for which all lanes should be returned
+        :return: A list of lanes that are on the same side of the given lane
+        """
+        current_lane = starting_lane
+        lanes = []
+        while current_lane:
+            if current_lane not in lanes:
+                lanes.append(current_lane)
+
+            current_lane = current_lane.get_right_lane()
+        return lanes
 
     def get_data_roads_for_junction(self, junction: Junction, landmarks: List[Landmark]) -> List[DataRoad]:
         """
