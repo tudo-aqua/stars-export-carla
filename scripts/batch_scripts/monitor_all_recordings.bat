@@ -5,22 +5,7 @@ set ABS_PATH=%CD%
 echo abs: %ABS_PATH%
 for /D %%s in ("./../../scenarios"\*) do (
     echo "Map folder: %%s"
-    for %%f in (%%s\*) do (
-        call :monitor %%s %%f
-    )
+        echo monitor_recording.bat %%s
+        call monitor_recording.bat %%s
 )
 endlocal
-
-
-:monitor
-set MAP_FOLDER=%1
-set FILE_PATH=%2
-Echo.%FILE_PATH% | findstr /C:"weather">nul && (
-    echo Skip weather data at %FILE_PATH%
-) || (
-    echo Current file %FILE_PATH%
-    echo monitor_recording.bat %MAP_FOLDER% %FILE_PATH%
-    call monitor_recording.bat %MAP_FOLDER% %FILE_PATH%
-    echo "====================================================="
-)
-:End
