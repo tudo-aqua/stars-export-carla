@@ -29,6 +29,7 @@ class DataWeatherParametersType(ComparableEnum):
     SoftRainSunset = 12
     MidRainSunset = 13
     HardRainSunset = 14
+    DustStorm = 15
 
 
 class DataLaneType(ComparableEnum):

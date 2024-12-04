@@ -35,6 +35,7 @@ class DataWeatherParameters(JSONWizard):
         debug_enabled = True
 
     type: DataWeatherParametersType
+    dust_storm: float
     cloudiness: float
     precipitation: float
     precipitation_deposits: float
@@ -50,8 +51,37 @@ class DataWeatherParameters(JSONWizard):
     rayleigh_scattering_scale: float
 
     @staticmethod
+    def from_enum_value(weather_value: str) -> DataWeatherParameters:
+        # Retrieve the enum value dynamically
+        if hasattr(DataWeatherParametersType, weather_value):
+            enum_value = getattr(DataWeatherParametersType, weather_value)
+            weather_mapping = {
+                "Default": WeatherParameters.Default,
+                "DustStorm": WeatherParameters.DustStorm,
+                "ClearNoon": WeatherParameters.ClearNoon,
+                "CloudyNoon": WeatherParameters.CloudyNoon,
+                "WetNoon": WeatherParameters.WetNoon,
+                "WetCloudyNoon": WeatherParameters.WetCloudyNoon,
+                "SoftRainNoon": WeatherParameters.SoftRainNoon,
+                "MidRainyNoon": WeatherParameters.MidRainyNoon,
+                "HardRainNoon": WeatherParameters.HardRainNoon,
+                "ClearSunset": WeatherParameters.ClearSunset,
+                "CloudySunset": WeatherParameters.CloudySunset,
+                "WetSunset": WeatherParameters.WetSunset,
+                "WetCloudySunset": WeatherParameters.WetCloudySunset,
+                "SoftRainSunset": WeatherParameters.SoftRainSunset,
+                "MidRainSunset": WeatherParameters.MidRainSunset,
+                "HardRainSunset": WeatherParameters.HardRainSunset,
+            }
+            weather_parameters = weather_mapping.get(weather_value, WeatherParameters.Default)
+            return DataWeatherParameters.from_weather(weather=weather_parameters, weather_enum=enum_value)
+        else:
+            raise ValueError(f"Weather value '{weather_value}' is not in the enum.")
+
+    @staticmethod
     def from_weather(weather: WeatherParameters, weather_enum: DataWeatherParametersType) -> DataWeatherParameters:
         return DataWeatherParameters(cloudiness=weather.cloudiness, precipitation=weather.precipitation,
+                                     dust_storm=weather.dust_storm,
                                      precipitation_deposits=weather.precipitation_deposits,
                                      wind_intensity=weather.wind_intensity, type=weather_enum,
                                      sun_azimuth_angle=weather.sun_azimuth_angle,
@@ -209,7 +239,7 @@ class DataLocation:
         @param bounding_box: The bounding box that should be transformed
         @return: The DataLocation based on the given bounding box
         """
-        location: Location = bounding_box.get_location()
+        location: Location = bounding_box.location
         return DataLocation(x=location.x, y=location.y, z=location.z)
 
 
@@ -437,7 +467,7 @@ class DataBoundingBox:
         """
         bounding_box: BoundingBox = actor.bounding_box
 
-        extent = Vector3D.from_bounding_box(bounding_box)
+        extent = DataVector3D.from_bounding_box(bounding_box)
         location = DataLocation.from_bounding_box(bounding_box)
         rotation = DataRotation.from_bounding_box(bounding_box)
 
