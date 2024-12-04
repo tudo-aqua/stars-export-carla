@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from dataclass_wizard import JSONWizard
 from typing import Tuple, List, Optional
 from carla import Rotation, Vector3D, Actor, Location, Vehicle, Waypoint, TrafficLight, TrafficSign, Walker, \
-    WeatherParameters
+    WeatherParameters, BoundingBox
 
 from carla_data_classes.data_enums import DataLaneType, DataLandmarkOrientation, DataLandmarkType, DataTrafficSignType, \
     DataWeatherParametersType
@@ -202,6 +202,16 @@ class DataLocation:
         """
         return DataLocation(x=location.x, y=location.y, z=location.z)
 
+    @staticmethod
+    def from_bounding_box(bounding_box: BoundingBox) -> DataLocation:
+        """
+        Convenience method to get a DataLocation from a BoundingBox
+        @param bounding_box: The bounding box that should be transformed
+        @return: The DataLocation based on the given bounding box
+        """
+        location: Location = bounding_box.get_location()
+        return DataLocation(x=location.x, y=location.y, z=location.z)
+
 
 @dataclass
 class DataVector3D:
@@ -219,6 +229,16 @@ class DataVector3D:
         @param vector: The vector that should be transformed
         @return: The DataVector3D based on the given Vector3D
         """
+        return DataVector3D(x=vector.x, y=vector.y, z=vector.z)
+
+    @staticmethod
+    def from_bounding_box(bounding_box: BoundingBox) -> DataVector3D:
+        """
+        Convenience method to get a DataVector3D from a BoundingBox
+        @param bounding_box: The bounding box that should be transformed
+        @return: The DataVector3D based on the given BoundingBox
+        """
+        vector: Vector3D = bounding_box.extent
         return DataVector3D(x=vector.x, y=vector.y, z=vector.z)
 
 
@@ -268,6 +288,18 @@ class DataRotation:
         """
         # Get the carla.Location from the Waypoint
         rotation: Location = waypoint.transform.rotation
+        # Map into DataLocation
+        return DataRotation.from_rotation(rotation)
+
+    @staticmethod
+    def from_bounding_box(bounding_box: BoundingBox) -> DataRotation:
+        """
+        Convenience method to get a DataLocation from a BoundingBox
+        @param bounding_box: The BoundingBox from which the location should be transformed
+        @return: The DataLocation based on the given bounding box
+        """
+        # Get the carla.Location from the Waypoint
+        rotation: Location = bounding_box.rotation
         # Map into DataLocation
         return DataRotation.from_rotation(rotation)
 
@@ -384,20 +416,62 @@ class DataStaticTrafficLight:
 
 
 @dataclass
+class DataBoundingBox:
+    """
+    DataClass mapper to serialize carla.BoundingBox objects
+    """
+    # Vector from the center of the box to one vertex.
+    # The value in each axis equals half the size of
+    # the box for that axis. extent.x * 2 would return
+    # the size of the box in the X-axis.
+    extent: DataVector3D
+    location: DataLocation
+    rotation: DataRotation
+
+    @staticmethod
+    def from_actor(actor: Actor) -> DataBoundingBox:
+        """
+        Convenience method to get a DataBoundingBox from an Actor
+        @param actor: The Actor from which the bounding box should be transformed
+        @return: The DataBoundingBox based on the given actor
+        """
+        bounding_box: BoundingBox = actor.bounding_box
+
+        extent = Vector3D.from_bounding_box(bounding_box)
+        location = DataLocation.from_bounding_box(bounding_box)
+        rotation = DataRotation.from_bounding_box(bounding_box)
+
+        # Map into DataBoundingBox
+        return DataBoundingBox(extent, location, rotation)
+
+
+@dataclass
 class DataActor:
     """
     DataClass mapper to serialize carla.Actor objects
     """
+    attributes: dict
     id: int
     type: str
     type_id: str
+    is_alive: bool
+    is_active: bool
+    is_dormant: bool
+    semantic_tags: List[int]
+    bounding_box: DataBoundingBox
     location: DataLocation
     rotation: DataRotation
 
     def __init__(self, actor: Actor):
+        self.attributes = actor.attributes
         self.id = actor.id
         self.type = "Actor"
         self.type_id = actor.type_id
+        self.is_alive = actor.is_alive
+        self.is_active = actor.is_active
+        self.is_dormant = actor.is_dormant
+        self.semantic_tags = actor.semantic_tags
+        self.bounding_box = DataBoundingBox.from_actor(actor)
         self.location = DataLocation.from_actor(actor)
         self.rotation = DataRotation.from_actor(actor)
 
