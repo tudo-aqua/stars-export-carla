@@ -7,16 +7,20 @@ from CarlaCameraRecorder import CarlaCameraRecorder
 from python.camera_recorder.CameraPosition import CameraPosition
 
 INPUT_DIR: str = "C:\\Users\\Dominik\\Desktop\\scenarios"
-OUTPUT_DIR: str = "C:\\Users\\Dominik\\Desktop\\scenarios"
+OUTPUT_DIR: str = "C:\\Users\\Dominik\\Desktop\\scenarios\\_output"
+DELETE_OUTPUT_DIR: bool = True
 
 CARLA_HOME: str = "C:\\Users\\Dominik\\workspace\\Carla0.9.15\\CarlaUE4.exe"
 CARLA_STARTUP_DELAY: int = 10
 RENDER_OFFSCREEN: bool = True
 SHOW_PREVIEW: bool = True
 
-CAMERA_POSITION: CameraPosition = CameraPosition.TOP_DOWN_FAR
+CAMERA_POSITION: CameraPosition = CameraPosition.BACK_ABOVE
 RENDER_BOUNDING_BOXES: bool = True
 RENDER_SAFETY_BOXES: bool = True
+
+BOUNDING_BOX_COLOR = (0, 255, 0, 255)
+SAFETY_BOUNDING_BOX_COLOR = (255, 0, 255, 255)
 
 def kill_carla():
     os.system('taskkill /f /im CarlaUE4-Win64-Shipping.exe')
@@ -31,6 +35,10 @@ if __name__ == '__main__':
     if not os.path.exists(INPUT_DIR):
         print(f"Error: The input directory {INPUT_DIR} does not exist.", file=sys.stderr)
         exit(1)
+
+    # Delete output directory
+    if DELETE_OUTPUT_DIR and os.path.exists(OUTPUT_DIR):
+        os.system(f"rmdir /s /q {OUTPUT_DIR}")
 
     # Create output directory if it does not exist
     if not os.path.exists(OUTPUT_DIR):

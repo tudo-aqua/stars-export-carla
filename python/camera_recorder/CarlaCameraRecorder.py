@@ -1,7 +1,7 @@
 import os
 import queue
 import sys
-from typing import Any
+from typing import Any, Tuple
 
 import carla
 import cv2
@@ -25,7 +25,9 @@ class CarlaCameraRecorder:
                  end_at: float = sys.maxsize,
                  camera_position: CameraPosition = None,
                  render_bounding_boxes: bool = False,
+                 bounding_box_color: Tuple[int, int, int, int] = (0, 255, 0, 255),
                  render_safety_boxes: bool = False,
+                 safety_bounding_box_color: Tuple[int, int, int, int] = (255, 0, 0, 255),
                  show_preview: bool = False):
         self.output_dir = output_dir
         self.img_height = img_height
@@ -37,7 +39,9 @@ class CarlaCameraRecorder:
         self.tick_count = 0
         self.camera_position = camera_position
         self.render_bounding_boxes = render_bounding_boxes
+        self.bounding_box_color = bounding_box_color
         self.render_safety_boxes = render_safety_boxes
+        self.safety_bounding_box_color = safety_bounding_box_color
         self.show_preview = show_preview
 
     @staticmethod
@@ -64,7 +68,7 @@ class CarlaCameraRecorder:
         # Get count of all ticks in the recorded file using the recorder_file_info and split
         self.tick_count = int(info.split("Frames: ")[1].split("Duration")[0])
         self.end_at = min(self.end_at, (self.tick_count - 1) * recording_frequency)
-        self.begin_at= min(self.begin_at, self.end_at)
+        self.begin_at = min(self.begin_at, self.end_at)
 
         # Get map name of recording
         map_name = info.split("Map: ")[1].split("\nDate")[0]
@@ -121,46 +125,49 @@ class CarlaCameraRecorder:
         ego_cam.listen(img_queue.put)
 
         # noinspection PyArgumentList
-        return ego_vehicle, ego_cam
+        return ego_cam
 
-    def __render_bounding_boxes__(self, world: World, camera: Any, ego_vehicle: Any, image: np.ndarray) -> None:
+    def __render_bounding_boxes__(self, world: World, camera: Any, image: np.ndarray) -> None:
         world_to_camera = np.array(camera.get_transform().get_inverse_matrix())
 
         # noinspection PyArgumentList
-        for npc in world.get_actors().filter('*vehicle*'):
-            bounding_box = npc.bounding_box
+        for vehicle in world.get_actors().filter('*vehicle*'):
+            bounding_box = vehicle.bounding_box
 
             # Get vertices of bounding box
-            vertices = [v for v in bounding_box.get_world_vertices(npc.get_transform())]
+            vertices = [v for v in bounding_box.get_world_vertices(vehicle.get_transform())]
+
+            k = build_projection_matrix(width=self.img_width, height=self.img_height, fov=self.fov)
+            k_behind = build_projection_matrix(width=self.img_width, height=self.img_height, fov=self.fov, is_behind_camera=True)
+
+            edge_connections = [[0,1], [1,3], [3,2], [2,0], [0,4], [4,5], [5,1], [5,7], [7,6], [6,4], [6,2], [7,3]]
+            edges = list(map(lambda ec: (vertices[ec[0]], vertices[ec[1]], self.bounding_box_color), edge_connections))
 
             # Calculate edges to draw
-            for edge in [[0,1], [1,3], [3,2], [2,0], [0,4], [4,5], [5,1], [5,7], [7,6], [6,4], [6,2], [7,3]]:
-                k = build_projection_matrix(width=self.img_width, height=self.img_height, fov=self.fov)
-                k_behind = build_projection_matrix(width=self.img_width, height=self.img_height, fov=self.fov, is_behind_camera=True)
-
+            for (loc1, loc2, color) in edges:
                 # Get points of edge
-                p1 = get_image_point(loc=vertices[edge[0]], k=k, world_to_camera=world_to_camera)
-                p2 = get_image_point(loc=vertices[edge[1]],  k=k, world_to_camera=world_to_camera)
+                p1 = get_image_point(loc=loc1, k=k, world_to_camera=world_to_camera)
+                p2 = get_image_point(loc=loc2,  k=k, world_to_camera=world_to_camera)
 
                 # Skip invisible edges
                 if (not point_in_canvas(pos=p1, img_width=self.img_width, img_height=self.img_height)
                         and not point_in_canvas(pos=p2, img_width=self.img_width, img_height=self.img_height)):
                     continue
 
-                ray0 = vertices[edge[0]] - camera.get_transform().location
-                ray1 = vertices[edge[1]] - camera.get_transform().location
+                ray0 = loc1 - camera.get_transform().location
+                ray1 = loc2 - camera.get_transform().location
                 cam_forward_vec = camera.get_transform().get_forward_vector()
 
                 # One of the vertex is behind the camera
                 if not (cam_forward_vec.dot(ray0) > 0):
-                    p1 = get_image_point(vertices[edge[0]], k_behind, world_to_camera)
+                    p1 = get_image_point(loc1, k_behind, world_to_camera)
                 if not (cam_forward_vec.dot(ray1) > 0):
-                    p2 = get_image_point(vertices[edge[1]], k_behind, world_to_camera)
+                    p2 = get_image_point(loc2, k_behind, world_to_camera)
 
                 # Draw edge
-                cv2.line(image, (int(p1[0]),int(p1[1])), (int(p2[0]),int(p2[1])), (255,0,0, 255), 1)
+                cv2.line(image, (int(p1[0]),int(p1[1])), (int(p2[0]),int(p2[1])), color, 1)
 
-    def __record_ticks__(self, world: World, ego_vehicle: Any, camera: Any, image_queue: queue.Queue, recording_frequency: float, output: str):
+    def __record_ticks__(self, world: World, camera: Any, image_queue: queue.Queue, recording_frequency: float, output: str):
         # Get the spectator
         # noinspection PyArgumentList
         spectator = world.get_spectator()
@@ -187,11 +194,10 @@ class CarlaCameraRecorder:
 
             # Add bounding boxes to the image
             if self.render_bounding_boxes:
-                self.__render_bounding_boxes__(world=world, camera=camera, ego_vehicle=ego_vehicle, image=image)
-
+                self.__render_bounding_boxes__(world=world, camera=camera, image=image)
 
             if self.show_preview:
-                cv2.imshow('Carla image preview',image)
+                cv2.imshow('Carla image preview', image)
                 cv2.waitKey(1)
 
             # Save the image
@@ -206,7 +212,8 @@ class CarlaCameraRecorder:
 
     def record_images(self, logfile: str) -> str:
         # Create output directory
-        output = os.path.join(self.output_dir, "_images\\" + logfile.split('\\')[-1].split('.')[0] + f"-vehicle_{self.vehicle_id}_range[{self.begin_at}, {self.end_at}]")
+        output = os.path.join(self.output_dir, "_images\\" + logfile.split('\\')[-1].split('.')[
+            0] + f"-vehicle_{self.vehicle_id}_range[{self.begin_at}, {self.end_at}]")
         if not os.path.exists(output):
             os.makedirs(output)
         else:
@@ -217,7 +224,7 @@ class CarlaCameraRecorder:
         client = self.__connect__()
 
         # Load world and recording frequency
-        world, recording_frequency = self.__load_world__(client = client, logfile=logfile)
+        world, recording_frequency = self.__load_world__(client=client, logfile=logfile)
 
         # Initialize necessary helper classes
         rasterizer = MapRasterizer(carla_world=world)
@@ -227,10 +234,11 @@ class CarlaCameraRecorder:
         image_queue = queue.Queue()
 
         # Start replay of simulation
-        ego_vehicle, camera = self.__start_replay__(logfile=logfile, api_helper=api_helper, world=world, img_queue=image_queue)
+        camera = self.__start_replay__(logfile=logfile, api_helper=api_helper, world=world, img_queue=image_queue)
 
         # Record all ticks
-        self.__record_ticks__(world=world, ego_vehicle=ego_vehicle, camera=camera, image_queue=image_queue, recording_frequency=recording_frequency, output=output)
+        self.__record_ticks__(world=world, camera=camera, image_queue=image_queue,
+                              recording_frequency=recording_frequency, output=output)
 
         return output
 
@@ -259,7 +267,7 @@ class CarlaCameraRecorder:
 
         last = -1
         for idx, image in enumerate(images):
-            progress = int(100*idx/len(images))
+            progress = int(100 * idx / len(images))
             if progress > last:
                 print(f"\rSaving video {progress}%")
                 last = progress
