@@ -457,6 +457,7 @@ class DataBoundingBox:
     extent: DataVector3D
     location: DataLocation
     rotation: DataRotation
+    vertices: List
 
     @staticmethod
     def from_actor(actor: Actor) -> DataBoundingBox:
@@ -467,12 +468,15 @@ class DataBoundingBox:
         """
         bounding_box: BoundingBox = actor.bounding_box
 
-        extent = DataVector3D.from_bounding_box(bounding_box)
-        location = DataLocation.from_bounding_box(bounding_box)
-        rotation = DataRotation.from_bounding_box(bounding_box)
-
-        # Map into DataBoundingBox
-        return DataBoundingBox(extent, location, rotation)
+        return DataBoundingBox(
+            extent=DataVector3D.from_bounding_box(bounding_box),
+            location=DataLocation.from_bounding_box(bounding_box),
+            rotation=DataRotation.from_bounding_box(bounding_box),
+            vertices=list(map(
+                lambda x: DataLocation.from_location(x),
+                actor.bounding_box.get_world_vertices(actor.get_transform())
+            ))
+        )
 
 
 @dataclass
