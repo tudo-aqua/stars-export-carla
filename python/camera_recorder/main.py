@@ -49,7 +49,9 @@ if __name__ == '__main__':
         output_dir=OUTPUT_DIR,
         camera_position=CAMERA_POSITION,
         render_bounding_boxes=RENDER_BOUNDING_BOXES,
+        bounding_box_color=BOUNDING_BOX_COLOR,
         render_safety_boxes=RENDER_SAFETY_BOXES,
+        safety_bounding_box_color=SAFETY_BOUNDING_BOX_COLOR,
         show_preview=SHOW_PREVIEW
     )
 

@@ -6,7 +6,7 @@ from typing import Any, Tuple
 import carla
 import cv2
 import numpy as np
-from carla import World, Vehicle
+from carla import World, Vehicle, Vector3D
 
 from helpers.carla_api_helper import CarlaAPIHelper
 from helpers.map_rasterizer import MapRasterizer
@@ -134,40 +134,74 @@ class CarlaCameraRecorder:
         for vehicle in world.get_actors().filter('*vehicle*'):
             bounding_box = vehicle.bounding_box
 
-            # Get vertices of bounding box
-            vertices = [v for v in bounding_box.get_world_vertices(vehicle.get_transform())]
+            camera_forward_vec = camera.get_transform().get_forward_vector()
+            ray = vehicle.get_transform().location - camera.get_transform().location
 
-            k = build_projection_matrix(width=self.img_width, height=self.img_height, fov=self.fov)
-            k_behind = build_projection_matrix(width=self.img_width, height=self.img_height, fov=self.fov, is_behind_camera=True)
+            if camera_forward_vec.dot(ray) > 0:
+                # Get vertices of bounding box
+                vertices = [v for v in bounding_box.get_world_vertices(vehicle.get_transform())]
 
-            edge_connections = [[0,1], [1,3], [3,2], [2,0], [0,4], [4,5], [5,1], [5,7], [7,6], [6,4], [6,2], [7,3]]
-            edges = list(map(lambda ec: (vertices[ec[0]], vertices[ec[1]], self.bounding_box_color), edge_connections))
+                k = build_projection_matrix(width=self.img_width, height=self.img_height, fov=self.fov)
+                k_behind = build_projection_matrix(width=self.img_width, height=self.img_height, fov=self.fov,
+                                                   is_behind_camera=True)
 
-            # Calculate edges to draw
-            for (loc1, loc2, color) in edges:
-                # Get points of edge
-                p1 = get_image_point(loc=loc1, k=k, world_to_camera=world_to_camera)
-                p2 = get_image_point(loc=loc2,  k=k, world_to_camera=world_to_camera)
+                edge_connections = [[0, 1], [1, 3], [3, 2], [2, 0], [0, 4], [4, 5], [5, 1], [5, 7], [7, 3]]
+                edges = list(
+                    map(lambda ec: (vertices[ec[0]], vertices[ec[1]], self.bounding_box_color), edge_connections))
 
-                # Skip invisible edges
-                if (not point_in_canvas(pos=p1, img_width=self.img_width, img_height=self.img_height)
-                        and not point_in_canvas(pos=p2, img_width=self.img_width, img_height=self.img_height)):
-                    continue
+                if self.render_safety_boxes:
+                    bottom_back: Vector3D = vertices[0]  # Bottom Left Back
+                    top_back: Vector3D = vertices[1]  # Top Left Back
+                    bottom_front: Vector3D = vertices[4]  # Bottom Right Back
+                    top_front: Vector3D = vertices[5]  # Top Right Back
 
-                ray0 = loc1 - camera.get_transform().location
-                ray1 = loc2 - camera.get_transform().location
-                cam_forward_vec = camera.get_transform().get_forward_vector()
+                    # vec(Bottom Left Front <- Bottom Right Front)
+                    vec: Vector3D = (bottom_front - vertices[6]).make_unit_vector()
 
-                # One of the vertex is behind the camera
-                if not (cam_forward_vec.dot(ray0) > 0):
-                    p1 = get_image_point(loc1, k_behind, world_to_camera)
-                if not (cam_forward_vec.dot(ray1) > 0):
-                    p2 = get_image_point(loc2, k_behind, world_to_camera)
+                    shifted_bottom_back: Vector3D = bottom_back + 1.5 * vec
+                    shifted_top_back: Vector3D = top_back + 1.5 * vec
+                    shifted_bottom_front: Vector3D = bottom_front + 1.5 * vec
+                    shifted_top_front: Vector3D = top_front + 1.5 * vec
 
-                # Draw edge
-                cv2.line(image, (int(p1[0]),int(p1[1])), (int(p2[0]),int(p2[1])), color, 1)
+                    new_edge_connections = [
+                        (bottom_back, shifted_bottom_back),
+                        (top_back, shifted_top_back),
+                        (bottom_front, shifted_bottom_front),
+                        (top_front, shifted_top_front),
+                        (shifted_bottom_front, shifted_top_front),
+                        (shifted_bottom_front, shifted_bottom_back),
+                        (shifted_top_front, shifted_top_back),
+                        (shifted_top_back, shifted_bottom_back),
+                    ]
+                    new_edges = list(
+                        map(lambda ec: (ec[0], ec[1], self.safety_bounding_box_color), new_edge_connections))
+                    edges.extend(new_edges)
 
-    def __record_ticks__(self, world: World, camera: Any, image_queue: queue.Queue, recording_frequency: float, output: str):
+                # Calculate edges to draw
+                for (loc1, loc2, color) in edges:
+                    # Get points of edge
+                    p1 = get_image_point(loc=loc1, k=k, world_to_camera=world_to_camera)
+                    p2 = get_image_point(loc=loc2, k=k, world_to_camera=world_to_camera)
+
+                    # # Skip invisible edges
+                    if (not point_in_canvas(pos=p1, img_width=self.img_width, img_height=self.img_height)
+                            and not point_in_canvas(pos=p2, img_width=self.img_width, img_height=self.img_height)):
+                        continue
+
+                    ray0 = loc1 - camera.get_transform().location
+                    ray1 = loc2 - camera.get_transform().location
+
+                    # One of the vertex is behind the camera
+                    if not (camera_forward_vec.dot(ray0) > 0):
+                        p1 = get_image_point(loc1, k_behind, world_to_camera)
+                    if not (camera_forward_vec.dot(ray1) > 0):
+                        p2 = get_image_point(loc2, k_behind, world_to_camera)
+
+                    # Draw edge
+                    cv2.line(image, (int(p1[0]), int(p1[1])), (int(p2[0]), int(p2[1])), color, 1)
+
+    def __record_ticks__(self, world: World, camera: Any, image_queue: queue.Queue, recording_frequency: float,
+                         output: str):
         # Get the spectator
         # noinspection PyArgumentList
         spectator = world.get_spectator()
