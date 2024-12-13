@@ -11,9 +11,10 @@ from carla import World, Vehicle
 from helpers.carla_api_helper import CarlaAPIHelper
 from helpers.map_rasterizer import MapRasterizer
 from helper import build_projection_matrix, get_image_point, point_in_canvas
+from python.camera_recorder.CameraPosition import CameraPosition
 
 
-class CarlaRecorder:
+class CarlaCameraRecorder:
     def __init__(self,
                  output_dir: str,
                  img_width: int = 1920,
@@ -22,6 +23,7 @@ class CarlaRecorder:
                  vehicle_id: int = -1,
                  begin_at: float = 0,
                  end_at: float = sys.maxsize,
+                 camera_position: CameraPosition = None,
                  render_bounding_boxes: bool = False,
                  render_safety_boxes: bool = False,
                  show_preview: bool = False):
@@ -33,6 +35,7 @@ class CarlaRecorder:
         self.begin_at = begin_at
         self.end_at = end_at
         self.tick_count = 0
+        self.camera_position = camera_position
         self.render_bounding_boxes = render_bounding_boxes
         self.render_safety_boxes = render_safety_boxes
         self.show_preview = show_preview
@@ -105,9 +108,13 @@ class CarlaRecorder:
         cam_bp.set_attribute("image_size_x", str(self.img_width))
         cam_bp.set_attribute("image_size_y", str(self.img_height))
         cam_bp.set_attribute("fov", str(self.fov))
-        cam_location = carla.Location(-2, 0, 3)
-        cam_rotation = carla.Rotation(0, 0, 0)
+
+        # Set camera position
+        cam_location = self.camera_position.value[0]
+        cam_rotation = self.camera_position.value[1]
         cam_transform = carla.Transform(cam_location, cam_rotation)
+
+        # Spawn camera
         ego_cam = world.spawn_actor(cam_bp, cam_transform, attach_to=ego_vehicle,
                                     attachment_type=carla.AttachmentType.Rigid)
 
@@ -123,43 +130,35 @@ class CarlaRecorder:
         for npc in world.get_actors().filter('*vehicle*'):
             bounding_box = npc.bounding_box
 
-            # Calculate the dot product between the forward vector
-            # of the vehicle and the vector between the vehicle
-            # and the other vehicle to limit drawing bounding boxes
-            # IN FRONT OF THE CAMERA
-            forward_vec = ego_vehicle.get_transform().get_forward_vector()
-            ray = npc.get_transform().location - ego_vehicle.get_transform().location
+            # Get vertices of bounding box
+            vertices = [v for v in bounding_box.get_world_vertices(npc.get_transform())]
 
-            if forward_vec.dot(ray) > 0:
-                # Get vertices of bounding box
-                vertices = [v for v in bounding_box.get_world_vertices(npc.get_transform())]
+            # Calculate edges to draw
+            for edge in [[0,1], [1,3], [3,2], [2,0], [0,4], [4,5], [5,1], [5,7], [7,6], [6,4], [6,2], [7,3]]:
+                k = build_projection_matrix(width=self.img_width, height=self.img_height, fov=self.fov)
+                k_behind = build_projection_matrix(width=self.img_width, height=self.img_height, fov=self.fov, is_behind_camera=True)
 
-                # Calculate edges to draw
-                for edge in [[0,1], [1,3], [3,2], [2,0], [0,4], [4,5], [5,1], [5,7], [7,6], [6,4], [6,2], [7,3]]:
-                    k = build_projection_matrix(width=self.img_width, height=self.img_height, fov=self.fov)
-                    k_behind = build_projection_matrix(width=self.img_width, height=self.img_height, fov=self.fov, is_behind_camera=True)
+                # Get points of edge
+                p1 = get_image_point(loc=vertices[edge[0]], k=k, world_to_camera=world_to_camera)
+                p2 = get_image_point(loc=vertices[edge[1]],  k=k, world_to_camera=world_to_camera)
 
-                    # Get points of edge
-                    p1 = get_image_point(loc=vertices[edge[0]], k=k, world_to_camera=world_to_camera)
-                    p2 = get_image_point(loc=vertices[edge[1]],  k=k, world_to_camera=world_to_camera)
+                # Skip invisible edges
+                if (not point_in_canvas(pos=p1, img_width=self.img_width, img_height=self.img_height)
+                        and not point_in_canvas(pos=p2, img_width=self.img_width, img_height=self.img_height)):
+                    continue
 
-                    # Skip invisible edges
-                    if (not point_in_canvas(pos=p1, img_width=self.img_width, img_height=self.img_height)
-                            and not point_in_canvas(pos=p2, img_width=self.img_width, img_height=self.img_height)):
-                        continue
+                ray0 = vertices[edge[0]] - camera.get_transform().location
+                ray1 = vertices[edge[1]] - camera.get_transform().location
+                cam_forward_vec = camera.get_transform().get_forward_vector()
 
-                    ray0 = vertices[edge[0]] - camera.get_transform().location
-                    ray1 = vertices[edge[1]] - camera.get_transform().location
-                    cam_forward_vec = camera.get_transform().get_forward_vector()
+                # One of the vertex is behind the camera
+                if not (cam_forward_vec.dot(ray0) > 0):
+                    p1 = get_image_point(vertices[edge[0]], k_behind, world_to_camera)
+                if not (cam_forward_vec.dot(ray1) > 0):
+                    p2 = get_image_point(vertices[edge[1]], k_behind, world_to_camera)
 
-                    # One of the vertex is behind the camera
-                    if not (cam_forward_vec.dot(ray0) > 0):
-                        p1 = get_image_point(vertices[edge[0]], k_behind, world_to_camera)
-                    if not (cam_forward_vec.dot(ray1) > 0):
-                        p2 = get_image_point(vertices[edge[1]], k_behind, world_to_camera)
-
-                    # Draw edge
-                    cv2.line(image, (int(p1[0]),int(p1[1])), (int(p2[0]),int(p2[1])), (255,0,0, 255), 1)
+                # Draw edge
+                cv2.line(image, (int(p1[0]),int(p1[1])), (int(p2[0]),int(p2[1])), (255,0,0, 255), 1)
 
     def __record_ticks__(self, world: World, ego_vehicle: Any, camera: Any, image_queue: queue.Queue, recording_frequency: float, output: str):
         # Get the spectator
@@ -207,7 +206,7 @@ class CarlaRecorder:
 
     def record_images(self, logfile: str) -> str:
         # Create output directory
-        output = os.path.join(self.output_dir, "images\\" + logfile.split('\\')[-1].split('.')[0] + f"-vehicle_{self.vehicle_id}_range[{self.begin_at}, {self.end_at}]")
+        output = os.path.join(self.output_dir, "_images\\" + logfile.split('\\')[-1].split('.')[0] + f"-vehicle_{self.vehicle_id}_range[{self.begin_at}, {self.end_at}]")
         if not os.path.exists(output):
             os.makedirs(output)
         else:
@@ -236,7 +235,7 @@ class CarlaRecorder:
         return output
 
     def record_video(self, images_directory: str) -> None:
-        output = os.path.join(self.output_dir, "videos\\")
+        output = os.path.join(self.output_dir, "_videos\\")
         if not os.path.exists(output):
             os.makedirs(output)
 

@@ -3,7 +3,8 @@ import sys
 from time import sleep
 from typing import List
 
-from recorder import CarlaRecorder
+from CarlaCameraRecorder import CarlaCameraRecorder
+from python.camera_recorder.CameraPosition import CameraPosition
 
 INPUT_DIR: str = "C:\\Users\\Dominik\\Desktop\\scenarios"
 OUTPUT_DIR: str = "C:\\Users\\Dominik\\Desktop\\scenarios"
@@ -13,6 +14,7 @@ CARLA_STARTUP_DELAY: int = 10
 RENDER_OFFSCREEN: bool = True
 SHOW_PREVIEW: bool = True
 
+CAMERA_POSITION: CameraPosition = CameraPosition.TOP_DOWN_FAR
 RENDER_BOUNDING_BOXES: bool = True
 RENDER_SAFETY_BOXES: bool = True
 
@@ -35,8 +37,9 @@ if __name__ == '__main__':
         os.makedirs(OUTPUT_DIR)
 
     # Create Carla recorder
-    recorder = CarlaRecorder(
+    recorder = CarlaCameraRecorder(
         output_dir=OUTPUT_DIR,
+        camera_position=CAMERA_POSITION,
         render_bounding_boxes=RENDER_BOUNDING_BOXES,
         render_safety_boxes=RENDER_SAFETY_BOXES,
         show_preview=SHOW_PREVIEW
