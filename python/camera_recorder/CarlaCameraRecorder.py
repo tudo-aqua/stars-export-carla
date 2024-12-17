@@ -1,7 +1,7 @@
 import os
 import queue
 import sys
-from typing import Any, Tuple
+from typing import Any, Tuple, List
 
 import carla
 import cv2
@@ -12,8 +12,10 @@ from helpers.carla_api_helper import CarlaAPIHelper
 from helpers.map_rasterizer import MapRasterizer
 from helper import build_projection_matrix, get_image_point, point_in_canvas
 from python.camera_recorder.CameraPosition import CameraPosition
+from python.camera_recorder.SafetyBoxStyle import SafetyBoxStyle
 
 
+# noinspection PyDefaultArgument
 class CarlaCameraRecorder:
     def __init__(self,
                  output_dir: str,
@@ -23,10 +25,10 @@ class CarlaCameraRecorder:
                  vehicle_id: int = -1,
                  begin_at: float = 0,
                  end_at: float = sys.maxsize,
-                 camera_position: CameraPosition = None,
-                 render_bounding_boxes: bool = False,
+                 camera_positions: List[Tuple[CameraPosition, bool]] = [],
                  bounding_box_color: Tuple[int, int, int, int] = (0, 255, 0, 255),
                  render_safety_boxes: bool = False,
+                 safety_box_style: SafetyBoxStyle = None,
                  safety_bounding_box_color: Tuple[int, int, int, int] = (255, 0, 0, 255),
                  show_preview: bool = False):
         self.output_dir = output_dir
@@ -37,10 +39,10 @@ class CarlaCameraRecorder:
         self.begin_at = begin_at
         self.end_at = end_at
         self.tick_count = 0
-        self.camera_position = camera_position
-        self.render_bounding_boxes = render_bounding_boxes
+        self.camera_positions = camera_positions
         self.bounding_box_color = bounding_box_color
         self.render_safety_boxes = render_safety_boxes
+        self.safety_box_style = safety_box_style
         self.safety_bounding_box_color = safety_bounding_box_color
         self.show_preview = show_preview
 
@@ -89,7 +91,7 @@ class CarlaCameraRecorder:
 
         return world, recording_frequency
 
-    def __start_replay__(self, logfile: str, api_helper: CarlaAPIHelper, world: World, img_queue: queue.Queue):
+    def __start_replay__(self, logfile: str, api_helper: CarlaAPIHelper, world: World) -> List[Tuple[Any, bool, queue.Queue]]:
         print("Start with simulation replay")
         api_helper.start_replaying(logfile)
 
@@ -108,24 +110,72 @@ class CarlaCameraRecorder:
 
         # Spawn attached RGB camera
         # noinspection PyArgumentList
-        cam_bp = world.get_blueprint_library().find('sensor.camera.rgb')
-        cam_bp.set_attribute("image_size_x", str(self.img_width))
-        cam_bp.set_attribute("image_size_y", str(self.img_height))
-        cam_bp.set_attribute("fov", str(self.fov))
+        cameras: List[Tuple[Any, bool, queue.Queue]] = []
+        for (camera, show_bounding_box) in self.camera_positions:
+            # noinspection PyArgumentList
+            cam_bp = world.get_blueprint_library().find('sensor.camera.rgb')
+            cam_bp.set_attribute("image_size_x", str(self.img_width))
+            cam_bp.set_attribute("image_size_y", str(self.img_height))
+            cam_bp.set_attribute("fov", str(self.fov))
 
-        # Set camera position
-        cam_location = self.camera_position.value[0]
-        cam_rotation = self.camera_position.value[1]
-        cam_transform = carla.Transform(cam_location, cam_rotation)
+            # Set camera position
+            cam_location = camera.value[0]
+            cam_rotation = camera.value[1]
+            cam_transform = carla.Transform(cam_location, cam_rotation)
 
-        # Spawn camera
-        ego_cam = world.spawn_actor(cam_bp, cam_transform, attach_to=ego_vehicle,
-                                    attachment_type=carla.AttachmentType.Rigid)
+            # Spawn camera
+            ego_cam = world.spawn_actor(cam_bp, cam_transform, attach_to=ego_vehicle,
+                                        attachment_type=carla.AttachmentType.Rigid)
 
-        ego_cam.listen(img_queue.put)
+            # Create queue for image
+            image_queue = queue.Queue()
+
+            ego_cam.listen(image_queue.put)
+            cameras.append((ego_cam, show_bounding_box, image_queue))
 
         # noinspection PyArgumentList
-        return ego_cam
+        return cameras
+
+    def __create_safety_box(self, vertices: List[Vector3D]) ->  List[Tuple[list, list, tuple[int, int, int, int]]]:
+        bottom_back: Vector3D = vertices[2]  # Bottom Right Back
+        top_back: Vector3D = vertices[3]  # Top Right Back
+        bottom_front: Vector3D = vertices[6]  # Bottom Right Front
+        top_front: Vector3D = vertices[7]  # Top Right Front
+
+        # vec(Bottom Right Front <- Bottom Left Front)
+        vec: Vector3D = (bottom_front - vertices[4]).make_unit_vector()
+
+        shifted_bottom_back: Vector3D = bottom_back + 1.5 * vec
+        shifted_top_back: Vector3D = top_back + 1.5 * vec
+        shifted_bottom_front: Vector3D = bottom_front + 1.5 * vec
+        shifted_top_front: Vector3D = top_front + 1.5 * vec
+
+        new_edge_connections = [(bottom_back, shifted_bottom_back),
+                                (bottom_front, shifted_bottom_front),
+                                (shifted_bottom_front, shifted_bottom_back),]
+        match self.safety_box_style:
+            case SafetyBoxStyle.BOX:
+                new_edge_connections.extend([
+                    (top_back, shifted_top_back),
+                    (top_front, shifted_top_front),
+                    (shifted_bottom_front, shifted_top_front),
+                    (shifted_top_front, shifted_top_back),
+                    (shifted_top_back, shifted_bottom_back),
+                ])
+
+            case SafetyBoxStyle.X:
+                new_edge_connections.extend([
+                    (bottom_back, shifted_bottom_front),
+                    (shifted_bottom_back, bottom_front),
+                ])
+
+            case SafetyBoxStyle.HATCHING:
+                for i in np.arange(0, 1.25, 0.25):
+                    new_edge_connections.extend([
+                        (bottom_back + i*vec, bottom_front + (i+0.25)*vec),
+                    ])
+
+        return list(map(lambda ec: (ec[0], ec[1], self.safety_bounding_box_color), new_edge_connections))
 
     def __render_bounding_boxes__(self, world: World, camera: Any, image: np.ndarray) -> None:
         world_to_camera = np.array(camera.get_transform().get_inverse_matrix())
@@ -145,37 +195,13 @@ class CarlaCameraRecorder:
                 k_behind = build_projection_matrix(width=self.img_width, height=self.img_height, fov=self.fov,
                                                    is_behind_camera=True)
 
-                edge_connections = [[0, 1], [1, 3], [3, 2], [2, 0], [0, 4], [4, 5], [5, 1], [5, 7], [7, 3]]
+                edge_connections = [[0,1], [1,3], [3,2], [2,0], [0,4], [4,5], [5,1], [5,7], [7,6], [6,4], [6,2], [7,3]]
+
                 edges = list(
                     map(lambda ec: (vertices[ec[0]], vertices[ec[1]], self.bounding_box_color), edge_connections))
 
                 if self.render_safety_boxes:
-                    bottom_back: Vector3D = vertices[0]  # Bottom Left Back
-                    top_back: Vector3D = vertices[1]  # Top Left Back
-                    bottom_front: Vector3D = vertices[4]  # Bottom Right Back
-                    top_front: Vector3D = vertices[5]  # Top Right Back
-
-                    # vec(Bottom Left Front <- Bottom Right Front)
-                    vec: Vector3D = (bottom_front - vertices[6]).make_unit_vector()
-
-                    shifted_bottom_back: Vector3D = bottom_back + 1.5 * vec
-                    shifted_top_back: Vector3D = top_back + 1.5 * vec
-                    shifted_bottom_front: Vector3D = bottom_front + 1.5 * vec
-                    shifted_top_front: Vector3D = top_front + 1.5 * vec
-
-                    new_edge_connections = [
-                        (bottom_back, shifted_bottom_back),
-                        (top_back, shifted_top_back),
-                        (bottom_front, shifted_bottom_front),
-                        (top_front, shifted_top_front),
-                        (shifted_bottom_front, shifted_top_front),
-                        (shifted_bottom_front, shifted_bottom_back),
-                        (shifted_top_front, shifted_top_back),
-                        (shifted_top_back, shifted_bottom_back),
-                    ]
-                    new_edges = list(
-                        map(lambda ec: (ec[0], ec[1], self.safety_bounding_box_color), new_edge_connections))
-                    edges.extend(new_edges)
+                    edges.extend(self.__create_safety_box(vertices))
 
                 # Calculate edges to draw
                 for (loc1, loc2, color) in edges:
@@ -200,7 +226,7 @@ class CarlaCameraRecorder:
                     # Draw edge
                     cv2.line(image, (int(p1[0]), int(p1[1])), (int(p2[0]), int(p2[1])), color, 1)
 
-    def __record_ticks__(self, world: World, camera: Any, image_queue: queue.Queue, recording_frequency: float,
+    def __record_ticks__(self, world: World, cameras: List[Tuple[Any, bool, queue.Queue]], recording_frequency: float,
                          output: str):
         # Get the spectator
         # noinspection PyArgumentList
@@ -223,33 +249,40 @@ class CarlaCameraRecorder:
                 break
 
             # Create the image
-            image = image_queue.get()
-            image = np.reshape(np.copy(image.raw_data), (image.height, image.width, 4))
+            for idx, (camera, show_bounding_boxes, image_queue) in enumerate(cameras):
+                image = image_queue.get()
+                image = np.reshape(np.copy(image.raw_data), (image.height, image.width, 4))
 
-            # Add bounding boxes to the image
-            if self.render_bounding_boxes:
-                self.__render_bounding_boxes__(world=world, camera=camera, image=image)
+                # Add bounding boxes to the image
+                if show_bounding_boxes:
+                    self.__render_bounding_boxes__(world=world, camera=camera, image=image)
 
-            if self.show_preview:
-                cv2.imshow('Carla image preview', image)
-                cv2.waitKey(1)
+                if self.show_preview:
+                    cv2.imshow(f'Carla image preview CAM {idx}', image)
+                    cv2.waitKey(1)
 
-            # Save the image
-            image_name = "%.6d.jpg" % tick
-            cv2.imwrite(os.path.join(output, image_name), image)
+                # Save the image
+                image_name = "%.6d.jpg" % tick
+                cv2.imwrite(os.path.join(os.path.join(output, f"CAM_{idx}"), image_name), image)
 
-            # Set the spectator to the current vehicle
-            transform = camera.get_transform()
-            spectator.set_transform(carla.Transform(transform.location, transform.rotation))
+                # Set the spectator to the current vehicle
+                transform = camera.get_transform()
+                spectator.set_transform(carla.Transform(transform.location, transform.rotation))
 
         cv2.destroyAllWindows()
 
-    def record_images(self, logfile: str) -> str:
+    def record_images(self, logfile: str) -> List[str]:
         # Create output directory
         output = os.path.join(self.output_dir, "_images\\" + logfile.split('\\')[-1].split('.')[
             0] + f"-vehicle_{self.vehicle_id}_range[{self.begin_at}, {self.end_at}]")
+        outputs = []
         if not os.path.exists(output):
             os.makedirs(output)
+
+            for i in range(len(self.camera_positions)):
+                out = os.path.join(output, f"CAM_{i}")
+                outputs.append(out)
+                os.makedirs(out)
         else:
             print(f"Warning: The output directory {output} already exists. Skipping.", file=sys.stderr)
             raise RuntimeError()
@@ -264,53 +297,99 @@ class CarlaCameraRecorder:
         rasterizer = MapRasterizer(carla_world=world)
         api_helper = CarlaAPIHelper(client=client, world=world, rasterizer=rasterizer)
 
-        # Declare image queue
-        image_queue = queue.Queue()
-
         # Start replay of simulation
-        camera = self.__start_replay__(logfile=logfile, api_helper=api_helper, world=world, img_queue=image_queue)
+        cameras = self.__start_replay__(logfile=logfile, api_helper=api_helper, world=world)
 
         # Record all ticks
-        self.__record_ticks__(world=world, camera=camera, image_queue=image_queue,
-                              recording_frequency=recording_frequency, output=output)
+        self.__record_ticks__(world=world, cameras=cameras, recording_frequency=recording_frequency, output=output)
 
-        return output
+        return outputs
 
-    def record_video(self, images_directory: str) -> None:
+    def record_videos(self, images_directory: str) -> None:
         output = os.path.join(self.output_dir, "_videos\\")
         if not os.path.exists(output):
             os.makedirs(output)
 
-        output = os.path.join(output, images_directory.split('\\')[-1].split('.')[0] + ".mp4")
+        scenario = images_directory.split('\\')[-1].split('.')[0]
+        output = os.path.join(output, scenario)
         if os.path.exists(output):
-            print(f"Warning: The output file {output} already exists. Skipping.", file=sys.stderr)
+            print(f"Warning: The output directory {output} already exists. Skipping.", file=sys.stderr)
             return
+        else:
+            os.makedirs(output)
 
-        images = [img for img in os.listdir(images_directory) if img.endswith(".jpg")][0:-1]
-        if len(images) == 0:
-            print("There are no images to save as video")
-            return
-
-        frame = cv2.imread(os.path.join(images_directory, images[0]))
-        height, width, layers = frame.shape
-
+        cameras = os.listdir(images_directory)
+        images = []
+        videos = []
+        for camera in cameras:
+            images.append([img for img in os.listdir(os.path.join(images_directory, camera)) if img.endswith(".jpg")][0:-1])
+            # noinspection PyUnresolvedReferences
+            videos.append(cv2.VideoWriter(f"{output}\\{camera}", cv2.VideoWriter_fourcc('m', 'p', '4', 'v'), 20, (1920, 1080)))
         # noinspection PyUnresolvedReferences
-        fourcc = cv2.VideoWriter_fourcc('m', 'p', '4', 'v')
-        video = cv2.VideoWriter(output, fourcc, 20, (width, height))
-        print(f"Saving video to {output}")
+        videos.append(cv2.VideoWriter(f"{output}\\ALL", cv2.VideoWriter_fourcc('m', 'p', '4', 'v'), 20, (1920, 1080)))
 
-        last = -1
-        for idx, image in enumerate(images):
-            progress = int(100 * idx / len(images))
-            if progress > last:
-                print(f"\rSaving video {progress}%")
-                last = progress
+        for tick in range(len(images[0])):
+            img = []
+            for idx, camera in enumerate(cameras):
+                img.append(cv2.imread(os.path.join(images_directory, camera, images[idx][tick])))
+                videos[idx].write(img[-1])
 
-            img = cv2.imread(os.path.join(images_directory, image))
-            if self.show_preview:
-                cv2.imshow('Carla video preview', img)
-                cv2.waitKey(1)
-            video.write(img)
+            img_all = None
+            match len(img):
+                case 1:
+                    break
+                case 2:
+                    img_all = np.concatenate((img[0], img[1]), axis=1)
+                case 3:
+                    img_all = np.concatenate((
+                        np.concatenate((img[0], img[1]), axis=1),
+                        np.concatenate((img[2], np.zeros_like(img[0])), axis=1)
+                    ), axis=0)
+                case 4:
+                    img_all = np.concatenate((
+                        np.concatenate((img[0], img[1]), axis=1),
+                        np.concatenate((img[2], img[3]), axis=1)
+                    ), axis=0)
+                case 5:
+                    img_all = np.concatenate((
+                        np.concatenate((img[0], img[1], img[2]), axis=1),
+                        np.concatenate((img[3], img[4], np.zeros_like(img[0])), axis=1)
+                    ), axis=0)
+                case 6:
+                    img_all = np.concatenate((
+                        np.concatenate((img[0], img[1], img[2]), axis=1),
+                        np.concatenate((img[3], img[4], img[5]), axis=1)
+                    ), axis=0)
+                case 7:
+                    img_all = np.concatenate((
+                        np.concatenate((img[0], img[1], img[2]), axis=1),
+                        np.concatenate((img[3], img[4], img[5]), axis=1),
+                        np.concatenate((img[6], np.zeros_like(img[0]), np.zeros_like(img[0])), axis=1)
+                    ), axis=0)
+                case 8:
+                    img_all = np.concatenate((
+                        np.concatenate((img[0], img[1], img[2]), axis=1),
+                        np.concatenate((img[3], img[4], img[5]), axis=1),
+                        np.concatenate((img[6], img[7], np.zeros_like(img[0])), axis=1)
+                    ), axis=0)
+                case 9:
+                    img_all = np.concatenate((
+                        np.concatenate((img[0], img[1], img[2]), axis=1),
+                        np.concatenate((img[3], img[4], img[5]), axis=1),
+                        np.concatenate((img[6], img[7], img[8]), axis=1)
+                    ), axis=0)
+                case _:
+                    print("Too many cameras for multi-view")
+                    break
+
+
+            if img_all is not None:
+                videos[-1].write(img_all)
+                if self.show_preview:
+                    cv2.imshow('Carla video preview', img_all)
+                    cv2.waitKey(1)
 
         cv2.destroyAllWindows()
-        video.release()
+
+        for video in videos:
+            video.release()

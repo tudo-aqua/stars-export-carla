@@ -1,9 +1,10 @@
 import os
 import sys
 from time import sleep
-from typing import List
+from typing import List, Tuple
 
 from CarlaCameraRecorder import CarlaCameraRecorder
+from python.camera_recorder.SafetyBoxStyle import SafetyBoxStyle
 from python.camera_recorder.CameraPosition import CameraPosition
 
 INPUT_DIR: str = "C:\\Users\\Dominik\\Desktop\\scenarios"
@@ -15,9 +16,14 @@ CARLA_STARTUP_DELAY: int = 10
 RENDER_OFFSCREEN: bool = True
 SHOW_PREVIEW: bool = True
 
-CAMERA_POSITION: CameraPosition = CameraPosition.BACK_ABOVE
-RENDER_BOUNDING_BOXES: bool = True
+CAMERA_POSITIONS: List[Tuple[CameraPosition, bool]] = [
+    (CameraPosition.BACK_ABOVE, False),
+    (CameraPosition.REAR, False),
+    (CameraPosition.BACK_ABOVE, True),
+    (CameraPosition.TOP_DOWN_NEAR, True)
+]
 RENDER_SAFETY_BOXES: bool = True
+SAFETY_BOX_STYLE: SafetyBoxStyle = SafetyBoxStyle.X
 
 BOUNDING_BOX_COLOR = (0, 255, 0, 255)
 SAFETY_BOUNDING_BOX_COLOR = (255, 0, 255, 255)
@@ -30,7 +36,7 @@ def start_carla():
     os.system(f"start {CARLA_HOME} {'-RenderOffScreen' if RENDER_OFFSCREEN else ''}")
     sleep(CARLA_STARTUP_DELAY)
 
-if __name__ == '__main__':
+def __create_images():
     # Check if input directory exists
     if not os.path.exists(INPUT_DIR):
         print(f"Error: The input directory {INPUT_DIR} does not exist.", file=sys.stderr)
@@ -44,34 +50,37 @@ if __name__ == '__main__':
     if not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR)
 
-    # Create Carla recorder
-    recorder = CarlaCameraRecorder(
-        output_dir=OUTPUT_DIR,
-        camera_position=CAMERA_POSITION,
-        render_bounding_boxes=RENDER_BOUNDING_BOXES,
-        bounding_box_color=BOUNDING_BOX_COLOR,
-        render_safety_boxes=RENDER_SAFETY_BOXES,
-        safety_bounding_box_color=SAFETY_BOUNDING_BOX_COLOR,
-        show_preview=SHOW_PREVIEW
-    )
-
     # Record all logs
-    recordings: List[str] = []
     for scenario in [os.path.join(INPUT_DIR, file) for file in os.listdir(INPUT_DIR)]:
         for logfile in [os.path.join(scenario, file) for file in os.listdir(scenario) if file.endswith(".log")]:
             try:
                 # Restart Carla
                 kill_carla()
                 start_carla()
-                recordings.append(recorder.record_images(logfile=logfile))
+                recorder.record_images(logfile=logfile)
             except RuntimeError:
                 print(f"Error: Could not record images for {logfile}", file=sys.stderr)
 
-    kill_carla()
-
-    # Render videos
-    for images_directory in recordings:
-        recorder.record_video(images_directory=images_directory)
-
     # Close Carla
     kill_carla()
+
+def __render_videos():
+    input_dir = os.path.join(OUTPUT_DIR, "_images")
+    for images_directory in os.listdir(input_dir):
+        recorder.record_videos(images_directory=os.path.join(input_dir, images_directory))
+
+
+if __name__ == '__main__':
+    # Create Carla recorder
+    recorder = CarlaCameraRecorder(
+        output_dir=OUTPUT_DIR,
+        camera_positions=CAMERA_POSITIONS,
+        bounding_box_color=BOUNDING_BOX_COLOR,
+        render_safety_boxes=RENDER_SAFETY_BOXES,
+        safety_box_style=SAFETY_BOX_STYLE,
+        safety_bounding_box_color=SAFETY_BOUNDING_BOX_COLOR,
+        show_preview=SHOW_PREVIEW
+    )
+
+    __create_images()
+    __render_videos()
