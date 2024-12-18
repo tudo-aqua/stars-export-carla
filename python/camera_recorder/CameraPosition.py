@@ -30,6 +30,10 @@ class CameraPosition(Enum):
     TOP_DOWN_FAR = \
         (carla.Location(0, 0, 25), carla.Rotation(-90, 0, 0))
 
+    # View from the top of the vehicle far
+    TOP_DOWN_VERY_FAR = \
+        (carla.Location(0, 0, 50), carla.Rotation(-90, 0, 0))
+
     # Rear view
     REAR = \
         (carla.Location(6, 0, 2.5), carla.Rotation(0, 180, 0))

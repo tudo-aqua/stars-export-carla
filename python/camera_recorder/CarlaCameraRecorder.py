@@ -26,10 +26,12 @@ class CarlaCameraRecorder:
                  begin_at: float = 0,
                  end_at: float = sys.maxsize,
                  camera_positions: List[Tuple[CameraPosition, bool]] = [],
+                 render_bounding_boxes: bool = False,
                  bounding_box_color: Tuple[int, int, int, int] = (0, 255, 0, 255),
                  render_safety_boxes: bool = False,
                  safety_box_style: SafetyBoxStyle = None,
                  safety_bounding_box_color: Tuple[int, int, int, int] = (255, 0, 0, 255),
+                 render_metadata: bool = False,
                  show_preview: bool = False):
         self.output_dir = output_dir
         self.img_height = img_height
@@ -40,10 +42,12 @@ class CarlaCameraRecorder:
         self.end_at = end_at
         self.tick_count = 0
         self.camera_positions = camera_positions
+        self.render_bounding_boxes = render_bounding_boxes
         self.bounding_box_color = bounding_box_color
         self.render_safety_boxes = render_safety_boxes
         self.safety_box_style = safety_box_style
         self.safety_bounding_box_color = safety_bounding_box_color
+        self.render_metadata = render_metadata
         self.show_preview = show_preview
 
     @staticmethod
@@ -91,7 +95,7 @@ class CarlaCameraRecorder:
 
         return world, recording_frequency
 
-    def __start_replay__(self, logfile: str, api_helper: CarlaAPIHelper, world: World) -> List[Tuple[Any, bool, queue.Queue]]:
+    def __start_replay__(self, logfile: str, api_helper: CarlaAPIHelper, world: World) -> Tuple[List[Tuple[Any, bool, queue.Queue]], Vehicle]:
         print("Start with simulation replay")
         api_helper.start_replaying(logfile)
 
@@ -134,9 +138,30 @@ class CarlaCameraRecorder:
             cameras.append((ego_cam, show_bounding_box, image_queue))
 
         # noinspection PyArgumentList
-        return cameras
+        return cameras, ego_vehicle
 
-    def __create_safety_box(self, vertices: List[Vector3D]) ->  List[Tuple[list, list, tuple[int, int, int, int]]]:
+    @staticmethod
+    def __min_distance_to_front(velocity: float) -> float:
+        if 0.0 <= velocity < 2.0:
+            return 2.0
+        elif 2.0 <= velocity < 7.2:
+            return velocity * 1.0
+        elif 7.2 <= velocity < 10.0:
+            return velocity * 1.1
+        elif 10.0 <= velocity < 20.0:
+            return velocity * 1.2
+        elif 20.0 <= velocity < 30.0:
+            return velocity * 1.3
+        elif 30.0 <= velocity < 40.0:
+            return velocity * 1.4
+        elif 40.0 <= velocity < 50.0:
+            return velocity * 1.5
+        elif 50.0 <= velocity < 60.0:
+            return velocity * 1.6
+        else:
+            return velocity * 3.6 / 2
+
+    def __create_safety_box_right(self, vertices: List[Vector3D]) ->  List[Tuple[list, list, tuple[int, int, int, int]]]:
         bottom_back: Vector3D = vertices[2]  # Bottom Right Back
         top_back: Vector3D = vertices[3]  # Top Right Back
         bottom_front: Vector3D = vertices[6]  # Bottom Right Front
@@ -177,7 +202,49 @@ class CarlaCameraRecorder:
 
         return list(map(lambda ec: (ec[0], ec[1], self.safety_bounding_box_color), new_edge_connections))
 
-    def __render_bounding_boxes__(self, world: World, camera: Any, image: np.ndarray) -> None:
+    def __create_safety_box_front(self, vertices: List[Vector3D], safety_distance: float) ->  List[Tuple[list, list, tuple[int, int, int, int]]]:
+        bottom_right_front: Vector3D = vertices[6]  # Bottom Right Front
+        top_right_front: Vector3D = vertices[7]  # Top Right Front
+        top_left_front: Vector3D = vertices[5]  # Top Left Front
+        bottom_left_front: Vector3D = vertices[4]  # Bottom Left Front
+
+        # vec(Bottom Right Front <- Bottom Right Back)
+        vec: Vector3D = (bottom_right_front - vertices[2]).make_unit_vector() * safety_distance
+
+        shifted_bottom_right_front: Vector3D = bottom_right_front + vec
+        shifted_top_right_front: Vector3D = top_right_front + vec
+        shifted_top_left_front: Vector3D = top_left_front + vec
+        shifted_bottom_left_front: Vector3D = bottom_left_front + vec
+
+        new_edge_connections = [(bottom_left_front, shifted_bottom_left_front),
+                                (shifted_bottom_left_front, shifted_bottom_right_front),
+                                (shifted_bottom_right_front, bottom_right_front)]
+
+        match self.safety_box_style:
+            case SafetyBoxStyle.BOX:
+                new_edge_connections.extend([
+                    (top_left_front, shifted_top_left_front),
+                    (shifted_top_left_front, shifted_top_right_front),
+                    (shifted_top_right_front, top_right_front),
+                    (shifted_bottom_right_front, shifted_top_right_front),
+                    (shifted_bottom_left_front, shifted_top_left_front),
+                ])
+
+            case SafetyBoxStyle.X:
+                new_edge_connections.extend([
+                    (bottom_left_front, shifted_bottom_right_front),
+                    (bottom_right_front, shifted_bottom_left_front),
+                ])
+
+            case SafetyBoxStyle.HATCHING:
+                for i in np.arange(0, 1, 0.20):
+                    new_edge_connections.extend([
+                        (bottom_left_front + i*vec, bottom_right_front + (i+0.20)*vec),
+                    ])
+
+        return list(map(lambda ec: (ec[0], ec[1], self.safety_bounding_box_color), new_edge_connections))
+
+    def __render_bounding_boxes__(self, world: World, camera: Any, safety_distance: float, image: np.ndarray) -> None:
         world_to_camera = np.array(camera.get_transform().get_inverse_matrix())
 
         # noinspection PyArgumentList
@@ -200,8 +267,9 @@ class CarlaCameraRecorder:
                 edges = list(
                     map(lambda ec: (vertices[ec[0]], vertices[ec[1]], self.bounding_box_color), edge_connections))
 
-                if self.render_safety_boxes:
-                    edges.extend(self.__create_safety_box(vertices))
+                if self.render_safety_boxes and 'ego' in vehicle.attributes['role_name']:
+                    edges.extend(self.__create_safety_box_right(vertices))
+                    edges.extend(self.__create_safety_box_front(vertices=vertices, safety_distance=safety_distance))
 
                 # Calculate edges to draw
                 for (loc1, loc2, color) in edges:
@@ -226,11 +294,20 @@ class CarlaCameraRecorder:
                     # Draw edge
                     cv2.line(image, (int(p1[0]), int(p1[1])), (int(p2[0]), int(p2[1])), color, 1)
 
-    def __record_ticks__(self, world: World, cameras: List[Tuple[Any, bool, queue.Queue]], recording_frequency: float,
+    @staticmethod
+    def __render_metadata__(tick: int, time: float, velocity: float, safety_distance: float, image: np.ndarray) -> None:
+        cv2.putText(image, f"Tick: {tick}", (10, 30), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 255), 1, cv2.LINE_AA)
+        cv2.putText(image, f"Time: {time:.2f} s", (10, 50), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 255), 1, cv2.LINE_AA)
+        cv2.putText(image, f"Velocity: {velocity:.2f} m/s", (10, 70), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 255), 1, cv2.LINE_AA)
+        cv2.putText(image, f"Safety distance: {safety_distance:.2f} m", (10, 90), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 255), 1, cv2.LINE_AA)
+
+    # noinspection PyArgumentList
+    def __record_ticks__(self, world: World, cameras: List[Tuple[Any, bool, queue.Queue]], ego_vehicle: Vehicle, recording_frequency: float,
                          output: str):
         # Get the spectator
-        # noinspection PyArgumentList
         spectator = world.get_spectator()
+
+        last_location: Vector3D = ego_vehicle.get_location()
 
         # Tick the world for each frame in the replay
         for tick in range(1, self.tick_count):
@@ -248,14 +325,22 @@ class CarlaCameraRecorder:
                 print(f"Current tick {current_tick} is not within [{self.begin_at}, {self.end_at}]")
                 break
 
+            new_location: Vector3D = ego_vehicle.get_location()
+            velocity = new_location.distance(last_location) / recording_frequency
+            safety_distance = self.__min_distance_to_front(velocity)
+            last_location = new_location
+
             # Create the image
-            for idx, (camera, show_bounding_boxes, image_queue) in enumerate(cameras):
+            for idx, (camera, show_overlays, image_queue) in enumerate(cameras):
                 image = image_queue.get()
                 image = np.reshape(np.copy(image.raw_data), (image.height, image.width, 4))
 
                 # Add bounding boxes to the image
-                if show_bounding_boxes:
-                    self.__render_bounding_boxes__(world=world, camera=camera, image=image)
+                if show_overlays:
+                    if self.render_bounding_boxes:
+                        self.__render_bounding_boxes__(world=world, camera=camera, safety_distance=safety_distance, image=image)
+                    if self.render_metadata:
+                        self.__render_metadata__(tick=tick, time=current_tick, velocity=velocity, safety_distance=safety_distance, image=image)
 
                 if self.show_preview:
                     cv2.imshow(f'Carla image preview CAM {idx}', image)
@@ -298,10 +383,10 @@ class CarlaCameraRecorder:
         api_helper = CarlaAPIHelper(client=client, world=world, rasterizer=rasterizer)
 
         # Start replay of simulation
-        cameras = self.__start_replay__(logfile=logfile, api_helper=api_helper, world=world)
+        cameras, ego_vehicle = self.__start_replay__(logfile=logfile, api_helper=api_helper, world=world)
 
         # Record all ticks
-        self.__record_ticks__(world=world, cameras=cameras, recording_frequency=recording_frequency, output=output)
+        self.__record_ticks__(world=world, cameras=cameras, ego_vehicle=ego_vehicle, recording_frequency=recording_frequency, output=output)
 
         return outputs
 
@@ -324,17 +409,29 @@ class CarlaCameraRecorder:
         for camera in cameras:
             images.append([img for img in os.listdir(os.path.join(images_directory, camera)) if img.endswith(".jpg")][0:-1])
             # noinspection PyUnresolvedReferences
-            videos.append(cv2.VideoWriter(f"{output}\\{camera}", cv2.VideoWriter_fourcc('m', 'p', '4', 'v'), 20, (1920, 1080)))
-        # noinspection PyUnresolvedReferences
-        videos.append(cv2.VideoWriter(f"{output}\\ALL", cv2.VideoWriter_fourcc('m', 'p', '4', 'v'), 20, (1920, 1080)))
+            videos.append(cv2.VideoWriter(f"{output}\\{camera}.mp4", cv2.VideoWriter_fourcc('m', 'p', '4', 'v'), 20, (1920, 1080)))
 
-        for tick in range(len(images[0])):
+        rows, cols = (0,0)
+        match len(cameras):
+            case 1: rows, cols = (1,1)
+            case 2: rows, cols = (1,2)
+            case 3: rows, cols = (2,2)
+            case 4: rows, cols = (2,2)
+            case 5: rows, cols = (2,3)
+            case 6: rows, cols = (2,3)
+            case 7: rows, cols = (3,3)
+            case 8: rows, cols = (3,3)
+            case 9: rows, cols = (3,3)
+
+        # noinspection PyUnresolvedReferences
+        videos.append(cv2.VideoWriter(f"{output}\\ALL.mp4", cv2.VideoWriter_fourcc('m', 'p', '4', 'v'), 20, (cols*1920, rows*1080)))
+
+        for tick in range(len(images[0])-1):
             img = []
             for idx, camera in enumerate(cameras):
                 img.append(cv2.imread(os.path.join(images_directory, camera, images[idx][tick])))
                 videos[idx].write(img[-1])
 
-            img_all = None
             match len(img):
                 case 1:
                     break
@@ -383,11 +480,10 @@ class CarlaCameraRecorder:
                     break
 
 
-            if img_all is not None:
-                videos[-1].write(img_all)
-                if self.show_preview:
-                    cv2.imshow('Carla video preview', img_all)
-                    cv2.waitKey(1)
+            videos[-1].write(img_all)
+            if self.show_preview:
+                cv2.imshow('Carla video preview', img_all)
+                cv2.waitKey(1)
 
         cv2.destroyAllWindows()
 

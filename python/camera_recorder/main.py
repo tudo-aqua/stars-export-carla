@@ -18,12 +18,19 @@ SHOW_PREVIEW: bool = True
 
 CAMERA_POSITIONS: List[Tuple[CameraPosition, bool]] = [
     (CameraPosition.BACK_ABOVE, False),
+    (CameraPosition.TOP_DOWN_FAR, False),
     (CameraPosition.REAR, False),
-    (CameraPosition.BACK_ABOVE, True),
-    (CameraPosition.TOP_DOWN_NEAR, True)
+
+    (CameraPosition.TOP_DOWN_NEAR, True),
+    (CameraPosition.TOP_DOWN_FAR, True),
+    (CameraPosition.TOP_DOWN_VERY_FAR, True)
 ]
+
+RENDER_BOUNDING_BOXES: bool = True
 RENDER_SAFETY_BOXES: bool = True
-SAFETY_BOX_STYLE: SafetyBoxStyle = SafetyBoxStyle.X
+RENDER_METADATA: bool = True
+
+SAFETY_BOX_STYLE: SafetyBoxStyle = SafetyBoxStyle.HATCHING
 
 BOUNDING_BOX_COLOR = (0, 255, 0, 255)
 SAFETY_BOUNDING_BOX_COLOR = (255, 0, 255, 255)
@@ -34,9 +41,11 @@ def kill_carla():
 
 def start_carla():
     os.system(f"start {CARLA_HOME} {'-RenderOffScreen' if RENDER_OFFSCREEN else ''}")
-    sleep(CARLA_STARTUP_DELAY)
+    for i in range(CARLA_STARTUP_DELAY):
+        print(f"Waiting for {CARLA_STARTUP_DELAY - i}")
+        sleep(1)
 
-def __create_images():
+def __create_images(limit: int):
     # Check if input directory exists
     if not os.path.exists(INPUT_DIR):
         print(f"Error: The input directory {INPUT_DIR} does not exist.", file=sys.stderr)
@@ -51,7 +60,11 @@ def __create_images():
         os.makedirs(OUTPUT_DIR)
 
     # Record all logs
+    count = 0
     for scenario in [os.path.join(INPUT_DIR, file) for file in os.listdir(INPUT_DIR)]:
+        if count == limit:
+            break
+
         for logfile in [os.path.join(scenario, file) for file in os.listdir(scenario) if file.endswith(".log")]:
             try:
                 # Restart Carla
@@ -60,6 +73,8 @@ def __create_images():
                 recorder.record_images(logfile=logfile)
             except RuntimeError:
                 print(f"Error: Could not record images for {logfile}", file=sys.stderr)
+
+        count += 1
 
     # Close Carla
     kill_carla()
@@ -75,12 +90,14 @@ if __name__ == '__main__':
     recorder = CarlaCameraRecorder(
         output_dir=OUTPUT_DIR,
         camera_positions=CAMERA_POSITIONS,
+        render_bounding_boxes=RENDER_BOUNDING_BOXES,
         bounding_box_color=BOUNDING_BOX_COLOR,
         render_safety_boxes=RENDER_SAFETY_BOXES,
         safety_box_style=SAFETY_BOX_STYLE,
         safety_bounding_box_color=SAFETY_BOUNDING_BOX_COLOR,
+        render_metadata=RENDER_METADATA,
         show_preview=SHOW_PREVIEW
     )
 
-    __create_images()
+    #__create_images(limit=1)
     __render_videos()
