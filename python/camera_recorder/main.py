@@ -7,6 +7,7 @@ from CarlaCameraRecorder import CarlaCameraRecorder
 from python.camera_recorder.DownscalingMethod import DownscalingMethod
 from python.camera_recorder.SafetyBoxStyle import SafetyBoxStyle
 from python.camera_recorder.CameraPosition import CameraPosition
+from python.camera_recorder.VideoRenderer import record_videos
 
 INPUT_DIR: str = "C:\\Users\\Dominik\\Desktop\\scenarios"
 OUTPUT_DIR: str = "C:\\Users\\Dominik\\Desktop\\scenarios\\_output"
@@ -15,15 +16,15 @@ DELETE_OUTPUT_DIR: bool = True
 CARLA_HOME: str = "C:\\Users\\Dominik\\workspace\\Carla0.9.15\\CarlaUE4.exe"
 CARLA_STARTUP_DELAY: int = 10
 RENDER_OFFSCREEN: bool = True
-SHOW_PREVIEW: bool = True
+SHOW_PREVIEW: bool = False
 
 CAMERA_POSITIONS: List[Tuple[CameraPosition, bool]] = [
     (CameraPosition.BACK_ABOVE, False),
-    (CameraPosition.TOP_DOWN_FAR, False),
+    # (CameraPosition.TOP_DOWN_FAR, False),
     (CameraPosition.REAR, False),
 
     (CameraPosition.TOP_DOWN_NEAR, True),
-    (CameraPosition.TOP_DOWN_FAR, True),
+    # (CameraPosition.TOP_DOWN_FAR, True),
     (CameraPosition.TOP_DOWN_VERY_FAR, True)
 ]
 
@@ -47,7 +48,7 @@ def start_carla():
         print(f"Waiting for {CARLA_STARTUP_DELAY - i}")
         sleep(1)
 
-def __create_images(start_at: int = 0, limit: int | None = None):
+def __create_images(start_at: int = 0, end_at: int | None = None):
     # Check if input directory exists
     if not os.path.exists(INPUT_DIR):
         print(f"Error: The input directory {INPUT_DIR} does not exist.", file=sys.stderr)
@@ -67,7 +68,7 @@ def __create_images(start_at: int = 0, limit: int | None = None):
         if count < start_at:
             count += 1
             continue
-        if count == limit:
+        if count == end_at:
             break
 
         for logfile in [os.path.join(scenario, file) for file in os.listdir(scenario) if file.endswith(".log")]:
@@ -87,7 +88,12 @@ def __create_images(start_at: int = 0, limit: int | None = None):
 def __render_videos():
     input_dir = os.path.join(OUTPUT_DIR, "_images")
     for images_directory in os.listdir(input_dir):
-        recorder.record_videos(images_directory=os.path.join(input_dir, images_directory), scaling_method=SCALING_METHOD)
+        record_videos(
+            images_directory=os.path.join(input_dir, images_directory),
+            output_directory=OUTPUT_DIR,
+            scaling_method=SCALING_METHOD,
+            show_preview=SHOW_PREVIEW
+        )
 
 
 if __name__ == '__main__':
@@ -104,5 +110,5 @@ if __name__ == '__main__':
         show_preview=SHOW_PREVIEW
     )
 
-    # __create_images(limit=1)
+    __create_images()
     __render_videos()

@@ -1,5 +1,25 @@
 import numpy as np
 
+def min_distance_to_front(velocity: float) -> float:
+    if 0.0 <= velocity < 2.0:
+        return 2.0
+    elif 2.0 <= velocity < 7.2:
+        return velocity * 1.0
+    elif 7.2 <= velocity < 10.0:
+        return velocity * 1.1
+    elif 10.0 <= velocity < 20.0:
+        return velocity * 1.2
+    elif 20.0 <= velocity < 30.0:
+        return velocity * 1.3
+    elif 30.0 <= velocity < 40.0:
+        return velocity * 1.4
+    elif 40.0 <= velocity < 50.0:
+        return velocity * 1.5
+    elif 50.0 <= velocity < 60.0:
+        return velocity * 1.6
+    else:
+        return velocity * 3.6 / 2
+
 def build_projection_matrix(width, height, fov, is_behind_camera=False):
     focal = width / (2.0 * np.tan(fov * np.pi / 360.0))
     k = np.identity(3)
