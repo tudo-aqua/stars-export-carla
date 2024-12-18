@@ -12,6 +12,7 @@ from helpers.carla_api_helper import CarlaAPIHelper
 from helpers.map_rasterizer import MapRasterizer
 from helper import build_projection_matrix, get_image_point, point_in_canvas
 from python.camera_recorder.CameraPosition import CameraPosition
+from python.camera_recorder.DownscalingMethod import DownscalingMethod
 from python.camera_recorder.SafetyBoxStyle import SafetyBoxStyle
 
 
@@ -390,7 +391,7 @@ class CarlaCameraRecorder:
 
         return outputs
 
-    def record_videos(self, images_directory: str) -> None:
+    def record_videos(self, images_directory: str, scaling_method: DownscalingMethod) -> None:
         output = os.path.join(self.output_dir, "_videos\\")
         if not os.path.exists(output):
             os.makedirs(output)
@@ -411,20 +412,18 @@ class CarlaCameraRecorder:
             # noinspection PyUnresolvedReferences
             videos.append(cv2.VideoWriter(f"{output}\\{camera}.mp4", cv2.VideoWriter_fourcc('m', 'p', '4', 'v'), 20, (1920, 1080)))
 
-        rows, cols = (0,0)
+        # Default for cases 1, 3, 4, 7, 8, 9
+        width:int = 1080
         match len(cameras):
-            case 1: rows, cols = (1,1)
-            case 2: rows, cols = (1,2)
-            case 3: rows, cols = (2,2)
-            case 4: rows, cols = (2,2)
-            case 5: rows, cols = (2,3)
-            case 6: rows, cols = (2,3)
-            case 7: rows, cols = (3,3)
-            case 8: rows, cols = (3,3)
-            case 9: rows, cols = (3,3)
+            case 2:
+                width = int(1080/2)
+            case 5 | 6:
+                width = int(1080*2/3)
+            # case 10 | 11 | 12:
+            #     width = 1080*3/4
 
         # noinspection PyUnresolvedReferences
-        videos.append(cv2.VideoWriter(f"{output}\\ALL.mp4", cv2.VideoWriter_fourcc('m', 'p', '4', 'v'), 20, (cols*1920, rows*1080)))
+        videos.append(cv2.VideoWriter(f"{output}\\ALL.mp4", cv2.VideoWriter_fourcc('m', 'p', '4', 'v'), 20, (1920, width)))
 
         for tick in range(len(images[0])-1):
             img = []
@@ -480,6 +479,7 @@ class CarlaCameraRecorder:
                     break
 
 
+            img_all = cv2.resize(img_all, (1920, width), interpolation=scaling_method.value)
             videos[-1].write(img_all)
             if self.show_preview:
                 cv2.imshow('Carla video preview', img_all)

@@ -4,6 +4,7 @@ from time import sleep
 from typing import List, Tuple
 
 from CarlaCameraRecorder import CarlaCameraRecorder
+from python.camera_recorder.DownscalingMethod import DownscalingMethod
 from python.camera_recorder.SafetyBoxStyle import SafetyBoxStyle
 from python.camera_recorder.CameraPosition import CameraPosition
 
@@ -29,6 +30,7 @@ CAMERA_POSITIONS: List[Tuple[CameraPosition, bool]] = [
 RENDER_BOUNDING_BOXES: bool = True
 RENDER_SAFETY_BOXES: bool = True
 RENDER_METADATA: bool = True
+SCALING_METHOD: DownscalingMethod = DownscalingMethod.INTER_NEAREST
 
 SAFETY_BOX_STYLE: SafetyBoxStyle = SafetyBoxStyle.HATCHING
 
@@ -45,7 +47,7 @@ def start_carla():
         print(f"Waiting for {CARLA_STARTUP_DELAY - i}")
         sleep(1)
 
-def __create_images(limit: int):
+def __create_images(start_at: int = 0, limit: int | None = None):
     # Check if input directory exists
     if not os.path.exists(INPUT_DIR):
         print(f"Error: The input directory {INPUT_DIR} does not exist.", file=sys.stderr)
@@ -62,6 +64,9 @@ def __create_images(limit: int):
     # Record all logs
     count = 0
     for scenario in [os.path.join(INPUT_DIR, file) for file in os.listdir(INPUT_DIR)]:
+        if count < start_at:
+            count += 1
+            continue
         if count == limit:
             break
 
@@ -82,7 +87,7 @@ def __create_images(limit: int):
 def __render_videos():
     input_dir = os.path.join(OUTPUT_DIR, "_images")
     for images_directory in os.listdir(input_dir):
-        recorder.record_videos(images_directory=os.path.join(input_dir, images_directory))
+        recorder.record_videos(images_directory=os.path.join(input_dir, images_directory), scaling_method=SCALING_METHOD)
 
 
 if __name__ == '__main__':
@@ -99,5 +104,5 @@ if __name__ == '__main__':
         show_preview=SHOW_PREVIEW
     )
 
-    #__create_images(limit=1)
+    # __create_images(limit=1)
     __render_videos()
