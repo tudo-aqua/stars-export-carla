@@ -18,25 +18,23 @@ CARLA_STARTUP_DELAY: int = 10
 RENDER_OFFSCREEN: bool = True
 SHOW_PREVIEW: bool = False
 
-CAMERA_POSITIONS: List[Tuple[CameraPosition, bool]] = [
-    (CameraPosition.BACK_ABOVE, False),
+# CameraPosition, Render Metadata, Render Bounding Box
+CAMERA_POSITIONS: List[Tuple[CameraPosition, bool, bool]] = [
+    (CameraPosition.BACK_ABOVE, True, False),
     # (CameraPosition.TOP_DOWN_FAR, False),
-    (CameraPosition.REAR, False),
+    (CameraPosition.REAR, True, False),
 
-    (CameraPosition.TOP_DOWN_NEAR, True),
+    (CameraPosition.TOP_DOWN_NEAR, True, True),
     # (CameraPosition.TOP_DOWN_FAR, True),
-    (CameraPosition.TOP_DOWN_VERY_FAR, True)
+    (CameraPosition.TOP_DOWN_VERY_FAR, True, True)
 ]
 
-RENDER_BOUNDING_BOXES: bool = True
 RENDER_SAFETY_BOXES: bool = True
-RENDER_METADATA: bool = True
-SCALING_METHOD: DownscalingMethod = DownscalingMethod.INTER_NEAREST
-
-SAFETY_BOX_STYLE: SafetyBoxStyle = SafetyBoxStyle.HATCHING
-
 BOUNDING_BOX_COLOR = (0, 255, 0, 255)
 SAFETY_BOUNDING_BOX_COLOR = (255, 0, 255, 255)
+SAFETY_BOX_STYLE: SafetyBoxStyle = SafetyBoxStyle.HATCHING
+SCALING_METHOD: DownscalingMethod = DownscalingMethod.INTER_AREA
+
 
 def kill_carla():
     os.system('taskkill /f /im CarlaUE4-Win64-Shipping.exe')
@@ -101,12 +99,10 @@ if __name__ == '__main__':
     recorder = CarlaCameraRecorder(
         output_dir=OUTPUT_DIR,
         camera_positions=CAMERA_POSITIONS,
-        render_bounding_boxes=RENDER_BOUNDING_BOXES,
         bounding_box_color=BOUNDING_BOX_COLOR,
         render_safety_boxes=RENDER_SAFETY_BOXES,
         safety_box_style=SAFETY_BOX_STYLE,
         safety_bounding_box_color=SAFETY_BOUNDING_BOX_COLOR,
-        render_metadata=RENDER_METADATA,
         show_preview=SHOW_PREVIEW
     )
 

@@ -25,13 +25,11 @@ class CarlaCameraRecorder:
                  vehicle_id: int = -1,
                  begin_at: float = 0,
                  end_at: float = sys.maxsize,
-                 camera_positions: List[Tuple[CameraPosition, bool]] = [],
-                 render_bounding_boxes: bool = False,
+                 camera_positions: List[Tuple[CameraPosition, bool, bool]] = [],
                  bounding_box_color: Tuple[int, int, int, int] = (0, 255, 0, 255),
                  render_safety_boxes: bool = False,
                  safety_box_style: SafetyBoxStyle = None,
                  safety_bounding_box_color: Tuple[int, int, int, int] = (255, 0, 0, 255),
-                 render_metadata: bool = False,
                  show_preview: bool = False):
         self.output_dir = output_dir
         self.img_height = img_height
@@ -42,15 +40,13 @@ class CarlaCameraRecorder:
         self.end_at = end_at
         self.tick_count = 0
         self.camera_positions = camera_positions
-        self.render_bounding_boxes = render_bounding_boxes
         self.bounding_box_color = bounding_box_color
         self.render_safety_boxes = render_safety_boxes
         self.safety_box_style = safety_box_style
         self.safety_bounding_box_color = safety_bounding_box_color
-        self.render_metadata = render_metadata
         self.show_preview = show_preview
 
-    def __start_replay__(self, logfile: str, api_helper: CarlaAPIHelper, world: carla.World) -> Tuple[List[Tuple[Any, bool, queue.Queue]], carla.Vehicle]:
+    def __start_replay__(self, logfile: str, output:str, api_helper: CarlaAPIHelper, world: carla.World) -> Tuple[List[Tuple[Any, str, bool, bool, queue.Queue]], carla.Vehicle]:
         print("Start with simulation replay")
         api_helper.start_replaying(logfile)
 
@@ -69,8 +65,11 @@ class CarlaCameraRecorder:
 
         # Spawn attached RGB camera
         # noinspection PyArgumentList
-        cameras: List[Tuple[Any, bool, queue.Queue]] = []
-        for (camera, show_bounding_box) in self.camera_positions:
+        cameras: List[Tuple[Any, str, bool, bool, queue.Queue]] = []
+        for (camera, show_metadata, show_bounding_box) in self.camera_positions:
+            out = os.path.join(output, f"CAM_{camera.name + ('_META' if show_metadata else '') + ('_BB' if show_bounding_box else '')}")
+            os.makedirs(out)
+
             # noinspection PyArgumentList
             cam_bp = world.get_blueprint_library().find('sensor.camera.rgb')
             cam_bp.set_attribute("image_size_x", str(self.img_width))
@@ -90,7 +89,7 @@ class CarlaCameraRecorder:
             image_queue = queue.Queue()
 
             ego_cam.listen(image_queue.put)
-            cameras.append((ego_cam, show_bounding_box, image_queue))
+            cameras.append((ego_cam, out, show_metadata, show_bounding_box, image_queue))
 
         # noinspection PyArgumentList
         return cameras, ego_vehicle
@@ -236,8 +235,7 @@ class CarlaCameraRecorder:
         cv2.putText(image, f"Safety distance: {safety_distance:.2f} m", (10, 90), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 255), 1, cv2.LINE_AA)
 
     # noinspection PyArgumentList
-    def __record_ticks__(self, world: carla.World, cameras: List[Tuple[Any, bool, queue.Queue]], ego_vehicle: carla.Vehicle, recording_frequency: float,
-                         output: str):
+    def __record_ticks__(self, world: carla.World, cameras: List[Tuple[Any, str, bool, bool, queue.Queue]], ego_vehicle: carla.Vehicle, recording_frequency: float):
         # Get the spectator
         spectator = world.get_spectator()
 
@@ -265,16 +263,14 @@ class CarlaCameraRecorder:
             last_location = new_location
 
             # Create the image
-            for idx, (camera, show_overlays, image_queue) in enumerate(cameras):
+            for idx, (camera, directory, render_metadata, render_bounding_box, image_queue) in enumerate(cameras):
                 image = image_queue.get()
                 image = np.reshape(np.copy(image.raw_data), (image.height, image.width, 4))
 
-                # Add bounding boxes to the image
-                if show_overlays:
-                    if self.render_bounding_boxes:
-                        self.__render_bounding_boxes__(world=world, camera=camera, safety_distance=safety_distance, image=image)
-                    if self.render_metadata:
-                        self.__render_metadata__(tick=tick, time=current_tick, velocity=velocity, safety_distance=safety_distance, image=image)
+                if render_metadata:
+                    self.__render_metadata__(tick=tick, time=current_tick, velocity=velocity, safety_distance=safety_distance, image=image)
+                if render_bounding_box:
+                    self.__render_bounding_boxes__(world=world, camera=camera, safety_distance=safety_distance, image=image)
 
                 if self.show_preview:
                     cv2.imshow(f'Carla image preview CAM {idx}', image)
@@ -282,7 +278,7 @@ class CarlaCameraRecorder:
 
                 # Save the image
                 image_name = "%.6d.jpg" % tick
-                cv2.imwrite(os.path.join(os.path.join(output, f"CAM_{idx}"), image_name), image)
+                cv2.imwrite(os.path.join(directory, image_name), image)
 
                 # Set the spectator to the current vehicle
                 transform = camera.get_transform()
@@ -290,18 +286,13 @@ class CarlaCameraRecorder:
 
         cv2.destroyAllWindows()
 
-    def record_images(self, logfile: str) -> List[str]:
+    def record_images(self, logfile: str) -> None:
         # Create output directory
         output = os.path.join(self.output_dir, "_images\\" + logfile.split('\\')[-1].split('.')[
             0] + f"-vehicle_{self.vehicle_id}_range[{self.begin_at}, {self.end_at}]")
-        outputs = []
+
         if not os.path.exists(output):
             os.makedirs(output)
-
-            for i in range(len(self.camera_positions)):
-                out = os.path.join(output, f"CAM_{i}")
-                outputs.append(out)
-                os.makedirs(out)
         else:
             print(f"Warning: The output directory {output} already exists. Skipping.", file=sys.stderr)
             raise RuntimeError()
@@ -320,9 +311,7 @@ class CarlaCameraRecorder:
         api_helper = CarlaAPIHelper(client=client, world=world, rasterizer=rasterizer)
 
         # Start replay of simulation
-        cameras, ego_vehicle = self.__start_replay__(logfile=logfile, api_helper=api_helper, world=world)
+        cameras, ego_vehicle = self.__start_replay__(logfile=logfile, output=output, api_helper=api_helper, world=world)
 
         # Record all ticks
-        self.__record_ticks__(world=world, cameras=cameras, ego_vehicle=ego_vehicle, recording_frequency=recording_frequency, output=output)
-
-        return outputs
+        self.__record_ticks__(world=world, cameras=cameras, ego_vehicle=ego_vehicle, recording_frequency=recording_frequency)
