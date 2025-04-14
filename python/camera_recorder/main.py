@@ -9,14 +9,14 @@ from python.camera_recorder.SafetyBoxStyle import SafetyBoxStyle
 from python.camera_recorder.CameraPosition import CameraPosition
 from python.camera_recorder.VideoRenderer import record_videos
 
-INPUT_DIR: str = "C:\\Users\\Dominik\\Desktop\\scenarios"
-OUTPUT_DIR: str = "C:\\Users\\Dominik\\Desktop\\scenarios\\_output"
+INPUT_DIR: str = "C:\\Users\\Dominik\\Desktop\\Videos"
+OUTPUT_DIR: str = "C:\\Users\\Dominik\\Desktop\\Videos\\_output"
 DELETE_OUTPUT_DIR: bool = True
 
 CARLA_HOME: str = "C:\\Users\\Dominik\\workspace\\Carla0.9.15\\CarlaUE4.exe"
 CARLA_STARTUP_DELAY: int = 10
 RENDER_OFFSCREEN: bool = True
-SHOW_PREVIEW: bool = False
+SHOW_PREVIEW: bool = True
 
 # CameraPosition, Render Metadata, Render Bounding Box
 CAMERA_POSITIONS: List[Tuple[CameraPosition, bool, bool]] = [
@@ -30,8 +30,8 @@ CAMERA_POSITIONS: List[Tuple[CameraPosition, bool, bool]] = [
 ]
 
 RENDER_SAFETY_BOXES: bool = True
-BOUNDING_BOX_COLOR = (0, 255, 0, 255)
-SAFETY_BOUNDING_BOX_COLOR = (255, 0, 255, 255)
+BOUNDING_BOX_COLOR = (0, 0, 255, 255)
+SAFETY_BOUNDING_BOX_COLOR = (255, 0, 0, 255)
 SAFETY_BOX_STYLE: SafetyBoxStyle = SafetyBoxStyle.HATCHING
 SCALING_METHOD: DownscalingMethod = DownscalingMethod.INTER_AREA
 
@@ -59,6 +59,7 @@ def __create_images(start_at: int = 0, end_at: int | None = None):
     # Create output directory if it does not exist
     if not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR)
+        os.makedirs(f"{OUTPUT_DIR}\\_images")
 
     # Record all logs
     count = 0

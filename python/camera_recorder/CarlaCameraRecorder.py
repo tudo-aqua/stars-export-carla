@@ -59,7 +59,7 @@ class CarlaCameraRecorder:
 
         # Get the ego vehicle from the given vehicle id
         if self.vehicle_id == -1:
-            ego_vehicle: carla.Vehicle = list(filter(lambda v: 'ego' in v.attributes['role_name'], vehicles))[0]
+            ego_vehicle: carla.Vehicle = vehicles[1]
         else:
             ego_vehicle: carla.Vehicle = list(filter(lambda v: v.id == self.vehicle_id, vehicles))[0]
 
@@ -170,9 +170,9 @@ class CarlaCameraRecorder:
                 ])
 
             case SafetyBoxStyle.HATCHING:
-                for i in np.arange(0, 1, 0.20):
+                for i in np.arange(0, 1, 0.10):
                     new_edge_connections.extend([
-                        (bottom_left_front + i*vec, bottom_right_front + (i+0.20)*vec),
+                        (bottom_left_front + i*vec, bottom_right_front + (i+0.10)*vec),
                     ])
 
         return list(map(lambda ec: (ec[0], ec[1], self.safety_bounding_box_color), new_edge_connections))
@@ -181,6 +181,7 @@ class CarlaCameraRecorder:
         world_to_camera = np.array(camera.get_transform().get_inverse_matrix())
 
         # noinspection PyArgumentList
+        b = True
         for vehicle in world.get_actors().filter('*vehicle*'):
             bounding_box = vehicle.bounding_box
 
@@ -200,7 +201,7 @@ class CarlaCameraRecorder:
                 edges = list(
                     map(lambda ec: (vertices[ec[0]], vertices[ec[1]], self.bounding_box_color), edge_connections))
 
-                if self.render_safety_boxes and 'ego' in vehicle.attributes['role_name']:
+                if self.render_safety_boxes and not b:
                     edges.extend(self.__create_safety_box_right(vertices))
                     edges.extend(self.__create_safety_box_front(vertices=vertices, safety_distance=safety_distance))
 
@@ -225,7 +226,9 @@ class CarlaCameraRecorder:
                         p2 = get_image_point(loc2, k_behind, world_to_camera)
 
                     # Draw edge
-                    cv2.line(image, (int(p1[0]), int(p1[1])), (int(p2[0]), int(p2[1])), color, 1)
+                    cv2.line(image, (int(p1[0]), int(p1[1])), (int(p2[0]), int(p2[1])), color, 2)
+                    #cv2.putText(image, text=f"{loc1}, {loc2}", bottomLeftOrigin=(int(p1[0]), int(p1[1])))
+            b = False
 
     @staticmethod
     def __render_metadata__(tick: int, time: float, velocity: float, safety_distance: float, image: np.ndarray) -> None:
