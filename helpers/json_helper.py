@@ -3,7 +3,7 @@ import os
 import re
 from datetime import datetime
 from os.path import dirname
-from typing import List
+from typing import List, Union, IO
 import zipfile
 from pathlib import Path
 
@@ -151,11 +151,28 @@ class JSONHelper:
             logfile.write(json_string)
 
     @staticmethod
-    def load_data_blocks(path: os.path) -> [DataBlock]:
-        with open(path) as logfile:
-            data = json.loads(logfile.read())
-            # TODO Check for invalid json files
-            return DataBlock.from_list(data)
+    def load_data_blocks(source: Union[str, os.PathLike, IO]) -> [DataBlock]:
+        """Load JSON from either a filesystem path or a file-like (e.g. ZipExtFile)."""
+
+        # Determine if we need to open it ourselves
+        needs_close = False
+        if hasattr(source, "read"):
+            # It's already a file-like (ZipExtFile or open file)
+            f = source
+        else:
+            # It's a path → open it
+            f = open(source, "r", encoding="utf-8")
+            needs_close = True
+
+        try:
+            # Use json.load so we can pass it the file‐object directly
+            data = json.load(f)
+        finally:
+            if needs_close:
+                f.close()
+
+        # Convert your list of dicts into DataBlock instances
+        return DataBlock.from_list(data)
 
     @staticmethod
     def load_tick_data(path: os.path) -> List[TickData]:

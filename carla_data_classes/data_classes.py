@@ -529,6 +529,12 @@ class DataTrafficLight(DataActor):
             self.state = 4
             self.location = DataLocation(-1, -1, -1)
             self.rotation = DataRotation(-1, -1, -1)
+            self.attributes = dict()
+            self.is_alive = False
+            self.is_active = False
+            self.is_dormant = False
+            self.semantic_tags = []
+            self.bounding_box = None
         else:
             super().__init__(actor)
             self.type = "TrafficLight"

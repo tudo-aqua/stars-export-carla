@@ -1,4 +1,7 @@
+import json
 import os
+import zipfile
+from pathlib import Path
 
 import numpy as np
 from carla import World, Map, Junction, Landmark, LaneType
@@ -37,6 +40,31 @@ class MapRasterizer:
             raise RuntimeError("The blocks have not yet been calculated. Use method 'get_data_blocks'")
         JSONHelper.log_data_blocks(self._blocks, file_path)
 
+    def load_data_blocks(self, file_path: Path) -> [DataBlock]:
+        """
+        — Checks that exactly one static_data_*.zip exists in `log_file_path`.
+        — Extracts and loads all JSON files inside into a dict.
+        Returns:
+            Dict[str, Any]: mapping from JSON filename → parsed JSON content.
+        Raises:
+            FileNotFoundError: if no matching zip is found.
+            ValueError: if more than one matching zip is found,
+                        or if the zip contains no .json files.
+        """
+
+        blocks = None
+        with zipfile.ZipFile(file_path, 'r') as zf:
+            # find all JSON entries
+            json_files = [n for n in zf.namelist() if n.lower().endswith('.json')]
+            if not json_files:
+                raise ValueError(f"No .json files inside {file_path.name}")
+
+            for name in json_files:
+                with zf.open(name) as f:
+                    blocks = JSONHelper.load_data_blocks(f)
+
+        return blocks
+
     def load_or_calculate_data_blocks(self, log_file_path: str) -> List[DataBlock]:
         """
         Loads the DataBlocks for the current map if existing. Otherwise, they are calculated and
@@ -45,14 +73,22 @@ class MapRasterizer:
         if self._blocks.__len__() > 0:
             print("Blocks are already calculated. Nothing new to be done.")
             return self._blocks
-        # Load the collected static data from the json file
-        logfile_name = log_file_path
-        self._blocks = self.get_data_blocks()
-        file_name = os.path.basename(log_file_path).split(".")[0]
-        folder = JSONHelper.get_file_path_folder(file_name)
-        save_file_name = os.path.join(folder, f"{JSONHelper.STATIC_FILE_NAME_PREFIX}_{file_name}.json")
-        self.save_data_blocks(file_path=save_file_name)
-        JSONHelper.zip_and_delete_file(save_file_name)
+        log_dir = Path(log_file_path)
+        # Look for any file named static_data_*.zip
+        matches = list(log_dir.glob("static_data_*.zip"))
+        # Optionally, ensure they’re actual files
+        if any(p.is_file() for p in matches):
+            # Load the collected static data from the json file
+            print(f"Static data was already calculated. Load data from file: '{matches[0]}'")
+            self._blocks = self.load_data_blocks(matches[0])
+        else:
+            logfile_name = log_file_path
+            self._blocks = self.get_data_blocks()
+            file_name = os.path.basename(log_file_path).split(".")[0]
+            folder = JSONHelper.get_file_path_folder(file_name)
+            save_file_name = os.path.join(folder, f"{JSONHelper.STATIC_FILE_NAME_PREFIX}_{file_name}.json")
+            self.save_data_blocks(file_path=save_file_name)
+            JSONHelper.zip_and_delete_file(save_file_name)
 
         self._lane_midpoints = self.getLaneMidpointsArray()
         lane_midpoint_locations = list(

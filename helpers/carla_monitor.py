@@ -11,7 +11,7 @@ from carla import WorldSnapshot, Vehicle, WeatherParameters
 from carla.libcarla import TrafficLight
 
 from carla_data_classes import DataActorPosition, TickData, DataWeatherParameters, DataWeatherParametersType, \
-    DataTrafficLight, DataActor
+    DataTrafficLight, DataActor, DataTrafficSign
 from helpers.carla_api_helper import CarlaAPIHelper
 from helpers.carla_recording_generator import CarlaDataGenerator
 from helpers.json_helper import JSONHelper
@@ -48,7 +48,7 @@ class CarlaMonitor:
         weather_data = JSONHelper.load_weather_from_scenic(weather_file)
         return weather_data
 
-    def monitor_simulation_run(self, file_path: str, weather_file_path: str) -> None:
+    def monitor_simulation_run(self, file_path: str, weather_file_path: str, result_file_path: str) -> None:
         """
         Monitor the simulation run of the given file
         @param file_path: The file name of the simulation run to monitor
@@ -85,6 +85,8 @@ class CarlaMonitor:
 
             # Get map name of recording
             map_name = info.split("Map: ")[1].split("\nDate")[0]
+            print(f"Load map {map_name}")
+
             # Load map from recording
             self.client.load_world(map_name)
 
@@ -93,10 +95,11 @@ class CarlaMonitor:
 
             # Initialize necessary helper classes
             rasterizer = MapRasterizer(world)
-            api_helper = CarlaAPIHelper(client, world, rasterizer)
+            api_helper = CarlaAPIHelper(self.client, world, rasterizer)
 
+            print("Load or calculate Data Blocks")
             # Calculate the static data for the current map
-            blocks = rasterizer.load_or_calculate_data_blocks(log_file_path=log_data_path)
+            blocks = rasterizer.load_or_calculate_data_blocks(log_file_path=result_file_path)
 
             traffic_lights = rasterizer.get_all_traffic_lights()
 
@@ -196,6 +199,14 @@ class CarlaMonitor:
             file_name = os.path.basename(log_data_path).split(".")[0]
             folder = JSONHelper.get_file_path_folder(file_name)
             save_file_name = os.path.join(folder, f"{JSONHelper.DYNAMIC_FILE_NAME_PREFIX}_{file_name}.json")
+            check_all_signs_alive = (
+                lambda ticks: all(
+                    pos.actor.is_alive
+                    for tick in ticks
+                    for pos in tick.actor_positions
+                    if isinstance(pos.actor, DataTrafficSign)
+                )
+            )
             saved_dynamic_data = api_helper.save_dynamic_data(ticks=ticks, file_path=save_file_name)
             JSONHelper.zip_and_delete_file(save_file_name)
         except RuntimeError as err:
