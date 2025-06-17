@@ -156,7 +156,11 @@ class CarlaMonitor:
                 data_actors: List[DataActor] = []
                 # Calculate the actor position for each actor (Vehicle, Pedestrian, TrafficSign, TrafficLight)
                 for actor in actors:
-                    is_ego = False
+                    if isinstance(actor, Vehicle):
+                        role = actor.attributes.get("role_name", None)
+                        is_ego = role == "hero"
+                    else:
+                        is_ego = False
                     # Transform the carla.Actor into a DataActor
                     data_actor = api_helper.get_data_actor_from_actor(actor, is_ego)
                     if data_actor is None:
