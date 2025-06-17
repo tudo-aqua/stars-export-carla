@@ -457,7 +457,7 @@ class DataBoundingBox:
     extent: DataVector3D
     location: DataLocation
     rotation: DataRotation
-    vertices: List
+    vertices: List[DataLocation]
 
     @staticmethod
     def from_actor(actor: Actor) -> DataBoundingBox:
