@@ -1,11 +1,13 @@
 import json
 import os
 import zipfile
+from collections import deque
 from pathlib import Path
 
 import numpy as np
 from carla import World, Map, Junction, Landmark, LaneType
 from scipy.spatial import KDTree
+from typing import Set
 
 from carla_data_classes import *
 from helpers.json_helper import JSONHelper
@@ -136,7 +138,7 @@ class MapRasterizer:
                 data_blocks.append(data_block)
             else:
                 # The waypoint belongs to a multi-lane road: calculate all possible waypoints
-                data_road = self.get_data_road_for_waypoints(waypoint, waypoint_list, landmarks)
+                data_road = self.get_data_road_for_waypoints(waypoint, landmarks)
                 data_block = DataBlock(str(data_road.road_id), [data_road])
                 data_blocks.append(data_block)
         self._blocks = data_blocks
@@ -211,42 +213,59 @@ class MapRasterizer:
                 return True
         return False
 
-    def get_data_road_for_waypoints(self, waypoint: Waypoint, waypoints: List[Waypoint],
-                                    landmarks: List[Landmark]) -> DataRoad:
+    def get_data_road_for_waypoints(self, waypoint: Waypoint, landmarks: List[Landmark]) -> DataRoad:
         """
         This method returns a filled DataRoad based on the given waypoint. The waypoints list is for
         the calculation of the underlying lanes of the road.
         @param waypoint: The lane of which the road should be constructed of
-        @param waypoints: All waypoint of the map
         @return: A filled DataRoad object based on the given waypoint
         """
-        road_id = waypoint.road_id
-        # Extract all waypoints belonging to the road of the waypoint
-        lane_waypoints = list(filter(lambda wp: wp.road_id == road_id, waypoints))
-        # Get only one waypoint for each lane
-        unique_lane_ids_waypoints = list({wp.lane_id: wp for wp in lane_waypoints}.values())
-        # Get all lanes for the road
-        road_lanes = [x for xs in
-                      list(map(lambda wp: self.get_all_lanes_on_same_side_of_road(wp), unique_lane_ids_waypoints)) for x
-                      in xs]
-        # Transform all relevant waypoints to DataLanes
-        data_lanes = list(map(lambda wp: self.get_data_lane_for_waypoint(wp, landmarks), road_lanes))
-        return DataRoad(road_id, lanes=data_lanes, is_junction=waypoint.is_junction)
+        target_road = waypoint.road_id
 
-    def get_all_lanes_on_same_side_of_road(self, starting_lane: Waypoint) -> List[Waypoint]:
-        """
-        This method returns all lanes that are on the same side of the given `starting_lane` waypoint.
-        :param starting_lane: The waypoint, representing the starting lane, for which all lanes should be returned
-        :return: A list of lanes that are on the same side of the given lane
-        """
-        current_lane = starting_lane
-        lanes = []
-        while current_lane:
-            if current_lane not in lanes:
-                lanes.append(current_lane)
+        topo = self._map.get_topology()
 
-            current_lane = current_lane.get_right_lane()
-        return lanes
+        lane_to_wp = {}
+        for wp, _ in topo:
+            if wp.road_id == target_road and wp.lane_id not in lane_to_wp:
+                lane_to_wp[wp.lane_id] = wp
+
+        road_lanes = list(lane_to_wp.values())
+        lanes = self.collect_all_lanes_waypoints(road_lanes)
+        data_lanes = [
+            self.get_data_lane_for_waypoint(wp, landmarks)
+            for wp in lanes
+        ]
+
+        return DataRoad(
+            road_id=target_road,
+            is_junction=waypoint.is_junction,
+            lanes=data_lanes
+        )
+
+    def collect_all_lanes_waypoints(self, starting_waypoints: [Waypoint]) -> [Waypoint]:
+        """
+        Given one or more seed waypoints on the same road, traverse left/right
+        across all lanes without cycling, and return one representative
+        Waypoint per lane.
+        """
+        visited: Set[Tuple[int, int]] = set()  # (road_id, lane_id)
+        queue = deque(starting_waypoints)
+        result: [Waypoint] = []
+
+        while queue:
+            wp = queue.popleft()
+            key = (wp.road_id, wp.lane_id)
+            if key in visited:
+                continue
+            visited.add(key)
+            result.append(wp)
+
+            # Enqueue neighbors
+            for neighbor in (wp.get_left_lane(), wp.get_right_lane()):
+                if neighbor is not None:
+                    queue.append(neighbor)
+
+        return result
 
     def get_data_roads_for_junction(self, junction: Junction, landmarks: List[Landmark]) -> List[DataRoad]:
         """
