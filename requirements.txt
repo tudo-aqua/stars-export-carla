@@ -3,3 +3,4 @@ numpy~=1.22
 dataclass-wizard
 opencv-python~=4.8.1.78
 scipy~=1.7.3
+psutil
