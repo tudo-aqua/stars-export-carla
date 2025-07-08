@@ -338,7 +338,7 @@ class MapRasterizer:
         @param waypoint: The waypoint from which the information should be collected
         @return: The filled DataLane
         """
-        print("Converting road", waypoint.road_id, "with lane", waypoint.lane_id)
+        print(f"Converting road {waypoint.road_id} with lane {waypoint.lane_id}")
         # Get length of the lane
         lane_length: float = self.get_length_of_lane(waypoint)
         # Get list of leading lanes

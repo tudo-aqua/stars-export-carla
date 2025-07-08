@@ -137,8 +137,7 @@ class CarlaMonitor:
                                                                               CarlaMonitor.SPECIFIC_TRACK_INTERVAL) != 0:
                     continue
                 elapsed_time = (datetime.now() - start_time).total_seconds()
-                print("Simulation tick:", tick, "of", replay_tick_count, "Result Tick:", current_tick,
-                      f"Elapsed time: {elapsed_time}s")
+                print(f"Simulation tick: {tick} of {replay_tick_count} Result Tick: {current_tick} Elapsed time: {elapsed_time}s")
 
                 # Get all vehicles
                 vehicles = api_helper.get_vehicles()
