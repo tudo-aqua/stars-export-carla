@@ -17,7 +17,6 @@ class TickData(JSONWizard):
 
     class _(JSONWizard.Meta):
         key_transform_with_dump = 'SNAKE'
-        debug_enabled = True
 
     current_tick: float
     actor_positions: List[DataActorPosition]
@@ -32,7 +31,6 @@ class DataWeatherParameters(JSONWizard):
 
     class _(JSONWizard.Meta):
         key_transform_with_dump = 'SNAKE'
-        debug_enabled = True
 
     type: DataWeatherParametersType
     dust_storm: float
@@ -100,7 +98,6 @@ class DataBlock(JSONWizard):
 
     class _(JSONWizard.Meta):
         key_transform_with_dump = 'SNAKE'
-        debug_enabled = True
 
     id: str
     roads: List[DataRoad]
