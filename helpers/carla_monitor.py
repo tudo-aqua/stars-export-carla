@@ -99,7 +99,7 @@ class CarlaMonitor:
 
             print("Load or calculate Data Blocks")
             # Calculate the static data for the current map
-            blocks = rasterizer.load_or_calculate_data_blocks(log_file_path=result_file_path)
+            blocks = rasterizer.load_or_calculate_data_blocks(log_file_path=result_file_path, map_name=map_name)
 
             traffic_lights = rasterizer.get_all_traffic_lights()
 
@@ -200,8 +200,7 @@ class CarlaMonitor:
             print("Analysis complete. Save to disk.")
             # Save Dynamic data to disk
             file_name = os.path.basename(log_data_path).split(".")[0]
-            folder = JSONHelper.get_file_path_folder(file_name)
-            save_file_name = os.path.join(folder, f"{JSONHelper.DYNAMIC_FILE_NAME_PREFIX}_{file_name}.json")
+            save_file_name = os.path.join(result_file_path, f"{JSONHelper.DYNAMIC_FILE_NAME_PREFIX}_{file_name}.json")
             check_all_signs_alive = (
                 lambda ticks: all(
                     pos.actor.is_alive

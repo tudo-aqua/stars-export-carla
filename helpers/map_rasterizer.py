@@ -67,7 +67,7 @@ class MapRasterizer:
 
         return blocks
 
-    def load_or_calculate_data_blocks(self, log_file_path: str) -> List[DataBlock]:
+    def load_or_calculate_data_blocks(self, log_file_path: str, map_name: str) -> List[DataBlock]:
         """
         Loads the DataBlocks for the current map if existing. Otherwise, they are calculated and
         saved to disk.
@@ -77,18 +77,15 @@ class MapRasterizer:
             return self._blocks
         log_dir = Path(log_file_path)
         # Look for any file named static_data_*.zip
-        matches = list(log_dir.glob("static_data_*.zip"))
+        matches = list(log_dir.glob(f"static_data_{map_name}.zip"))
         # Optionally, ensure they’re actual files
         if any(p.is_file() for p in matches):
             # Load the collected static data from the json file
             print(f"Static data was already calculated. Load data from file: '{matches[0]}'")
             self._blocks = self.load_data_blocks(matches[0])
         else:
-            logfile_name = log_file_path
             self._blocks = self.get_data_blocks()
-            file_name = os.path.basename(log_file_path).split(".")[0]
-            folder = JSONHelper.get_file_path_folder(file_name)
-            save_file_name = os.path.join(folder, f"{JSONHelper.STATIC_FILE_NAME_PREFIX}_{file_name}.json")
+            save_file_name = os.path.join(log_file_path, f"{JSONHelper.STATIC_FILE_NAME_PREFIX}_{map_name}.json")
             self.save_data_blocks(file_path=save_file_name)
             JSONHelper.zip_and_delete_file(save_file_name)
 
