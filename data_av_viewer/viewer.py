@@ -40,8 +40,8 @@ LAYER_OPTIONS = [{"label": n.replace("_", " ").title(), "value": n}
                  for n in LAYER_REGISTRY]
 DEFAULT_LAYERS = ["lanes"]
 HOVER_DEFAULT = ["lanes"]
-SIZE_LAYERS  = [name for name, cls in LAYER_REGISTRY.items()
-                if getattr(cls, "slider_key", None)]
+SIZE_LAYERS = [name for name, cls in LAYER_REGISTRY.items()
+               if getattr(cls, "slider_key", None)]
 DEFAULT_SIZES = {name: cls.default_size for name, cls in LAYER_REGISTRY.items()
                  if getattr(cls, "default_size", None)}
 
@@ -118,6 +118,13 @@ def build_fig(json_data, visible_layers):
     store = ViewerStore.from_json(json_data)
     traces, layer_map = build_all_traces(store, visible_layers, DEFAULT_SIZES)
     fig = go.Figure(data=traces)
+    fig.update_layout(
+        hovermode="closest",
+        uirevision="keep",
+        legend=dict(itemsizing="constant"),
+        xaxis=dict(scaleanchor="y", scaleratio=1, showgrid=False),
+        yaxis=dict(showgrid=False)
+    )
     tmpl = {i: t.hovertemplate for i, t in enumerate(fig.data)}
     return fig, layer_map, tmpl
 
@@ -151,8 +158,8 @@ def patch_sizes(values, ids, layer_map):
         lname = item["layer"]
         for idx in layer_map.get(lname, []):
             # safe to set both: Plotly ignores irrelevant props
-            patch["data"][idx]["marker"]["size"] = val     # point layers
-            patch["data"][idx]["line"]["width"]  = val     # line layers (lanes, roads)
+            patch["data"][idx]["marker"]["size"] = val  # point layers
+            patch["data"][idx]["line"]["width"] = val  # line layers (lanes, roads)
     return patch
 
 
