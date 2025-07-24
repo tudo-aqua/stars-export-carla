@@ -1,9 +1,7 @@
 import sys
-import os
 import threading
 import subprocess
 import shutil
-import signal
 from datetime import datetime
 from pathlib import Path
 import tkinter as tk
@@ -117,6 +115,7 @@ class ManualControlApp:
         self.config.carla_executable = self.exe_var.get().strip()
         self.config.input_path = self.input_var.get().strip()
         self.config.output_path = self.output_var.get().strip()
+        self.config.new_file_name = self.filename_var.get().strip()
         save_config_to_disk(self.config)
 
     def clear_log(self):
