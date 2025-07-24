@@ -9,3 +9,4 @@ plotly~=6.2.0
 dash~=3.1.1
 dash-extensions==1.0.20
 tzdata~=2025.2
+pandas~=2.3.1
