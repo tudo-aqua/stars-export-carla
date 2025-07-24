@@ -119,6 +119,7 @@ def build_fig(json_data, visible_layers):
     traces, layer_map = build_all_traces(store, visible_layers, DEFAULT_SIZES)
     fig = go.Figure(data=traces)
     fig.update_layout(
+        dragmode="pan",
         hovermode="closest",
         uirevision="keep",
         legend=dict(itemsizing="constant"),
