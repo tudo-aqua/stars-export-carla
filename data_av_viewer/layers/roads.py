@@ -1,32 +1,57 @@
-# layers/roads.py
 import numpy as np
 import plotly.graph_objects as go
+
 from .base_layer import register, BaseLayer
-from .utils import color_for_road, rgba
+from shapely.geometry import LineString
+
+from .utils import rgba, color_for_road
 
 
 @register("roads")
 class RoadLayer(BaseLayer):
-    """Uses the lanes DataFrame already built by LaneLayer."""
+    """
+    For every lane centre‑line, create a polygon corridor with width = lane_width,
+    then draw it with fill="toself". Hover works on the filled area.
+    Uses the lane DataFrame prepared by LaneLayer (df_key='lanes').
+    """
     df_key = "lanes"
 
     def traces(self):
         df = self.get_df(self.df_key)
-        if df.empty: return []
+        if df.empty:
+            return []
+
         max_abs_lane = df.lane_id.abs().max() or 1
         traces = []
         for _, row in df.iterrows():
-            base = color_for_road(row.road_id)
+            base_color = color_for_road(row.road_id)
             opacity = max(0.15, 1 - abs(row.lane_id) / max_abs_lane)
-            color = rgba(base, opacity)
-            poly = np.asarray(row.poly)
-            xs, ys = poly[:, 0], poly[:, 1]
-            traces.append(go.Scattergl(
-                x=xs, y=ys, mode="lines",
-                name=f"Road {row.road_id} lane {row.lane_id}",
-                line=dict(width=2, color=color), hovertemplate=(f"Road: {row.road_id} Lane: {row.lane_id}<br>"
-                                                                "x:%{x:.2f} y:%{y:.2f}<extra></extra>"),
-                hoverlabel=dict(bgcolor=color),
-                showlegend=False
-            ))
+            fill_color = rgba(base_color, opacity)
+
+            poly = np.asarray(row.poly)  # (N,2) array
+            line = LineString(poly)
+            radius = row.width / 2.0
+            corridor = line.buffer(radius, cap_style=2, join_style=2)
+            xs, ys = map(np.asarray, corridor.exterior.xy)
+
+            traces.append(
+                go.Scatter(
+                    x=xs,
+                    y=ys,
+                    mode="lines",
+                    name=f"Road: {row.road_id} Lane: {row.lane_id}",
+                    text=f"Road: {row.road_id}<br>"
+                         f"Lane: {row.lane_id}<br>"
+                         "───────────────<br>"
+                         f"Type: {row.lane_type}<br>"
+                         f"Width: {row.width:.2f} m<br>"
+                         f"Length: {row.length:.2f} m<br>",
+                    line=dict(width=1.5, color=base_color),
+                    fill="toself",
+                    fillcolor=fill_color,
+                    hoveron="fills",
+                    hoverlabel=dict(bgcolor=base_color,namelength=0),
+                )
+            )
+
         return traces
