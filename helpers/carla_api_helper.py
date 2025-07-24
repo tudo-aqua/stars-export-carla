@@ -24,7 +24,7 @@ class CarlaAPIHelper:
         self._rasterizer = rasterizer
 
     @staticmethod
-    def save_dynamic_data(ticks: [TickData], file_path: os.path) -> bool:
+    def save_dynamic_data(ticks: List[TickData], file_path: os.path) -> bool:
         """
         Saves the ticks created for the current map to disk.
         """
@@ -101,10 +101,10 @@ class CarlaAPIHelper:
             duration = 0.0
         if not camera_id:
             camera_id = 0
-        self.client.replay_file(name=file, time_start=start_time, duration=duration, follow_id=camera_id)
+        self.client.replay_file(name=file, time_start=start_time, duration=duration, follow_id=camera_id, replay_sensors=True)
         self.client.set_replayer_time_factor(time_factor)
         if show_file_info:
-            self.client.show_recorder_file_info(file)
+            self.client.show_recorder_file_info(file, False)
 
     # region Static methods
     ########################################
