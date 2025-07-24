@@ -24,7 +24,7 @@ class LaneLayer(BaseLayer):
                     distance_to_start = np.column_stack([mp.distance_to_start for mp in ln.lane_midpoints])
                     rows.append(dict(poly=poly,
                                      distance_to_start=distance_to_start,
-                                     lane_type=ln.lane_type,
+                                     lane_type=ln.lane_type.name,
                                      road_id=ln.road_id,
                                      lane_id=ln.lane_id,
                                      width=ln.lane_width,
