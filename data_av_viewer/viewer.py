@@ -38,8 +38,8 @@ def load_raw_json(raw):
 # UI constants ---------------------------------------------------------
 LAYER_OPTIONS = [{"label": n.replace("_", " ").title(), "value": n}
                  for n in LAYER_REGISTRY]
-DEFAULT_LAYERS = ["lanes"]
-HOVER_DEFAULT = ["lanes"]
+DEFAULT_LAYERS = ["roads"]
+HOVER_DEFAULT = ["roads"]
 SIZE_LAYERS = [name for name, cls in LAYER_REGISTRY.items()
                if getattr(cls, "slider_key", None)]
 DEFAULT_SIZES = {name: cls.default_size for name, cls in LAYER_REGISTRY.items()
