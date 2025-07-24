@@ -227,7 +227,7 @@ class DataLocation:
         @param location: The location that should be transformed
         @return: The DataLocation based on the given location
         """
-        return DataLocation(x=location.x, y=location.y, z=location.z)
+        return DataLocation(x=location.x, y=-location.y, z=location.z)
 
     @staticmethod
     def from_bounding_box(bounding_box: BoundingBox) -> DataLocation:
