@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from dataclass_wizard import JSONWizard
-from typing import Tuple, List, Optional
+from typing import Tuple, List, Optional, Union
 from carla import Rotation, Vector3D, Actor, Location, Vehicle, Waypoint, TrafficLight, TrafficSign, Walker, \
     WeatherParameters, BoundingBox
 
@@ -17,6 +17,8 @@ class TickData(JSONWizard):
 
     class _(JSONWizard.Meta):
         key_transform_with_dump = 'SNAKE'
+        tag_key = "type"  # look at the “type” field in JSON
+        auto_assign_tags = False  # we supplied the tag values ourselves
 
     current_tick: float
     actor_positions: List[DataActorPosition]
@@ -145,17 +147,6 @@ class DataLaneMidpoint:
     distance_to_start: float
     location: DataLocation
     rotation: DataRotation
-
-
-@dataclass
-class DataActorPosition:
-    """
-    DataClass to wrap the position of actors, including the lane and road id
-    """
-    position_on_lane: float
-    road_id: int
-    lane_id: int
-    actor: DataActor
 
 
 @dataclass
@@ -477,7 +468,7 @@ class DataBoundingBox:
 
 
 @dataclass
-class DataActor:
+class DataActor(JSONWizard):
     """
     DataClass mapper to serialize carla.Actor objects
     """
@@ -489,22 +480,29 @@ class DataActor:
     is_active: bool
     is_dormant: bool
     semantic_tags: List[int]
-    bounding_box: DataBoundingBox
+    bounding_box: DataBoundingBox | None
     location: DataLocation
     rotation: DataRotation
 
-    def __init__(self, actor: Actor):
-        self.attributes = actor.attributes
-        self.id = actor.id
-        self.type = "Actor"
-        self.type_id = actor.type_id
-        self.is_alive = actor.is_alive
-        self.is_active = actor.is_active
-        self.is_dormant = actor.is_dormant
-        self.semantic_tags = actor.semantic_tags
-        self.bounding_box = DataBoundingBox.from_actor(actor)
-        self.location = DataLocation.from_actor(actor)
-        self.rotation = DataRotation.from_actor(actor)
+    @staticmethod
+    def from_actor(actor: Actor) -> DataActor:
+        """
+        Build a *new* DataActor from a carla.Actor.
+        """
+        return DataActor(
+            attributes=dict(actor.attributes),
+            id=actor.id,
+            type="Actor",
+            type_id=actor.type_id,
+            is_alive=actor.is_alive,
+            is_active=actor.is_active,
+            is_dormant=actor.is_dormant,
+            semantic_tags=list(actor.semantic_tags),
+            bounding_box=DataBoundingBox.from_actor(actor)
+            if actor is not None else None,
+            location=DataLocation.from_actor(actor),
+            rotation=DataRotation.from_actor(actor),
+        )
 
 
 @dataclass
@@ -514,31 +512,48 @@ class DataTrafficLight(DataActor):
     This dataclass contains the dynamic data for a TrafficLight
     in the carla simulation
     """
+
+    class _(JSONWizard.Meta):
+        tag = "TrafficLight"
+
     state: int  # TODO convert to enum
     related_open_drive_id: int
 
-    def __init__(self, actor: Actor, static_traffic_light: DataStaticTrafficLight):
-        self.related_open_drive_id = static_traffic_light.open_drive_id
+    @staticmethod
+    def from_traffic_light(
+            actor: Optional[TrafficLight],
+            static_tl: DataStaticTrafficLight,
+    ) -> DataTrafficLight:
+        """
+        Build a *new* DataTrafficLight from a live TrafficLight actor
+        and its static counterpart.
+        """
         if actor is None:
-            self.id = -1
-            self.type = "TrafficLight"
-            self.type_id = "traffic.traffic_light"
-            self.state = 4
-            self.location = DataLocation(-1, -1, -1)
-            self.rotation = DataRotation(-1, -1, -1)
-            self.attributes = dict()
-            self.is_alive = False
-            self.is_active = False
-            self.is_dormant = False
-            self.semantic_tags = []
-            self.bounding_box = None
-        else:
-            super().__init__(actor)
-            self.type = "TrafficLight"
-            # Check if the given actor is actually a TrafficLight
-            if type(actor) is TrafficLight:
-                actor: TrafficLight
-                self.state = actor.state
+            # synthetic “off‑world” traffic light
+            return DataTrafficLight(
+                attributes={},
+                id=-1,
+                type="TrafficLight",
+                type_id="traffic.traffic_light",
+                is_alive=False,
+                is_active=False,
+                is_dormant=False,
+                semantic_tags=[],
+                bounding_box=None,
+                location=DataLocation(-1, -1, -1),
+                rotation=DataRotation(-1, -1, -1),
+                state=4,  # unknown
+                related_open_drive_id=static_tl.open_drive_id,
+            )
+
+        # live traffic‑light → base fields
+        base = DataActor.from_actor(actor).__dict__.copy()
+        base["type"] = "TrafficLight"
+        return DataTrafficLight(
+            **base,
+            state                 = int(actor.state),
+            related_open_drive_id = static_tl.open_drive_id,
+        )
 
 
 @dataclass
@@ -547,10 +562,17 @@ class DataPedestrian(DataActor):
     DataClass mapper to serialize carla.Pedestrian objects
     """
 
-    def __init__(self, actor: Walker):
-        super().__init__(actor)
-        self.type = "Pedestrian"
-        self.type_id = actor.type_id
+    class _(JSONWizard.Meta):
+        tag = "Pedestrian"
+
+    @staticmethod
+    def from_walker(actor: Walker) -> DataPedestrian:
+        base = DataActor.from_actor(actor).__dict__.copy()
+        base["type"] = "Pedestrian"
+        return DataPedestrian(
+            **base,
+            type_id = actor.type_id,
+        )
 
     type_id: str
 
@@ -560,32 +582,39 @@ class DataTrafficSign(DataActor):
     """
     DataClass mapper to serialize carla.TrafficSign objects
     """
+
+    class _(JSONWizard.Meta):
+        tag = "TrafficSign"
+
     traffic_sign_type: DataTrafficSignType
     speed_limit: Optional[float] = None
 
-    def __init__(self, actor: Actor):
-        super().__init__(actor)
-        self.type = "TrafficSign"
-        # Check if the given Actor is actually a TrafficSign
-        if type(actor) is TrafficSign:
-            actor: TrafficSign
-            types = actor.type_id.split('.')
-            # Get the type of the TrafficSign based of the type_id
-            if types[1] == "speed_limit":
-                self.traffic_sign_type = DataTrafficSignType(DataTrafficSignType.MAX_SPEED.value)
-                self.speed_limit = float(types[2])
-            elif types[1] == "stop":
-                self.traffic_sign_type = DataTrafficSignType(DataTrafficSignType.STOP.value)
-            elif types[1] == "unknown":
-                self.traffic_sign_type = DataTrafficSignType(DataTrafficSignType.UNKNOWN.value)
-            elif types[1] == "yield":
-                self.traffic_sign_type = DataTrafficSignType(DataTrafficSignType.YIELD.value)
-            else:
-                # There might be more TrafficSign in the future
-                # I could not find a complete list of possible type_ids
-                # in the carla documentation
-                # TODO
-                NotImplemented
+    @staticmethod
+    def from_traffic_sign(actor: TrafficSign) -> DataTrafficSign:
+        base = DataActor.from_actor(actor)
+
+        sign_type = DataTrafficSignType.UNKNOWN
+        speed = None
+
+        # parse the CARLA type_id, e.g. "traffic.speed_limit.30"
+        parts = actor.type_id.split('.')
+        if len(parts) >= 2:
+            match parts[1]:
+                case "speed_limit":
+                    sign_type = DataTrafficSignType.MAX_SPEED
+                    if len(parts) == 3:
+                        speed = float(parts[2])
+                case "stop":
+                    sign_type = DataTrafficSignType.STOP
+                case "yield":
+                    sign_type = DataTrafficSignType.YIELD
+        base = DataActor.from_actor(actor).__dict__.copy()
+        base["type"] = "TrafficSign"          # overwrite – no duplicate any more
+        return DataTrafficSign(
+            **base,                           # ← now contains the final "type"
+            traffic_sign_type = sign_type,
+            speed_limit       = speed,
+        )
 
 
 @dataclass
@@ -593,24 +622,30 @@ class DataVehicle(DataActor):
     """
     DataClass mapper to serialize carla.Vehicle objects
     """
+
+    class _(JSONWizard.Meta):
+        tag = "Vehicle"
+
     ego_vehicle: bool
-    location: DataLocation
-    rotation: DataRotation
     velocity: DataVector3D
     acceleration: DataVector3D
     forward_vector: DataVector3D
     angular_velocity: DataVector3D
 
-    def __init__(self, actor: Vehicle, ego_vehicle: bool = False):
-        super().__init__(actor)
-        self.type = "Vehicle"
-        self.ego_vehicle = ego_vehicle
-        self.location = DataLocation.from_actor(actor)
-        self.rotation = DataRotation.from_actor(actor)
-        self.velocity = DataVector3D.from_vector3d(actor.get_velocity())
-        self.acceleration = DataVector3D.from_vector3d(actor.get_acceleration())
-        self.angular_velocity = DataVector3D.from_vector3d(actor.get_angular_velocity())
-        self.forward_vector = DataVector3D.from_vector3d(actor.get_transform().get_forward_vector())
+    @staticmethod
+    def from_vehicle(actor: Vehicle, ego_vehicle: bool = False) -> DataVehicle:
+        base = DataActor.from_actor(actor).__dict__.copy()
+        base["type"] = "Vehicle"
+        return DataVehicle(
+            **base,
+            ego_vehicle      = ego_vehicle,
+            velocity         = DataVector3D.from_vector3d(actor.get_velocity()),
+            acceleration     = DataVector3D.from_vector3d(actor.get_acceleration()),
+            angular_velocity = DataVector3D.from_vector3d(actor.get_angular_velocity()),
+            forward_vector   = DataVector3D.from_vector3d(
+                actor.get_transform().get_forward_vector()
+            ),
+        )
 
 
 @dataclass
@@ -620,3 +655,23 @@ class DataContactLaneInfo:
     """
     road_id: int
     lane_id: int
+
+
+ActorT = Union[
+    DataTrafficLight,
+    DataVehicle,
+    DataPedestrian,
+    DataTrafficSign,
+    DataActor  # fallback if nothing matches
+]
+
+
+@dataclass
+class DataActorPosition(JSONWizard):
+    """
+    DataClass to wrap the position of actors, including the lane and road id
+    """
+    position_on_lane: float
+    road_id: int
+    lane_id: int
+    actor: ActorT

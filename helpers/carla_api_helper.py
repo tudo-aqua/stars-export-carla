@@ -133,18 +133,18 @@ class CarlaAPIHelper:
         data_actor: Optional[DataActor] = None
         # Check of which type the given actor is and transform it into the correct dataclass
         if type(actor) is Vehicle:
-            data_actor = DataVehicle(actor, ego_vehicle)
+            data_actor = DataVehicle.from_vehicle(actor, ego_vehicle)
         elif type(actor) is TrafficSign:
-            data_actor = DataTrafficSign(actor)
+            data_actor = DataTrafficSign.from_traffic_sign(actor)
         elif type(actor) is TrafficLight:
             data_actor = None
         elif type(actor) is Walker:
-            data_actor = DataPedestrian(actor)
+            data_actor = DataPedestrian.from_walker(actor)
         else:
             if actor.type_id == "spectator":
                 return None
             elif "pedestrian" in actor.type_id:
-                data_actor = DataPedestrian(actor)
+                data_actor = DataPedestrian.from_walker(actor)
             # TODO: If an actor of another type is tracked
         if data_actor:
             data_actor.location = DataLocation.from_location(location=actor.get_location())

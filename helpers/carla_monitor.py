@@ -169,7 +169,7 @@ class CarlaMonitor:
                 for traffic_light in traffic_lights:
                     dynamic_traffic_light = self.world.get_traffic_light_from_opendrive_id(
                         str(traffic_light.open_drive_id))
-                    data_traffic_light = DataTrafficLight(dynamic_traffic_light, traffic_light)
+                    data_traffic_light = DataTrafficLight.from_traffic_light(dynamic_traffic_light, traffic_light)
                     data_actors.append(data_traffic_light)
 
                 for data_actor in data_actors:
