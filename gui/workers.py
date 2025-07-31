@@ -1,25 +1,30 @@
+#!/usr/bin/env python3
+"""
+Background threads for the GUI.
+
+Re-uses restart_carla() / restart_and_connect() from carla_launcher
+and respects new config keys: transformer_output_path & video_output_path
+"""
 from __future__ import annotations
-import shutil, time, threading, subprocess, sys
+import shutil, threading, subprocess, sys, time
 from pathlib import Path
-import carla
-import psutil
+import psutil, carla  # type: ignore
 
 from .config_data import Config
-from .carla_launcher import kill_carla, start_carla
+from .carla_launcher import (
+    kill_carla, start_carla,
+    restart_carla, restart_and_connect
+)
 
 
-# --- shared helper ----------------------------------------------------------
+# ────────────────────────────────────────────────────────────────────────────
 class _ThreadWorker(threading.Thread):
-    """
-    Base class.
-    • override `exclusive = False` if this job may run parallel
-    • call self.cancel() from GUI stop-button
-    """
     exclusive = True
 
     def __init__(self, cfg: Config, log_cb):
         super().__init__(daemon=True)
-        self.cfg, self._log = cfg, log_cb
+        self.cfg = cfg;
+        self._log = log_cb
         self._cancel = threading.Event()
 
     def cancel(self): self._cancel.set()
@@ -27,143 +32,117 @@ class _ThreadWorker(threading.Thread):
     @property
     def cancelled(self): return self._cancel.is_set()
 
-    def log(self, txt): self._log(txt)
+    def log(self, txt: str): self._log(txt)
 
 
-# ---------------------------------------------------------------------------#
-# Stand-alone CARLA server worker                                            #
-# ---------------------------------------------------------------------------#
+# ────────────────────────────────────────────────────────────────────────────
 class CarlaServerWorker(_ThreadWorker):
-    """Launches the UE4 server only; loops until .cancel() is called."""
-
     def run(self):
-        self.log(">> Starting CARLA server …")
-        kill_carla()  # be sure we’re the only one
-        start_carla(self.cfg.carla_executable)
+        restart_carla(self.cfg.carla_executable, log=self.log)
         try:
-            while not self.cancelled:
-                time.sleep(1)
+            while not self.cancelled: time.sleep(1)
         finally:
-            self.log(">> Stopping CARLA server")
-            kill_carla()
+            kill_carla(log=self.log)
 
 
-# ---------------------------------------------------------------------------#
-# Manual-driving workflow (kill → start CARLA → run manual_control.py)       #
-# ---------------------------------------------------------------------------#
+# ────────────────────────────────────────────────────────────────────────────
 class ManualControlWorker(_ThreadWorker):
     def run(self):
-        self.log(">> Killing CARLA …")
-        kill_carla();
-        time.sleep(1)
+        self.log(">> Rebooting CARLA …")
+        restart_carla(self.cfg.carla_executable)
         if self.cancelled: return
 
-        self.log(">> Starting CARLA …")
-        start_carla(self.cfg.carla_executable)
-        time.sleep(20)  # let server boot
-        if self.cancelled: return
-
-        mc_py = Path(self.cfg.carla_executable).parent / "PythonAPI" / "examples" / "manual_control.py"
+        mc_py = (Path(self.cfg.carla_executable).parent /
+                 "PythonAPI" / "examples" / "manual_control.py")
         if not mc_py.exists():
-            self.log(f"!! manual_control.py missing @ {mc_py}")
-            return
+            return self.log(f"!! manual_control.py missing @ {mc_py}")
 
         self.log(">> Launching manual_control.py")
-        self._proc = subprocess.Popen(
-            [sys.executable, str(mc_py)],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, start_new_session=True
-        )
-
-        for line in self._proc.stdout:
-            if self.cancelled: break
-            self.log(line.rstrip())
-
-        self.log(">> manual_control.py exited")
-
-    def cancel(self):
-        super().cancel()
+        proc = subprocess.Popen([sys.executable, str(mc_py)],
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, start_new_session=True)
         try:
-            psutil.Process(self._proc.pid).kill()
-        except Exception:
-            pass
-        kill_carla()
+            for line in proc.stdout:
+                if self.cancelled: break
+                self.log(line.rstrip())
+        finally:
+            try:
+                psutil.Process(proc.pid).kill()
+            except Exception:
+                pass
+            kill_carla(log=self.log)
+            self.log(">> manual_control.py exited")
 
 
-# ---------------------------------------------------------------------------#
-# “Move latest .rec” quick utility (former *Transform & Move Latest*)        #
-# ---------------------------------------------------------------------------#
+# ────────────────────────────────────────────────────────────────────────────
 class MoveLatestRecWorker(_ThreadWorker):
     exclusive = False
-    def __init__(self, cfg, new_file_name, log_cb):
+
+    def __init__(self, cfg: Config, new_file_name: str, log_cb):
         super().__init__(cfg, log_cb)
         self._dst_name = new_file_name
 
     def run(self):
-        recs = list(Path(self.cfg.input_path).glob("*.rec"))
-        if not recs: return self.log("!! No .rec files found.")
-        src = max(recs, key=lambda p: p.stat().st_mtime)
-        ts = time.strftime("%Y_%m_%d_%H_%M")
-        dst = Path(self.cfg.output_path) / f"{self._dst_name}_{ts}.rec"
-        self.log(f">> Moving {src.name} → {dst.name}")
+        ext = self.cfg.recording_extension
+        src = Path(self.cfg.manual_output_dir) / f"manual_recording{ext}"
+        if not src.exists():
+            return self.log(f"!! '{src.name}' not found in {src.parent}")
+
+        ts = time.strftime("%Y_%m_%d-%H_%M_%S")
+        dst_dir = Path(self.cfg.default_recordings_folder) or src.parent
+        dst = dst_dir / f"{self._dst_name}_{ts}{ext}"
+
+        self.log(f">> Moving {src.name} → {dst}")
         try:
-            shutil.move(src, dst);
+            dst_dir.mkdir(parents=True, exist_ok=True)
+            shutil.move(src, dst)
             self.log(">> Move successful.")
         except Exception as e:
             self.log(f"!! {e}")
 
 
-# ---------------------------------------------------------------------------#
-# Full recording transformation (uses helpers.CarlaMonitor exactly as before)#
-# ---------------------------------------------------------------------------#
+# ────────────────────────────────────────────────────────────────────────────
 class TransformWorker(_ThreadWorker):
     def run(self):
         import traceback
         try:
-            from helpers.carla_monitor import CarlaMonitor
-            self.log(">> Booting CARLA …");
-            kill_carla();
-            time.sleep(2)
-            start_carla(self.cfg.carla_executable);
-            time.sleep(20)
+            from helpers.carla_monitor import CarlaMonitor  # type: ignore
+            self.log(">> Rebooting CARLA & connecting …")
+            client = restart_and_connect(self.cfg.carla_executable, log=self.log)
             if self.cancelled: return
 
-            self.log(">> Connecting to CARLA")
-            client = carla.Client("localhost", 2000);
-            client.set_timeout(60)
             monitor = CarlaMonitor(carla_client=client)
-
-            self.log(f">> Transforming {self.cfg.input_path}")
+            self.log(f">> Transforming {self.cfg.transform_input_file}")
             monitor.monitor_simulation_run(
-                file_path=self.cfg.input_path,
+                file_path=self.cfg.transform_input_file,
                 weather_file_path="",
-                result_file_path=self.cfg.output_path
+                result_file_path=self.cfg.transformer_output_path
             )
         except Exception:
             self.log(traceback.format_exc())
         finally:
-            kill_carla();
+            kill_carla(log=self.log)
             self.log(">> Done.")
 
+    def cancel(self):
+        super().cancel(); kill_carla(log=self.log)
 
-# ---------------------------------------------------------------------------#
-# Video recorder (wraps both original recorder classes)                      #
-# ---------------------------------------------------------------------------#
+
+# ────────────────────────────────────────────────────────────────────────────
 class RecordVideoWorker(_ThreadWorker):
     def run(self):
-        from helpers.carla_camera_recorder import CarlaCameraRecorder as RawRec
-        from helpers.carla_camera_recorder_with_bboxes import CarlaCameraRecorder as BoxRec
-
+        from helpers.carla_camera_recorder import CarlaCameraRecorder as RawRec  # type: ignore
+        from helpers.carla_camera_recorder_with_bboxes import CarlaCameraRecorder as BoxRec  # type: ignore
         RecCls = BoxRec if self.cfg.with_bboxes else RawRec
 
-        self.log(">> Spawning CARLA client")
-        client = carla.Client('localhost', 2000);
-        client.set_timeout(60)
-        rec = RecCls(client)
+        self.log(">> Rebooting CARLA & connecting …")
+        client = restart_and_connect(self.cfg.carla_executable, log=self.log)
+        if self.cancelled: return
 
+        rec = RecCls(client)
         args = dict(
-            recording_folder=self.cfg.output_path or ".",
-            path=self.cfg.input_path,
+            recording_folder=self.cfg.video_output_path or ".",
+            path=self.cfg.video_input_file,
             vehicle_id=self.cfg.vehicle_id,
             width=self.cfg.video_width,
             height=self.cfg.video_height,
@@ -172,8 +151,12 @@ class RecordVideoWorker(_ThreadWorker):
         )
         self.log(f">> Recording video (bboxes={self.cfg.with_bboxes}) …")
         rec.record_camera_in_simulation_run(**args)
+
         self.log(">> Encoding mp4 …")
-        filename_wo_ext = Path(self.cfg.input_path).stem
-        rec.save_video(self.cfg.output_path, filename_wo_ext,
-                       self.cfg.vehicle_id, self.cfg.begin_at, rec.END_AT)
+        stem = Path(self.cfg.video_input_file).stem
+        rec.save_video(self.cfg.video_output_path, stem,
+                       self.cfg.vehicle_id, self.cfg.begin_at, rec.END_AT, self.cfg.with_bboxes)
         self.log(">> Finished video export")
+        kill_carla(log=self.log)
+
+    def cancel(self): super().cancel(); kill_carla(log=self.log)
