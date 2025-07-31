@@ -101,7 +101,7 @@ class CarlaCameraRecorder:
 
         # Initialize necessary helper classes
         rasterizer = MapRasterizer(world)
-        api_helper = CarlaAPIHelper(client, world, rasterizer)
+        api_helper = CarlaAPIHelper(self.client, world, rasterizer)
 
         print("Start with simulation replay")
 
@@ -215,7 +215,7 @@ class CarlaCameraRecorder:
             # while CarlaCameraRecorder.COUNTER < tick:
             #     x = ""
 
-        client.reload_world()
+        self.client.reload_world()
 
         if filename.endswith(".zip"):
             JSONHelper.delete_file(log_data_path)
