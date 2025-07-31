@@ -102,7 +102,7 @@ class CarlaCameraRecorder:
 
         # Get the ego vehicle from the given vehicle id
         if vehicle_id == -1:
-            ego_vehicle: Vehicle = list(filter(lambda v: 'ego' in v.attributes['role_name'], vehicles))[0]
+            ego_vehicle: Vehicle = list(filter(lambda v: 'hero' in v.attributes['role_name'], vehicles))[0]
         else:
             ego_vehicle: Vehicle = list(filter(lambda v: v.id == vehicle_id, vehicles))[0]
 
