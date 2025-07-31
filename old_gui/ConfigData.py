@@ -1,4 +1,4 @@
-# gui/ConfigData.py
+# old_gui/ConfigData.py
 # !/usr/bin/env python3
 import json
 from pathlib import Path
