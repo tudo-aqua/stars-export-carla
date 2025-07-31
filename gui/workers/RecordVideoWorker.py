@@ -8,7 +8,14 @@ from helpers.carla_camera_recorder_with_bboxes import CarlaCameraRecorder as Box
 
 
 class RecordVideoWorker(ThreadWorker):
+    """
+    Handles video recording tasks using CARLA simulation and exports the video.
+    """
     def run(self):
+        """
+        Executes the video recording process with optional bounding box annotations, connects to the CARLA simulator, and
+        handles the exporting of the final encoded video.
+        """
         RecCls = BoxRec if self.cfg.with_bboxes else RawRec
 
         self.log(">> Rebooting CARLA & connecting …")
@@ -37,5 +44,8 @@ class RecordVideoWorker(ThreadWorker):
         kill_carla(log=self.log)
 
     def cancel(self):
+        """
+        Cancels the operation or process and ensures the appropriate shutdown logic for Carla software.
+        """
         super().cancel()
         kill_carla(log=self.log)

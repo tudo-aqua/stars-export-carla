@@ -7,6 +7,9 @@ from gui.workers.ThreadWorker import ThreadWorker
 
 
 class MoveLatestRecordingWorker(ThreadWorker):
+    """
+    Worker class for moving the latest recording file with a specific naming format.
+    """
     exclusive = False
 
     def __init__(self, cfg: Config, new_file_name: str, log_cb):
@@ -14,6 +17,9 @@ class MoveLatestRecordingWorker(ThreadWorker):
         self._dst_name = new_file_name
 
     def run(self):
+        """
+        Moves a manually recorded file to a specified destination directory with a timestamped name.
+        """
         ext = self.cfg.recording_extension
         src = Path(self.cfg.manual_output_dir) / f"manual_recording{ext}"
         if not src.exists():

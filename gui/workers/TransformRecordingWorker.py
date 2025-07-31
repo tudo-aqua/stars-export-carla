@@ -4,7 +4,15 @@ import traceback
 
 
 class TransformRecordingWorker(ThreadWorker):
+    """
+    Handles transformation of recording data in CARLA simulation.
+    """
+
     def run(self):
+        """
+        Executes the main process involving connecting to CARLA Simulator, monitoring its
+        simulation run, and handling transformation tasks.
+        """
         try:
             from helpers.carla_monitor import CarlaMonitor  # type: ignore
             self.log(">> Rebooting CARLA & connecting …")
@@ -25,5 +33,9 @@ class TransformRecordingWorker(ThreadWorker):
             self.log(">> Done.")
 
     def cancel(self):
+        """
+        Cancels the current operation and terminates the Carla simulation environment
+        associated with it.
+        """
         super().cancel();
         kill_carla(log=self.log)

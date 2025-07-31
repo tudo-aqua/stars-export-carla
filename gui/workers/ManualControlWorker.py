@@ -9,7 +9,14 @@ from gui.workers.ThreadWorker import ThreadWorker
 
 
 class ManualControlWorker(ThreadWorker):
+    """
+    Represents a worker responsible for manually driving in the CARLA simulator.
+    """
+
     def run(self):
+        """
+        Runs the process to reboot the CARLA simulator and launch the `manual_control.py` script.
+        """
         self.log(">> Rebooting CARLA …")
         restart_carla(self.cfg.carla_executable)
         if self.cancelled:
