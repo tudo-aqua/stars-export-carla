@@ -1,23 +1,22 @@
-#!/usr/bin/env python3
-"""
-CARLA process helpers
-
-• kill_carla()           – terminate every UE4 process
-• start_carla(exe)       – launch head-less CARLA
-• restart_carla(exe, …)  – kill → wait → start → wait  (with logging)
-• restart_and_connect()  – above + return carla.Client
-"""
 from __future__ import annotations
 import os, sys, subprocess, time
 import psutil
+import carla
 from typing import Callable, Any
 
 
-# ────────────────────────────────────────────────────────────────────
-# basic helpers
-# ────────────────────────────────────────────────────────────────────
 def kill_carla(log: Callable[[str], None] | None = None) -> None:
-    """Kill every running CARLA UE4 process (cross-platform)."""
+    """
+    Terminate every running Unreal-Engine (CARLA) process on the host.
+
+    Parameters
+    ----------
+    log : Callable[[str], None], optional
+        Logging callback that will receive status messages
+        (defaults to `print`).  The callback is invoked **before**
+        each process is killed, so you always know which binary
+        was terminated (e.g. ``CarlaUE4-Win64-Shipping.exe``).
+    """
     _log = log or print
     for proc in psutil.process_iter(["name"]):
         if proc.info["name"] in (
@@ -32,7 +31,14 @@ def kill_carla(log: Callable[[str], None] | None = None) -> None:
 
 
 def start_carla(exe: str) -> None:
-    """Launch CARLA head-less in its own process group."""
+    """
+    Launch a head-less CARLA server in its **own** process group.
+
+    Parameters
+    ----------
+    exe : str
+        Path to the ``CarlaUE4`` executable or launcher script.
+    """
     cmd = [exe, "-RenderOffScreen"]
     kwargs: dict[str, Any]
     if sys.platform.startswith("win"):
@@ -42,9 +48,6 @@ def start_carla(exe: str) -> None:
     subprocess.Popen(cmd, **kwargs)
 
 
-# ────────────────────────────────────────────────────────────────────
-# reusable routines for workers, now with logging
-# ────────────────────────────────────────────────────────────────────
 def restart_carla(
         exe: str,
         *,
@@ -53,19 +56,22 @@ def restart_carla(
         log: Callable[[str], None] | None = None
 ) -> None:
     """
-    Kill any existing CARLA, wait *cooldown* seconds,
-    start a fresh one, wait *boot* seconds until it’s ready.
+    Hard-restart the CARLA server and wait until it is ready.
+
+    The routine is a convenience wrapper around `kill_carla` ->
+    *cool-down* -> `start_carla` -> *boot-wait*.
 
     Parameters
     ----------
     exe : str
-        Path to CarlaUE4 executable.
-    cooldown : float
-        Seconds to wait after killing before re-starting.
-    boot : float
-        Seconds to wait after launch so the server is fully ready.
-    log : callable, optional
-        Function that consumes a text message (default: built-in `print`).
+        Fully qualified path to the CARLA executable.
+    cooldown : float, default 5
+        Seconds to wait *after* killing existing instances but *before*
+        spawning a new one.  Gives the OS time to release sockets/handles.
+    boot : float, default 20
+        Seconds to wait *after* launching CARLA so UE4 can finish loading maps.
+    log : Callable[[str], None], optional
+        Logging callback (defaults to `print`).
     """
     _log = log or print
 
@@ -88,7 +94,6 @@ def restart_carla(
 
 def restart_and_connect(
         exe: str,
-        *,
         host: str = "localhost",
         port: int = 2000,
         timeout: float = 60,
@@ -97,13 +102,32 @@ def restart_and_connect(
         log: Callable[[str], None] | None = None
 ):
     """
-    Convenience wrapper: restart CARLA (see above), then create and
-    return a connected `carla.Client`.
+    Restart CARLA and return an active `carla.Client`.
+
+    Parameters
+    ----------
+    exe : str
+        Location of the CARLA executable passed through to
+        `restart_carla`.
+    host : str default ``"localhost"``
+        Connection endpoint for the CARLA RPC server.
+    port: int, default ``2000``
+        Connection endpoint port for the CARLA RPC server.
+    timeout : float, default 60
+        Seconds before a socket operation on the client aborts.
+    cooldown, boot : float
+        Forwarded verbatim to `restart_carla`.
+    log : Callable[[str], None], optional
+        Logger callback (defaults to `print`).
+
+    Returns
+    -------
+    carla.Client
+        A connected client of Carla ready for world interaction.
     """
     _log = log or print
     restart_carla(exe, cooldown=cooldown, boot=boot, log=_log)
 
-    import carla  # late import – only if we actually need to connect
     _log(">> [CARLA] Connecting to server …")
     client = carla.Client(host, port)
     client.set_timeout(timeout)
