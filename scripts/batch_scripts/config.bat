@@ -1,1 +1,0 @@
-set CARLA_HOME=D:\github\CARLA_0.9.15\CarlaUE4.exe
