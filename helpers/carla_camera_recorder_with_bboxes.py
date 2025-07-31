@@ -66,7 +66,8 @@ class CarlaCameraRecorder:
         image_save_folder = CarlaCameraRecorder.get_image_save_folder(recording_folder=recording_folder,
                                                                       filename_without_extension=filename_without_extension,
                                                                       vehicle_id=vehicle_id, begin_at=begin_at,
-                                                                      end_at=CarlaCameraRecorder.END_AT)
+                                                                      end_at=CarlaCameraRecorder.END_AT,
+                                                                      bounding_boxes=True)
         if os.path.exists(image_save_folder):
             print(f"The files were already recorded at {image_save_folder}")
             return
@@ -138,10 +139,10 @@ class CarlaCameraRecorder:
                                     attachment_type=carla.AttachmentType.Rigid)
 
         ego_cam.listen(lambda t: CarlaCameraRecorder.tmp(image=t, image_queue=image_queue,
-                                     recording_folder=recording_folder,
-                                     filename_without_extension=filename_without_extension,
-                                     vehicle_id=vehicle_id, begin_at=begin_at,
-                                     end_at=end_at, recording_frequency=recording_frequency))
+                                                         recording_folder=recording_folder,
+                                                         filename_without_extension=filename_without_extension,
+                                                         vehicle_id=vehicle_id, begin_at=begin_at,
+                                                         end_at=end_at, recording_frequency=recording_frequency))
 
         spectator = world.get_spectator()
 
@@ -169,13 +170,14 @@ class CarlaCameraRecorder:
 
                 if forward_vec.dot(ray) > 0:
                     verts = [v for v in bb.get_world_vertices(npc.get_transform())]
-                    edges = [[0,1], [1,3], [3,2], [2,0], [0,4], [4,5], [5,1], [5,7], [7,6], [6,4], [6,2], [7,3]]
+                    edges = [[0, 1], [1, 3], [3, 2], [2, 0], [0, 4], [4, 5], [5, 1], [5, 7], [7, 6], [6, 4], [6, 2],
+                             [7, 3]]
                     for edge in edges:
                         K = CarlaCameraRecorder.build_projection_matrix(width, height, 105)
                         K_b = CarlaCameraRecorder.build_projection_matrix(width, height, 105, is_behind_camera=True)
 
                         p1 = CarlaCameraRecorder.get_image_point(verts[edge[0]], K, world_2_camera)
-                        p2 = CarlaCameraRecorder.get_image_point(verts[edge[1]],  K, world_2_camera)
+                        p2 = CarlaCameraRecorder.get_image_point(verts[edge[1]], K, world_2_camera)
 
                         p1_in_canvas = CarlaCameraRecorder.point_in_canvas(p1, height, width)
                         p2_in_canvas = CarlaCameraRecorder.point_in_canvas(p2, height, width)
@@ -193,12 +195,12 @@ class CarlaCameraRecorder:
                         if not (cam_forward_vec.dot(ray1) > 0):
                             p2 = CarlaCameraRecorder.get_image_point(verts[edge[1]], K_b, world_2_camera)
 
-                        cv2.line(img, (int(p1[0]),int(p1[1])), (int(p2[0]),int(p2[1])), (255,0,0, 255), 1)
+                        cv2.line(img, (int(p1[0]), int(p1[1])), (int(p2[0]), int(p2[1])), (255, 0, 0, 255), 1)
 
-            cv2.imshow('ImageWindowName',img)
+            cv2.imshow('ImageWindowName', img)
 
             image_name = "%.6d.jpg" % CarlaCameraRecorder.COUNTER
-            cv2.imwrite(os.path.join(image_save_folder, image_name),img)
+            cv2.imwrite(os.path.join(image_save_folder, image_name), img)
 
             CarlaCameraRecorder.COUNTER += 1
 
@@ -279,16 +281,16 @@ class CarlaCameraRecorder:
             return True
         return False
 
-
     @staticmethod
-    def get_video_prefix(filename_without_extension: str, vehicle_id: int, begin_at: float, end_at: float) -> os.path:
-        return f"{filename_without_extension}-vehicle_{vehicle_id}_range[{begin_at}, {end_at}]"
+    def get_video_prefix(filename_without_extension: str, vehicle_id: int, begin_at: float, end_at: float,
+                         bounding_boxes: bool = False) -> os.path:
+        return f"{filename_without_extension}-vehicle_{vehicle_id}_range[{begin_at}, {end_at}]{'_bounding_boxes' if bounding_boxes else ''}"
 
     @staticmethod
     def get_image_save_folder(recording_folder: str, filename_without_extension: str, vehicle_id: int, begin_at: float,
-                              end_at: float) -> os.path:
+                              end_at: float, bounding_boxes: bool = False) -> os.path:
         folder_path = CarlaCameraRecorder.get_video_prefix(filename_without_extension, vehicle_id, begin_at=begin_at,
-                                                           end_at=end_at)
+                                                           end_at=end_at, bounding_boxes=bounding_boxes)
         return os.path.join(recording_folder, JSONHelper.VIDEO_IMAGE_FOLDER, folder_path)
 
     @staticmethod
@@ -313,16 +315,16 @@ class CarlaCameraRecorder:
 
     @staticmethod
     def save_video(recording_folder: str, filename_without_extension: str, vehicle_id: int, begin_at: float,
-                   end_at: float):
+                   end_at: float, bounding_boxes: bool = False):
         image_folder = CarlaCameraRecorder.get_image_save_folder(recording_folder, filename_without_extension,
                                                                  vehicle_id,
-                                                                 begin_at=begin_at, end_at=end_at)
+                                                                 begin_at=begin_at, end_at=end_at, bounding_boxes=bounding_boxes)
 
         video_folder = CarlaCameraRecorder.get_video_save_folder(recording_folder)
         if not os.path.exists(video_folder):
             os.makedirs(video_folder)
 
-        video_name = f"{CarlaCameraRecorder.get_video_prefix(filename_without_extension, vehicle_id, begin_at, end_at)}.mp4"
+        video_name = f"{CarlaCameraRecorder.get_video_prefix(filename_without_extension, vehicle_id, begin_at, end_at, bounding_boxes)}.mp4"
         video_path = os.path.join(video_folder, video_name)
 
         if os.path.exists(video_path):
@@ -433,4 +435,4 @@ if __name__ == '__main__':
         CarlaCameraRecorder.save_video(destination, filename_without_extension=filename_without_extension,
                                        vehicle_id=vehicle_id,
                                        begin_at=begin_at,
-                                       end_at=CarlaCameraRecorder.END_AT)
+                                       end_at=CarlaCameraRecorder.END_AT, bounding_boxes=True)
