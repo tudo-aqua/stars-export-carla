@@ -1,79 +1,86 @@
-#!/usr/bin/env python3
-"""
-Unified CARLA GUI – rev-4
-•  Separate output folders for Transform / Video
-•  Uses new config keys: transformer_output_path, video_output_path
-"""
 from __future__ import annotations
 import sys, tkinter as tk
-from pathlib import Path
 from tkinter import ttk, filedialog, messagebox, scrolledtext
+from typing import List, Callable
 
+from gui.carla_launcher import kill_carla
 from gui.config_data import Config, load, save
-from gui.workers import (
-    ManualControlWorker, MoveLatestRecWorker,
-    TransformWorker, RecordVideoWorker, CarlaServerWorker,
-    kill_carla
-)
+from gui.workers.CarlaServerWorker import CarlaServerWorker
+from gui.workers.ManualControlWorker import ManualControlWorker
+from gui.workers.MoveLatestRecordingWorker import MoveLatestRecordingWorker
+from gui.workers.RecordVideoWorker import RecordVideoWorker
+from gui.workers.ThreadWorker import ThreadWorker
+from gui.workers.TransformRecordingWorker import TransformRecordingWorker
 
 
 class UnifiedCarlaGUI(tk.Tk):
-    # ───────────────────────────────────────────────────────────────────
+    """
+    Represents the main GUI application window for interaction with the CARLA Simulator.
+    """
+
     def __init__(self):
         super().__init__()
-        self.title("CARLA unified GUI")
+        self.title("CARLA interaction GUI")
         self.geometry("950x800")
         self.resizable(True, True)
 
-        # ── load persisted settings ────────────────────────────────────
-        self.cfg: Config = load()
+        self.config: Config = load()
 
-        self.exe_var = tk.StringVar(value=self.cfg.carla_executable)
-        self.ext_var = tk.StringVar(value=self.cfg.recording_extension)
+        self.carla_executable_variable = tk.StringVar(value=self.config.carla_executable)
+        self.recording_extension_variable = tk.StringVar(value=self.config.recording_extension)
 
-        # manual-drive
-        self.man_out_var = tk.StringVar(value=self.cfg.manual_output_dir)
-        self.defrec_var = tk.StringVar(value=self.cfg.default_recordings_folder)
-        self.name_var = tk.StringVar(value=self.cfg.new_file_name)
+        self.manual_output_dir_variable = tk.StringVar(value=self.config.manual_output_dir)
+        self.default_recordings_folder_variable = tk.StringVar(value=self.config.default_recordings_folder)
+        self.new_file_name_variable = tk.StringVar(value=self.config.new_file_name)
 
-        # transform / video I/O
-        self.tr_in_var = tk.StringVar(value=self.cfg.transform_input_file)
-        self.tr_out_var = tk.StringVar(value=self.cfg.transformer_output_path)
-        self.vid_in_var = tk.StringVar(value=self.cfg.video_input_file)
-        self.vid_out_var = tk.StringVar(value=self.cfg.video_output_path)
+        self.transform_input_file_variable = tk.StringVar(value=self.config.transform_input_file)
+        self.transformer_output_path_variable = tk.StringVar(value=self.config.transformer_output_path)
+        self.video_input_path_variable = tk.StringVar(value=self.config.video_input_file)
+        self.video_output_path_variable = tk.StringVar(value=self.config.video_output_path)
 
-        # video opts
-        self.vw_var = tk.IntVar(value=self.cfg.video_width)
-        self.vh_var = tk.IntVar(value=self.cfg.video_height)
-        self.vid_var = tk.IntVar(value=self.cfg.vehicle_id)
-        self.bbox_var = tk.BooleanVar(value=self.cfg.with_bboxes)
-        self.begin_var = tk.DoubleVar(value=self.cfg.begin_at)
-        end_default = -1 if self.cfg.end_at == float("inf") else self.cfg.end_at
-        self.end_var = tk.DoubleVar(value=end_default)
+        self.video_width_variable = tk.IntVar(value=self.config.video_width)
+        self.video_height_variable = tk.IntVar(value=self.config.video_height)
+        self.vehicle_id_variable = tk.IntVar(value=self.config.vehicle_id)
+        self.with_bboxes_variable = tk.BooleanVar(value=self.config.with_bboxes)
+        self.begin_at_variable = tk.DoubleVar(value=self.config.begin_at)
+        end_at_default = -1 if self.config.end_at == float("inf") else self.config.end_at
+        self.end_at_variable = tk.DoubleVar(value=end_at_default)
 
         self._active_worker = None
         self._carla_worker = None
 
-        # ── build notebook ─────────────────────────────────────────────
-        nb = ttk.Notebook(self);
-        nb.pack(fill="both", expand=True)
-        self._tab_server(nb)
-        self._tab_manual(nb)
-        self._tab_transform(nb)
-        self._tab_video(nb)
+        notebook = ttk.Notebook(self)
+        notebook.pack(fill="both", expand=True)
+        self._tab_server(notebook)
+        self._tab_manual(notebook)
+        self._tab_transform(notebook)
+        self._tab_video(notebook)
 
         # log pane
-        self.log = scrolledtext.ScrolledText(self, height=10, state="disabled")
+        self.log = scrolledtext.ScrolledText(self, height=30, state="disabled")
         self.log.pack(fill="both", expand=False, padx=4, pady=4)
 
         self._redirect_console()
         self._setup_autosave()
 
-    # ═══════════════════════════════════════════════════════════════════
-    #                     tab construction helpers
-    # ═══════════════════════════════════════════════════════════════════
-    def _entry_row(self, parent, label, var, browse=None, width=45):
-        row = tk.Frame(parent);
+    def _entry_row(self, parent: tk.Widget, label: str, var: tk.Variable, browse: Callable = None, width: int = 45):
+        """
+        Creates a single row layout comprising a label, entry field, and optionally
+        a browse button within the specified parent widget.
+
+        Parameters:
+        parent : tk.Widget
+            The parent widget in which the entry row will be created.
+        label : str
+            The text to be displayed as the label in the row.
+        var : tk.Variable
+            The tkinter variable associated with the entry widget.
+        browse : Callable, optional
+            A callback function to be executed when the browse button is clicked.
+        width : int
+            The width of the entry field.
+        """
+        row = tk.Frame(parent)
         row.pack(fill="x", pady=2)
         tk.Label(row, text=label, width=26, anchor="w").pack(side="left")
         tk.Entry(row, textvariable=var, width=width) \
@@ -82,89 +89,130 @@ class UnifiedCarlaGUI(tk.Tk):
             tk.Button(row, text="…", command=browse) \
                 .pack(side="left", padx=2)
 
-    # ─ server tab ─
-    def _tab_server(self, nb):
-        f = ttk.Frame(nb);
-        nb.add(f, text="CARLA Server")
-        tk.Label(f, text="Start or stop a head-less CARLA instance.").pack(pady=5)
-        self._entry_row(f, "CARLA executable:", self.exe_var,
-                        lambda: self._filepick(self.exe_var))
-        self.server_btn = tk.Button(f, text="Start CARLA server",
+    def _tab_server(self, notebook: ttk.Notebook):
+        """
+        Creates and manages the CARLA Server tab within a given notebook widget.
+
+        Parameters
+        ----------
+        notebook : ttk.Notebook
+            The notebook widget to which the CARLA Server tab will be added.
+        """
+        frame = ttk.Frame(notebook)
+        notebook.add(frame, text="CARLA Server")
+        tk.Label(frame, text="Start or stop a head-less CARLA instance.").pack(pady=5)
+        self._entry_row(frame, "CARLA executable:", self.carla_executable_variable,
+                        lambda: self._open_file_dialog(self.carla_executable_variable))
+        self.server_btn = tk.Button(frame, text="Start CARLA server",
                                     width=25, command=self._toggle_carla)
         self.server_btn.pack(pady=10)
 
-    # ─ manual-drive tab ─
-    def _tab_manual(self, nb):
-        f = ttk.Frame(nb);
-        nb.add(f, text="Manual Drive")
-        tk.Label(f, text="Kill → start CARLA → run manual_control.py.").pack(pady=5)
+    def _tab_manual(self, notebook: ttk.Notebook):
+        """
+        Initializes and organizes elements in the "Manual Drive" tab. Provides controls and input
+        fields to facilitate interaction with the CARLA Simulator for manual driving operations.
+        It also includes functionality to set paths and trigger starting and stopping of the manual
+        driving process.
 
-        self._entry_row(f, "CARLA executable:", self.exe_var,
-                        lambda: self._filepick(self.exe_var))
-        self._entry_row(f, "Recording extension:", self.ext_var)
-        self._entry_row(f, "CARLA output folder:", self.man_out_var,
-                        lambda: self._dirpick(self.man_out_var))
-        self._entry_row(f, "Archive recordings folder:", self.defrec_var,
-                        lambda: self._dirpick(self.defrec_var))
-        self._entry_row(f, "New file-name prefix:", self.name_var)
+        Parameters
+        ----------
+        notebook : ttk.Notebook
+            The notebook widget to which the "Manual Drive" tab is added. This parameter is used
+            to integrate the frame containing all related elements within the notebook.
+        """
+        frame = ttk.Frame(notebook)
+        notebook.add(frame, text="Manual Drive")
+        tk.Label(frame, text="Kill → start CARLA → run manual_control.py.").pack(pady=5)
 
-        self.start_btn = tk.Button(f, text="Start manual driving",
+        self._entry_row(frame, "CARLA executable:", self.carla_executable_variable,
+                        lambda: self._open_file_dialog(self.carla_executable_variable))
+        self._entry_row(frame, "Recording extension:", self.recording_extension_variable)
+        self._entry_row(frame, "CARLA output folder:", self.manual_output_dir_variable,
+                        lambda: self._open_directory_dialog(self.manual_output_dir_variable))
+        self._entry_row(frame, "Archive recordings folder:", self.default_recordings_folder_variable,
+                        lambda: self._open_directory_dialog(self.default_recordings_folder_variable))
+        self._entry_row(frame, "New file-name prefix:", self.new_file_name_variable)
+
+        self.start_btn = tk.Button(frame, text="Start manual driving",
                                    width=25, command=self._start_manual)
         self.start_btn.pack(pady=8)
 
-        self.move_btn = tk.Button(f, text="Move 'manual_recording'",
+        self.move_btn = tk.Button(frame, text="Move 'manual_recording'",
                                   command=self._move_latest, state="disabled")
         self.move_btn.pack(pady=2)
 
-        self.stop_btn = tk.Button(f, text="Stop",
+        self.stop_btn = tk.Button(frame, text="Stop",
                                   command=self._stop_worker, state="disabled")
         self.stop_btn.pack(pady=8)
 
-    # ─ transform tab ─
-    def _tab_transform(self, nb):
-        f = ttk.Frame(nb);
-        nb.add(f, text="Transform")
-        tk.Label(f, text="Replay a recording and dump processed data.").pack(pady=5)
+    def _tab_transform(self, notebook: ttk.Notebook):
+        """
+        Creates and configures the "Transform" tab in the provided notebook widget. This tab allows
+        users to replay a recording and dump processed data. It provides fields for entering the
+        recording extension, input recording path, and output folder, along with a button to
+        initiate the transformation process.
 
-        self._entry_row(f, "Recording extension:", self.ext_var)
-        self._entry_row(f, "Input recording:", self.tr_in_var,
-                        lambda: self._recfilepick(self.tr_in_var))
-        self._entry_row(f, "Output folder:", self.tr_out_var,
-                        lambda: self._dirpick(self.tr_out_var))
+        Parameters:
+            notebook (ttk.Notebook): The notebook widget to which the "Transform" tab will be added.
+        """
+        frame = ttk.Frame(notebook)
+        notebook.add(frame, text="Transform")
+        tk.Label(frame, text="Replay a recording and dump processed data.").pack(pady=5)
 
-        tk.Button(f, text="Start transform",
+        self._entry_row(frame, "Recording extension:", self.recording_extension_variable)
+        self._entry_row(frame, "Input recording:", self.transform_input_file_variable,
+                        lambda: self._open_file_selection_with_specified_extension(self.transform_input_file_variable))
+        self._entry_row(frame, "Output folder:", self.transformer_output_path_variable,
+                        lambda: self._open_directory_dialog(self.transformer_output_path_variable))
+
+        tk.Button(frame, text="Start transform",
                   command=self._start_transform).pack(pady=10)
 
-    # ─ video tab ─
-    def _tab_video(self, nb):
-        f = ttk.Frame(nb);
-        nb.add(f, text="Record ➜ MP4")
-        tk.Label(f, text="Export a recording directly to mp4.").pack(pady=5)
+    def _tab_video(self, notebook: ttk.Notebook):
+        """
+        Creates a tab in the provided notebook that allows users to configure and export
+        a recording directly to an MP4 format with custom video parameters and options.
 
-        self._entry_row(f, "Recording extension:", self.ext_var)
-        self._entry_row(f, "Input recording:", self.vid_in_var,
-                        lambda: self._recfilepick(self.vid_in_var))
-        self._entry_row(f, "Output folder:", self.vid_out_var,
-                        lambda: self._dirpick(self.vid_out_var))
+        Parameters
+        ----------
+        notebook : ttk.Notebook
+            The notebook widget where a new tab will be added for video recording.
+        """
+        frame = ttk.Frame(notebook)
+        notebook.add(frame, text="Record ➜ MP4")
+        tk.Label(frame, text="Export a recording directly to mp4.").pack(pady=5)
 
-        vp = ttk.LabelFrame(f, text="Video parameters");
-        vp.pack(fill="x", padx=4, pady=6)
-        self._entry_row(vp, "Width:", self.vw_var, width=8)
-        self._entry_row(vp, "Height:", self.vh_var, width=8)
-        self._entry_row(vp, "Vehicle ID (-1 = ego):", self.vid_var, width=8)
-        self._entry_row(vp, "Start at (s):", self.begin_var, width=8)
-        self._entry_row(vp, "End at (s, -1 = file end):", self.end_var, width=8)
-        tk.Checkbutton(vp, text="Draw 3-D bounding boxes",
-                       variable=self.bbox_var).pack(anchor="w", padx=4, pady=4)
+        self._entry_row(frame, "Recording extension:", self.recording_extension_variable)
+        self._entry_row(frame, "Input recording:", self.video_input_path_variable,
+                        lambda: self._open_file_selection_with_specified_extension(self.video_input_path_variable))
+        self._entry_row(frame, "Output folder:", self.video_output_path_variable,
+                        lambda: self._open_directory_dialog(self.video_output_path_variable))
 
-        tk.Button(f, text="Start recording",
+        video_parameters_label_frame = ttk.LabelFrame(frame, text="Video parameters")
+        video_parameters_label_frame.pack(fill="x", padx=4, pady=6)
+        self._entry_row(video_parameters_label_frame, "Width:", self.video_width_variable, width=8)
+        self._entry_row(video_parameters_label_frame, "Height:", self.video_height_variable, width=8)
+        self._entry_row(video_parameters_label_frame, "Vehicle ID (-1 = ego):", self.vehicle_id_variable, width=8)
+        self._entry_row(video_parameters_label_frame, "Start at (s):", self.begin_at_variable, width=8)
+        self._entry_row(video_parameters_label_frame, "End at (s, -1 = file end):", self.end_at_variable, width=8)
+        tk.Checkbutton(video_parameters_label_frame, text="Draw 3-D bounding boxes",
+                       variable=self.with_bboxes_variable).pack(anchor="w", padx=4, pady=4)
+
+        tk.Button(frame, text="Start recording",
                   command=self._start_video).pack(pady=10)
 
-    # ═══════════════════════════════════════════════════════════════════
-    #                worker orchestration / validation
-    # ═══════════════════════════════════════════════════════════════════
-    # ── helper to launch a background worker ───────────────────────────
-    def _attach_worker(self, worker, *, enable_move: bool = False):
+    def _attach_worker(self, worker: ThreadWorker, *, enable_move: bool = False):
+        """
+        Attaches a worker to the system and manages its execution, UI updates, and
+        state tracking.
+
+        Parameters:
+            worker (ThreadWorker): The worker instance to be attached.
+            enable_move (bool, optional): Flag to enable or disable "move" functionality in the UI. Default is False.
+
+        Returns:
+            None: This method has no return value.
+        """
         if worker.exclusive and self._active_worker:
             return messagebox.showwarning("Busy", "Another exclusive task is running.")
 
@@ -175,85 +223,109 @@ class UnifiedCarlaGUI(tk.Tk):
             self._active_worker = worker
             self.stop_btn.config(state="normal")
 
-        # optionally make “Move recording” available
         if enable_move:
             self.move_btn.config(state="normal")
 
         # poll until *this* worker finishes
         def poll():
+            """
+            Polls the state of a worker thread and updates UI elements accordingly.
+            """
             if worker.is_alive():
                 self.after(500, poll)
             else:
-                # only reset Stop-button if the exclusive task has ended
                 if worker is self._active_worker:
                     self._active_worker = None
                     self.stop_btn.config(state="disabled")
 
-                # only turn off Move-button when the *manual-drive* workflow ends
-                from gui.workers import ManualControlWorker
                 if isinstance(worker, ManualControlWorker):
                     self.move_btn.config(state="disabled")
 
         poll()
+        return None
 
-    # ─── start helpers ────────────────────────────────────────────────
     def _toggle_carla(self):
+        """
+        Toggles the CARLA server process between starting and stopping states. If the CARLA server is running,
+        it cancels the server process. If the server is not running, it validates the configuration and starts a
+        new CARLA server process.
+        """
         if self._carla_worker and self._carla_worker.is_alive():
             self._carla_worker.cancel()
             self.server_btn.config(text="Start CARLA server")
         else:
-            if not self._validate([("CARLA executable", self.exe_var)]):
+            if not self._validate([("CARLA executable", self.carla_executable_variable)]):
                 return
             self._carla_worker = CarlaServerWorker(self._collect_cfg(), self._log)
             self._carla_worker.start()
             self.server_btn.config(text="Stop CARLA server")
 
     def _start_manual(self):
-        need = [("CARLA executable", self.exe_var),
-                ("CARLA output folder", self.man_out_var)]
-        if not self._validate(need): return
+        """
+        Starts the manual recording process by validating input parameters, collecting configuration data,
+        and attaching the ManualControlWorker for the task.
+        """
+        required = [("CARLA executable", self.carla_executable_variable),
+                    ("CARLA output folder", self.manual_output_dir_variable)]
+        if not self._validate(required): return
         self._attach_worker(ManualControlWorker(self._collect_cfg(), self._log),
                             enable_move=True)
 
     def _move_latest(self):
-        if not self.name_var.get().strip():
+        """
+        Moves the latest recording with the specified prefix.
+        """
+        if not self.new_file_name_variable.get().strip():
             return messagebox.showerror("Missing", "File-name prefix required.")
-        self._attach_worker(MoveLatestRecWorker(self._collect_cfg(),
-                                                self.name_var.get(), self._log))
+        self._attach_worker(
+            MoveLatestRecordingWorker(self._collect_cfg(), self.new_file_name_variable.get(), self._log))
+        return None
 
     def _start_transform(self):
-        need = [("CARLA executable", self.exe_var),
-                ("Input recording", self.tr_in_var),
-                ("Output folder", self.tr_out_var)]
-        if not self._validate(need): return
+        """
+        Starts the recording transformation process by validating input parameters, collecting configuration data,
+        and attaching the TransformRecordingWorker for the task.
+        """
+        required = [("CARLA executable", self.carla_executable_variable),
+                    ("Input recording", self.transform_input_file_variable),
+                    ("Output folder", self.transformer_output_path_variable)]
+        if not self._validate(required): return
 
-        cfg = self._collect_cfg()
-        cfg.transform_input_file = self.tr_in_var.get().strip()
-        cfg.transformer_output_path = self.tr_out_var.get().strip()
-        self._attach_worker(TransformWorker(cfg, self._log))
+        config = self._collect_cfg()
+        config.transform_input_file = self.transform_input_file_variable.get().strip()
+        config.transformer_output_path = self.transformer_output_path_variable.get().strip()
+        self._attach_worker(TransformRecordingWorker(config, self._log))
 
     def _start_video(self):
-        need = [("CARLA executable", self.exe_var),
-                ("Input recording", self.vid_in_var),
-                ("Output folder", self.vid_out_var)]
-        if not self._validate(need): return
+        """
+        Starts the video recording process by validating input parameters, collecting configuration data,
+        and attaching the RecordVideoWorker for the task.
+        """
+        required = [("CARLA executable", self.carla_executable_variable),
+                    ("Input recording", self.video_input_path_variable),
+                    ("Output folder", self.video_output_path_variable)]
+        if not self._validate(required): return
 
-        cfg = self._collect_cfg()
-        cfg.video_input_file = self.vid_in_var.get().strip()
-        cfg.video_output_path = self.vid_out_var.get().strip()
+        config = self._collect_cfg()
+        config.video_input_file = self.video_input_path_variable.get().strip()
+        config.video_output_path = self.video_output_path_variable.get().strip()
 
-        cfg.video_width = self.vw_var.get()
-        cfg.video_height = self.vh_var.get()
-        cfg.vehicle_id = self.vid_var.get()
-        cfg.with_bboxes = self.bbox_var.get()
+        config.video_width = self.video_width_variable.get()
+        config.video_height = self.video_height_variable.get()
+        config.vehicle_id = self.vehicle_id_variable.get()
+        config.with_bboxes = self.with_bboxes_variable.get()
 
-        cfg.begin_at = max(0.0, self.begin_var.get())
-        end_val = self.end_var.get()
-        cfg.end_at = float("inf") if end_val < 0 else end_val
+        config.begin_at = max(0.0, self.begin_at_variable.get())
+        end_at_value = self.end_at_variable.get()
+        config.end_at = float("inf") if end_at_value < 0 else end_at_value
 
-        self._attach_worker(RecordVideoWorker(cfg, self._log))
+        self._attach_worker(RecordVideoWorker(config, self._log))
 
     def _stop_worker(self):
+        """
+        Stops the active worker and the CARLA worker, if they are running, and resets the relevant
+        GUI components. Also terminates the CARLA server processes.
+        """
         if self._active_worker:
             self._active_worker.cancel()
         if self._carla_worker and self._carla_worker.is_alive():
@@ -261,84 +333,149 @@ class UnifiedCarlaGUI(tk.Tk):
             self.server_btn.config(text="Start CARLA server")
         kill_carla()
 
-    # ═══════════════════════════════════════════════════════════════════
-    #                      persistence helpers
-    # ═══════════════════════════════════════════════════════════════════
     def _setup_autosave(self):
-        for var in (
-                self.exe_var, self.ext_var,
-                self.man_out_var, self.defrec_var, self.name_var,
-                self.tr_in_var, self.tr_out_var,
-                self.vid_in_var, self.vid_out_var,
-                self.vw_var, self.vh_var, self.vid_var, self.bbox_var,
-                self.begin_var, self.end_var
+        """
+        Sets up automatic saving for specified variables.
+        """
+        for variable in (
+                self.carla_executable_variable, self.recording_extension_variable,
+                self.manual_output_dir_variable, self.default_recordings_folder_variable, self.new_file_name_variable,
+                self.transform_input_file_variable, self.transformer_output_path_variable,
+                self.video_input_path_variable, self.video_output_path_variable,
+                self.video_width_variable, self.video_height_variable, self.vehicle_id_variable,
+                self.with_bboxes_variable,
+                self.begin_at_variable, self.end_at_variable
         ):
-            var.trace_add("write", self._auto_save)
+            variable.trace_add("write", self._auto_save)
 
     def _auto_save(self, *_):
+        """
+        Handles automatic saving of current configurations.
+        """
         self._collect_cfg()
 
     def _collect_cfg(self) -> Config:
-        c = self.cfg
-        c.carla_executable = self.exe_var.get().strip()
-        c.recording_extension = self._norm_ext(self.ext_var.get())
-        c.manual_output_dir = self.man_out_var.get().strip()
-        c.default_recordings_folder = self.defrec_var.get().strip()
-        c.new_file_name = self.name_var.get().strip()
-        c.transform_input_file = self.tr_in_var.get().strip()
-        c.transformer_output_path = self.tr_out_var.get().strip()
-        c.video_input_file = self.vid_in_var.get().strip()
-        c.video_output_path = self.vid_out_var.get().strip()
-        c.with_bboxes = self.bbox_var.get()
+        """
+        Collects and normalizes configuration data from various sources, updates the
+        config object, and saves it.
 
-        c.begin_at = max(0.0, self.begin_var.get())
-        end_val = self.end_var.get()
-        c.end_at = float("inf") if end_val < 0 else end_val
-        save(c)
-        return c
+        Returns
+        -------
+        Config
+            The updated configuration object with normalized and transformed values.
+        """
+        config = self.config
+        config.carla_executable = self.carla_executable_variable.get().strip()
+        config.recording_extension = self._normalize_extension(self.recording_extension_variable.get())
+        config.manual_output_dir = self.manual_output_dir_variable.get().strip()
+        config.default_recordings_folder = self.default_recordings_folder_variable.get().strip()
+        config.new_file_name = self.new_file_name_variable.get().strip()
+        config.transform_input_file = self.transform_input_file_variable.get().strip()
+        config.transformer_output_path = self.transformer_output_path_variable.get().strip()
+        config.video_input_file = self.video_input_path_variable.get().strip()
+        config.video_output_path = self.video_output_path_variable.get().strip()
+        config.with_bboxes = self.with_bboxes_variable.get()
 
-    # ── utilities ──────────────────────────────────────────────────────
-    def _validate(self, pairs):
+        config.begin_at = max(0.0, self.begin_at_variable.get())
+        end_at_value = self.end_at_variable.get()
+        config.end_at = float("inf") if end_at_value < 0 else end_at_value
+        save(config)
+        return config
+
+    def _validate(self, pairs: List[(str, tk.StringVar)]):
+        """
+        Validates whether the provided fields contain non-empty values.
+
+        Parameters:
+            pairs (list of tuple): A list of tuples where each tuple contains
+                a label (str) and a variable (tk.StringVar).
+
+        Returns:
+            bool: True if all field values are non-empty; otherwise, False.
+        """
         for label, var in pairs:
             if not var.get().strip():
                 messagebox.showerror("Missing", f"{label} required.")
                 return False
         return True
 
-    def _filepick(self, var):
-        p = filedialog.askopenfilename();
-        var.set(p or var.get())
+    def _open_file_dialog(self, variable: tk.StringVar):
+        """
+        Selects a file using a file dialog and sets it to the provided variable.
 
-    def _recfilepick(self, var):
-        ext = self._norm_ext(self.ext_var.get())
-        p = filedialog.askopenfilename(filetypes=[(f"{ext} files", f"*{ext}"),
-                                                  ("All files", "*.*")])
-        var.set(p or var.get())
+        Parameters:
+            variable (StringVar): A Tkinter StringVar instance to update with the
+            selected file path.
+        """
+        selected_file = filedialog.askopenfilename()
+        variable.set(selected_file or variable.get())
 
-    def _dirpick(self, var):
-        p = filedialog.askdirectory();
-        var.set(p or var.get())
+    def _open_file_selection_with_specified_extension(self, variable: tk.StringVar):
+        """
+        Helper method for file selection with the specified file type and extension.
+
+        Parameters:
+            variable: A tkinter `StringVar` instance that holds the file path to be
+                updated.
+
+        Raises:
+            No explicit error is raised, but runtime errors may occur if `var` is not
+            a tkinter-compatible variable.
+        """
+        extension = self._normalize_extension(self.recording_extension_variable.get())
+        selected_file = filedialog.askopenfilename(filetypes=[(f"{extension} files", f"*{extension}"),
+                                                              ("All files", "*.*")])
+        variable.set(selected_file or variable.get())
+
+    def _open_directory_dialog(self, variable: tk.StringVar):
+        """
+        Handles a directory selection dialog and assigns the selected path.
+
+        Parameters:
+            variable (tkinter.StringVar): A Tkinter StringVar object that holds the current
+            directory path to be updated with the selected path.
+        """
+        selected_directory = filedialog.askdirectory()
+        variable.set(selected_directory or variable.get())
 
     @staticmethod
-    def _norm_ext(ext: str) -> str:
+    def _normalize_extension(ext: str) -> str:
+        """
+        Normalizes a given file extension by ensuring it starts with a period.
+
+        Parameters:
+            ext: The file extension to normalize.
+
+        Returns:
+            The normalized file extension string.
+        """
         return ext if ext.startswith(".") else f".{ext}"
 
-    # redirect stdout/stderr into GUI
     def _redirect_console(self):
-        class _R:
+        """
+        Redirects console output to the GUI log.
+        """
+
+        class _TextOutputHandler:
             def __init__(self, gui): self.gui = gui
 
             def write(self, txt):
-                for l in txt.rstrip().splitlines():
-                    self.gui._log(l)
+                for lines in txt.rstrip().splitlines():
+                    self.gui._log(lines)
 
             def flush(self): pass
 
-        sys.stdout = sys.stderr = _R(self)
+        sys.stdout = sys.stderr = _TextOutputHandler(self)
 
-    def _log(self, txt):
+    def _log(self, txt: str):
+        """
+        Logs a given text message to a GUI text widget, maintaining its state.
+
+        Parameters:
+            txt (str): The text message to log.
+        """
         self.log.configure(state="normal")
-        self.log.insert("end", txt + "\n");
+        self.log.insert("end", txt + "\n")
         self.log.see("end")
         self.log.configure(state="disabled")
 
