@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 from gui.carla_launcher import restart_and_connect, kill_carla
