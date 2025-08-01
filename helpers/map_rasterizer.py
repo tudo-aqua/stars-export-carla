@@ -1,13 +1,18 @@
 import json
+import math
 import os
 import zipfile
 from collections import deque
+from itertools import combinations
 from pathlib import Path
 
 import numpy as np
 from carla import World, Map, Junction, Landmark, LaneType
 from scipy.spatial import KDTree
-from typing import Set
+from typing import Set, Dict
+
+from shapely import LineString, STRtree, Point, MultiLineString, MultiPoint, GeometryCollection, Polygon
+from shapely.ops import nearest_points
 
 from carla_data_classes import *
 from helpers.json_helper import JSONHelper
@@ -301,33 +306,181 @@ class MapRasterizer:
             data_road: DataRoad = DataRoad(road_id=road_id, is_junction=is_junction, lanes=road_lanes)
             # Add to roads list
             roads_list.append(data_road)
+
         # If currently a junction is observed: calculate intersection points of the junctions' lanes
-        for lane in block_lanes:
-            for intersection_check_lane in block_lanes:
-                # Do not calculate the intersection of the same lane
-                if lane == intersection_check_lane:
+        geoms = [lane.get_linestring() for lane in block_lanes]
+        strtree = STRtree(geoms)
+        geom2lane: Dict[LineString, DataLane] = {
+            g: ln for g, ln in zip(geoms, block_lanes)
+        }
+
+        processed: Dict[frozenset, DataContactArea] = {}
+        tol = 0.30  # 30 cm near-miss tolerance
+
+        for geom_a in geoms:
+            lane_a = geom2lane[geom_a]
+
+            for idx in strtree.query(geom_a.buffer(tol)):
+                geom_b = geoms[int(idx)]
+                if geom_a is geom_b:
                     continue
-                if lane.lane_id == intersection_check_lane.lane_id and lane.road_id == intersection_check_lane.road_id:
+                key = frozenset((geom_a, geom_b))
+                if key in processed:
                     continue
-                # Get intersection point, if existing
-                intersection_point = MapRasterizer.get_intersection_of_lanes(lane, intersection_check_lane)
-                # Check if there is an intersection
-                if intersection_point:
-                    # Create DataContactLaneInfo for intersection
-                    data_contact_lane_info = DataContactLaneInfo(road_id=intersection_check_lane.road_id,
-                                                                 lane_id=intersection_check_lane.lane_id)
-                    lane.intersecting_lanes.append(data_contact_lane_info)
-                    # Calculate the distance from the start of the lane to the intersection point
-                    distance_lane = MapRasterizer.get_distance_to_start_of_lane(lane, intersection_point)
-                    distance_intersection_check_lane = MapRasterizer.get_distance_to_start_of_lane(
-                        intersection_check_lane,
-                        intersection_point)
-                    contact_area = DataContactArea.from_lanes(contact_location=intersection_point, lane_1=lane,
-                                                              start_pos_lane_1=distance_lane,
-                                                              lane_2=intersection_check_lane,
-                                                              start_pos_lane_2=distance_intersection_check_lane)
-                    lane.contact_areas.append(contact_area)
+
+                lane_b = geom2lane[geom_b]
+
+                if (lane_a.road_id == 24 and lane_a.lane_id == 1 and lane_b.road_id == 90 and lane_b.lane_id == 1 or
+                        lane_b.road_id == 24 and lane_b.lane_id == 1 and lane_a.road_id == 90 and lane_a.lane_id == 1):
+                    x = 1
+
+                inter_geom = geom_a.intersection(geom_b)
+
+                if inter_geom.is_empty:
+                    # ---- near-miss branch (unchanged) ----
+                    if geom_a.distance(geom_b) > tol:
+                        processed[key] = None
+                        continue
+                    p, q = nearest_points(geom_a, geom_b)
+                    point = Point((p.x + q.x) * 0.5, (p.y + q.y) * 0.5)
+
+                else:
+                    # ---- any kind of overlap / collection ----
+                    point = self._nose_point(inter_geom, geom_a, geom_b)
+
+                contact_loc = DataLocation(point.x, point.y, 0.0)
+
+                # ---------- build DataContactArea once ----------
+                d_a = self.get_distance_to_start_of_lane(lane_a, contact_loc)
+                d_b = self.get_distance_to_start_of_lane(lane_b, contact_loc)
+                area = DataContactArea.from_lanes(
+                    contact_location=contact_loc,
+                    lane_1=lane_a, start_pos_lane_1=d_a,
+                    lane_2=lane_b, start_pos_lane_2=d_b
+                )
+
+                lane_a.contact_areas.append(area)
+                lane_b.contact_areas.append(area)
+                lane_a.intersecting_lanes.append(
+                    DataContactLaneInfo(lane_b.lane_id, lane_b.road_id))
+                lane_b.intersecting_lanes.append(
+                    DataContactLaneInfo(lane_a.lane_id, lane_a.road_id))
+
+                processed[key] = area
+
         return roads_list
+
+    def _nose_point(self, overlap, geom_a: LineString, geom_b: LineString) -> Point:
+        """
+        Return the first shared point (nose) of two overlapping lanes.
+        Guaranteed to return a shapely Point.
+        """
+        cand: List[Point] = []
+
+        def add_endpoints(ls: LineString):
+            c = list(ls.coords)
+            cand.append(Point(c[0]))
+            cand.append(Point(c[-1]))
+
+        # collect candidates
+        if isinstance(overlap, Point):
+            return overlap
+
+        if isinstance(overlap, LineString):
+            add_endpoints(overlap)
+
+        elif isinstance(overlap, MultiLineString):
+            for ls in overlap.geoms:
+                add_endpoints(ls)
+
+        elif isinstance(overlap, MultiPoint):
+            cand.extend(overlap.geoms)
+
+        elif isinstance(overlap, GeometryCollection):
+            for g in overlap.geoms:
+                if isinstance(g, Point):
+                    cand.append(g)
+                elif isinstance(g, (LineString, MultiLineString)):
+                    if isinstance(g, LineString):
+                        add_endpoints(g)
+                    else:
+                        for ls in g.geoms:
+                            add_endpoints(ls)
+                # Polygons can appear in weird OpenDRIVE edge cases
+                elif isinstance(g, Polygon):
+                    cand.extend([Point(c) for c in g.exterior.coords[:2]])
+
+        if cand:
+            rough_pt = min(cand, key=lambda pt: min(geom_a.project(pt),
+                                                geom_b.project(pt)))
+            point = self._scan_to_nose(geom_a, geom_b, rough_pt, tol=0.01, step=0.01)
+            return point
+
+        # ---------- fall-back if still no candidate ----------
+        # 1) overlap centroid (always a Point)
+        centroid = overlap.centroid
+        if not centroid.is_empty:
+            return centroid
+
+        # 2) nearest points between the centre-lines (never fails)
+        p, _ = nearest_points(geom_a, geom_b)
+        point = self._scan_to_nose(geom_a, geom_b, p, tol=0.01, step=0.01)
+        return point
+
+    @staticmethod
+    def _scan_to_nose(geom_a: LineString,
+                      geom_b: LineString,
+                      start_pt: Point,
+                      tol: float = 0.30,
+                      step: float = 0.10) -> Point:
+        """
+        Return the earliest point where the two lanes come within `tol`
+        even when the initial rough point is at s=0 on either lane.
+        """
+        def _forward(line_from, line_other):
+            s, length = 0.0, line_from.length
+            while s < length:
+                pt = line_from.interpolate(s)
+                if pt.distance(line_other) >= tol:
+                    return pt, min(line_from.project(pt), line_other.project(pt))
+                s += step
+            return None, float('inf')
+
+        def _backward(line_from, line_other, s_start):
+            s = s_start
+            while s > 0.0:
+                s_prev = max(0.0, s - step)
+                pt_prev = line_from.interpolate(s_prev)
+                if pt_prev.distance(line_other) > tol:
+                    return line_from.interpolate(s), min(
+                        line_from.project(line_from.interpolate(s)),
+                        line_other.project(line_from.interpolate(s)))
+                s = s_prev
+            # reached the beginning
+            pt0 = line_from.interpolate(0.0)
+            return pt0, min(line_from.project(pt0), line_other.project(pt0))
+
+        # --- run both directions on both lanes -------------------------
+        best_pt, best_score = None, float('inf')
+
+        # forward scan from start of each lane
+        for g_from, g_other in ((geom_a, geom_b), (geom_b, geom_a)):
+            pt, sc = _forward(g_from, g_other)
+            if sc < best_score:
+                best_pt, best_score = pt, sc
+
+        # backward scan from rough point on each lane
+        s_a = geom_a.project(start_pt)
+        s_b = geom_b.project(start_pt)
+        for g_from, g_other, s_start in ((geom_a, geom_b, s_a),
+                                         (geom_b, geom_a, s_b)):
+            pt, sc = _backward(g_from, g_other, s_start)
+            if sc < best_score:
+                best_pt, best_score = pt, sc
+
+        return best_pt
+
+
 
     def get_data_lane_for_waypoint(self, waypoint: Waypoint, landmarks: List[Landmark]) -> DataLane:
         """
@@ -367,99 +520,16 @@ class MapRasterizer:
                         traffic_lights.append(static_traffic_light)
 
         # Build and return DataLane
-        return DataLane(road_id=waypoint.road_id, lane_id=waypoint.lane_id,
-                        lane_type=DataLaneType(int(waypoint.lane_type)), lane_width=waypoint.lane_width,
-                        lane_length=lane_length, s=waypoint.s, predecessor_lanes=predecessor_lanes,
-                        successor_lanes=successor_lanes, intersecting_lanes=[], lane_midpoints=lane_midpoints,
-                        speed_limits=[], landmarks=[], contact_areas=[], traffic_lights=traffic_lights)
+        data_lane = DataLane(road_id=waypoint.road_id, lane_id=waypoint.lane_id,
+                             lane_type=DataLaneType(int(waypoint.lane_type)), lane_width=waypoint.lane_width,
+                             lane_length=lane_length, s=waypoint.s, predecessor_lanes=predecessor_lanes,
+                             successor_lanes=successor_lanes, intersecting_lanes=[], lane_midpoints=lane_midpoints,
+                             speed_limits=[], landmarks=[], contact_areas=[], traffic_lights=traffic_lights)
 
-    @staticmethod
-    def get_intersection_of_lanes(lane_1: DataLane, lane_2: DataLane) -> Optional[DataLocation]:
-        """
-        Returns the crossing point of the two given lanes, if one exists
-        @param lane_1: Lane 1
-        @param lane_2: Lane 2
-        @return: The crossing point as a DataLocation, if existing. Otherwise None
-        """
-        if lane_1.road_id == lane_2.road_id and lane_1.road_id == lane_2.lane_id:
-            return None
-        lane_1_midpoints = list(filter(lambda l: l.distance_to_start % 1.0 == 0, lane_1.lane_midpoints))
-        lane_2_midpoints = list(filter(lambda l: l.distance_to_start % 1.0 == 0, lane_2.lane_midpoints))
-        for index_lane_1, _ in enumerate(lane_1_midpoints):
-            for index_lane_2, _ in enumerate(lane_2_midpoints):
-                # Check if there is a crossing point between the two midpoints
-                if not index_lane_1 == lane_1.lane_midpoints.__len__() - 1 and \
-                        not index_lane_2 == lane_2.lane_midpoints.__len__() - 1:
-                    midpoint_lane_1_start = lane_1.lane_midpoints[index_lane_1].location
-                    midpoint_lane_1_end = lane_1.lane_midpoints[index_lane_1 + 1].location
-                    midpoint_lane_2_start = lane_2.lane_midpoints[index_lane_2].location
-                    midpoint_lane_2_end = lane_2.lane_midpoints[index_lane_2 + 1].location
-                    crossing_point = MapRasterizer.get_intersect(midpoint_lane_1_start, midpoint_lane_1_end,
-                                                                 midpoint_lane_2_start, midpoint_lane_2_end)
-                    if not crossing_point:
-                        continue
-                    # There is a midpoint. Now check if it is between the given points, or somewhere else
-                    if MapRasterizer.is_between(midpoint_lane_1_start, midpoint_lane_1_end,
-                                                crossing_point) and MapRasterizer.is_between(midpoint_lane_2_start,
-                                                                                             midpoint_lane_2_end,
-                                                                                             crossing_point):
-                        # Only the crossing point that lays between the given points should be returned
-                        return crossing_point
-        return None
-
-    @staticmethod
-    def get_intersect(lane_1_start: DataLocation, lane_1_end: DataLocation, lane_2_start: DataLocation,
-                      lane_2_end: DataLocation) -> Optional[DataLocation]:
-        """
-        Returns the point of intersection of the lines passing through a2,a1 and b2,b1.
-        a1: [x, y] a point on the first line
-        a2: [x, y] another point on the first line
-        b1: [x, y] a point on the second line
-        b2: [x, y] another point on the second line
-        Solution from https://stackoverflow.com/questions/3252194/numpy-and-line-intersections
-        """
-        stacked = np.vstack([lane_1_start.to_tuple(), lane_1_end.to_tuple(), lane_2_start.to_tuple(),
-                             lane_2_end.to_tuple()])
-        h = np.hstack((stacked, np.ones((4, 1))))  # h for homogeneous
-        l1 = np.cross(h[0], h[1])  # get first line
-        l2 = np.cross(h[2], h[3])  # get second line
-        x, y, z = np.cross(l1, l2)  # point of intersection
-        if z == 0:  # lines are parallel
-            return None
-        return DataLocation(x=x / z, y=y / z, z=0)
-
-    @staticmethod
-    def is_between(from_point: DataLocation, to_point: DataLocation, point_to_check: DataLocation) -> bool:
-        """
-        Returns whether @param point_to_check is between @param from_point and @param to_point
-        This method is used to check whether the crossing point c of
-        the line (a,b) with another line lies between a and b.
-        Otherwise, the crossing point is outside and not relevant
-        Solution from:
-        https://stackoverflow.com/questions/328107/how-can-you-determine-a-point-is-between-two-other-points-on-a-line-segment
-        @param from_point: Starting point
-        @param to_point: Ending point
-        @param point_to_check: Point to check of being between a and b
-        @return: True, if c is between a and b. False, otherwise.
-        """
-        cross_product = (point_to_check.y - from_point.y) * (to_point.x - from_point.x) - (
-                point_to_check.x - from_point.x) * (to_point.y - from_point.y)
-
-        # compare versus epsilon for floating point values, or != 0 if using integers
-        if abs(cross_product) > 0.1:
-            return False
-
-        dot_product = (point_to_check.x - from_point.x) * (to_point.x - from_point.x) + (
-                point_to_check.y - from_point.y) * (to_point.y - from_point.y)
-        if dot_product < 0:
-            return False
-
-        squared_length_ba = (to_point.x - from_point.x) * (to_point.x - from_point.x) + (to_point.y - from_point.y) * (
-                to_point.y - from_point.y)
-        if dot_product > squared_length_ba:
-            return False
-
-        return True
+        data_lane._geom = LineString(
+            [(m.location.x, m.location.y) for m in lane_midpoints]
+        )
+        return data_lane
 
     @staticmethod
     def distance_between(from_point: DataLocation, to_point: DataLocation) -> float:
