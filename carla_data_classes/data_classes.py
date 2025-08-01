@@ -4,6 +4,7 @@ from dataclass_wizard import JSONWizard
 from typing import Tuple, List, Optional, Union
 from carla import Rotation, Vector3D, Actor, Location, Vehicle, Waypoint, TrafficLight, TrafficSign, Walker, \
     WeatherParameters, BoundingBox
+from shapely import LineString
 
 from carla_data_classes.data_enums import DataLaneType, DataLandmarkOrientation, DataLandmarkType, DataTrafficSignType, \
     DataWeatherParametersType
@@ -134,6 +135,14 @@ class DataLane:
     landmarks: List[DataLandmark]
     contact_areas: List[DataContactArea]
     traffic_lights: List[DataStaticTrafficLight]
+
+    def get_linestring(self) -> LineString:
+        """Return (and cache) a Shapely LineString for the lane."""
+        if not hasattr(self, "_geom"):
+            self._geom = LineString(
+                [(m.location.x, m.location.y) for m in self.lane_midpoints]
+            )
+        return self._geom
 
 
 @dataclass
@@ -551,8 +560,8 @@ class DataTrafficLight(DataActor):
         base["type"] = "TrafficLight"
         return DataTrafficLight(
             **base,
-            state                 = int(actor.state),
-            related_open_drive_id = static_tl.open_drive_id,
+            state=int(actor.state),
+            related_open_drive_id=static_tl.open_drive_id,
         )
 
 
@@ -571,7 +580,7 @@ class DataPedestrian(DataActor):
         base["type"] = "Pedestrian"
         return DataPedestrian(
             **base,
-            type_id = actor.type_id,
+            type_id=actor.type_id,
         )
 
     type_id: str
@@ -609,11 +618,11 @@ class DataTrafficSign(DataActor):
                 case "yield":
                     sign_type = DataTrafficSignType.YIELD
         base = DataActor.from_actor(actor).__dict__.copy()
-        base["type"] = "TrafficSign"          # overwrite – no duplicate any more
+        base["type"] = "TrafficSign"  # overwrite – no duplicate any more
         return DataTrafficSign(
-            **base,                           # ← now contains the final "type"
-            traffic_sign_type = sign_type,
-            speed_limit       = speed,
+            **base,  # ← now contains the final "type"
+            traffic_sign_type=sign_type,
+            speed_limit=speed,
         )
 
 
@@ -638,11 +647,11 @@ class DataVehicle(DataActor):
         base["type"] = "Vehicle"
         return DataVehicle(
             **base,
-            ego_vehicle      = ego_vehicle,
-            velocity         = DataVector3D.from_vector3d(actor.get_velocity()),
-            acceleration     = DataVector3D.from_vector3d(actor.get_acceleration()),
-            angular_velocity = DataVector3D.from_vector3d(actor.get_angular_velocity()),
-            forward_vector   = DataVector3D.from_vector3d(
+            ego_vehicle=ego_vehicle,
+            velocity=DataVector3D.from_vector3d(actor.get_velocity()),
+            acceleration=DataVector3D.from_vector3d(actor.get_acceleration()),
+            angular_velocity=DataVector3D.from_vector3d(actor.get_angular_velocity()),
+            forward_vector=DataVector3D.from_vector3d(
                 actor.get_transform().get_forward_vector()
             ),
         )
