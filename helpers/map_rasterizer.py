@@ -145,6 +145,7 @@ class MapRasterizer:
                 data_blocks.append(data_block)
         self._blocks = data_blocks
         self.add_landmarks_to_lanes(data_blocks)
+        self.close_speed_limit_gaps(data_blocks, default_speed_kmh=30.0)
         return data_blocks
 
     def get_all_traffic_lights(self) -> List[DataStaticTrafficLight]:
@@ -547,10 +548,204 @@ class MapRasterizer:
                              successor_lanes=successor_lanes, intersecting_lanes=[], lane_midpoints=lane_midpoints,
                              speed_limits=[], landmarks=[], contact_areas=[], traffic_lights=traffic_lights)
 
-        data_lane._geom = LineString(
-            [(m.location.x, m.location.y) for m in lane_midpoints]
+        geom = LineString([(m.location.x, m.location.y) for m in lane_midpoints])
+        data_lane._geom = geom
+        data_lane.speed_limits = self._compute_speed_limits_for_lane(
+            geom=geom,
+            lane_id=waypoint.lane_id,
+            road_id=waypoint.road_id,
+            landmarks=landmarks,
+            lane_length=lane_length
         )
         return data_lane
+
+    def _kmh_to_mps(self, v):
+        return v / 3.6 if v is not None else None
+
+    def _compute_speed_limits_for_lane(self, geom, lane_id, road_id, landmarks, lane_length):
+        """
+        Build [start_s, end_s) speed-limit segments for this lane.
+        """
+        # OpenDRIVE/German codes commonly used by CARLA maps
+        BEGIN_CODES = {"274", "274.1", "275"}    # max speed, zone begin, min speed begin
+        END_CODES   = {"278", "274.2", "279"}    # end of max speed, zone end, min speed end
+
+        # Filter landmarks affecting this road & lane
+        def affects_lane(lm):
+            if lm.road_id != road_id:
+                return False
+            for a, b in lm.get_lane_validities():
+                if a <= lane_id <= b:
+                    return True
+            return False
+
+        speed_events = []
+        for lm in landmarks:
+            t = str(lm.type)
+            if t not in BEGIN_CODES and t not in END_CODES:
+                continue
+            if not affects_lane(lm):
+                continue
+
+            # project landmark XY onto lane centreline to get s
+            loc = lm.transform.location
+            s = geom.project(Point(loc.x, loc.y))
+            s = max(0.0, min(float(s), float(lane_length)))
+
+            if t in BEGIN_CODES:
+                # lm.value is km/h in CARLA’s Landmark; convert to m/s
+                val_mps = self._kmh_to_mps(float(lm.value)) if getattr(lm, "value", None) is not None else None
+                speed_events.append(("begin", s, val_mps))
+            else:
+                speed_events.append(("end", s, None))
+
+        # No signs → leave empty
+        if not speed_events:
+            return []
+
+        # sort by distance along lane
+        speed_events.sort(key=lambda e: (e[1], 0 if e[0] == "end" else 1))
+        segments = []
+        curr_v = None
+        seg_start = 0.0
+
+        for kind, s, v in speed_events:
+            s = float(s)
+            if kind == "begin":
+                # close previous segment if any
+                if curr_v is not None and s > seg_start:
+                    segments.append(DataSpeedLimit(from_distance=seg_start, to_distance=s, speed_limit=curr_v))
+                curr_v = v
+                seg_start = s
+            else:  # "end"
+                if curr_v is not None and s > seg_start:
+                    segments.append(DataSpeedLimit(from_distance=seg_start, to_distance=s, speed_limit=curr_v))
+                curr_v = None
+                seg_start = s
+
+        # tail segment to lane end if a limit is still active
+        if curr_v is not None and lane_length > seg_start:
+            segments.append(DataSpeedLimit(from_distance=seg_start, to_distance=lane_length, speed_limit=curr_v))
+
+        return segments
+
+    def _build_lane_index(self, blocks):
+        return {(r.road_id, ln.lane_id): ln
+                for b in blocks for r in b.roads for ln in r.lanes}
+
+    def _find_upstream_speed_mps(self, lane, lane_index, visited=None):
+        """
+        Walk predecessor graph to find a speed to inherit.
+        Assumes DataSpeedLimit.speed_limit is stored in m/s.
+        Returns m/s or None.
+        """
+        if visited is None:
+            visited = set()
+        q = deque([(lane.road_id, lane.lane_id)])
+        while q:
+            key = q.popleft()
+            if key in visited:
+                continue
+            visited.add(key)
+
+            ln = lane_index.get(key)
+            if not ln:
+                continue
+
+            if ln.speed_limits:
+                last = max(ln.speed_limits, key=lambda s: s.to_distance)
+                return float(last.speed_limit)   # m/s
+            for pre in getattr(ln, "predecessor_lanes", []) or []:
+                q.append((pre.road_id, pre.lane_id))
+        return None
+
+    def _merge_adjacent_equal(self, segs, eps=1e-6):
+        if not segs:
+            return segs
+        segs.sort(key=lambda s: (s.from_distance, s.to_distance))
+        out = [segs[0]]
+        for s in segs[1:]:
+            last = out[-1]
+            touches = abs(last.to_distance - s.from_distance) < eps
+            same = abs(float(last.speed_limit) - float(s.speed_limit)) < 1e-6
+            if touches and same:
+                last.to_distance = max(last.to_distance, s.to_distance)
+            else:
+                out.append(s)
+        return out
+
+    def close_speed_limit_gaps(self, blocks, default_speed_kmh=30.0):
+        """
+        Ensure continuous coverage [0, lane_length] with speed limits in **m/s**.
+        - Head/internal/tail gaps are filled.
+        - If lane has no segments: inherit from predecessors; else use default_speed_kmh(/3.6).
+        """
+        default_mps = float(default_speed_kmh) / 3.6
+        lane_index = self._build_lane_index(blocks)
+
+        for b in blocks:
+            for r in b.roads:
+                for ln in r.lanes:
+                    L = float(getattr(ln, "lane_length", 0.0) or 0.0)
+                    segs = list(getattr(ln, "speed_limits", []) or [])
+
+                    # If your landmark->segment code stored km/h by mistake, convert it here once:
+                    # for s in segs: s.speed_limit /= 3.6
+
+                    # No segments → inherit or default across full lane
+                    if not segs:
+                        inherit = self._find_upstream_speed_mps(ln, lane_index)
+                        spd = inherit if inherit is not None else default_mps
+                        ln.speed_limits = [DataSpeedLimit(speed_limit=spd, from_distance=0.0, to_distance=L)]
+                        continue
+
+                    # Normalize and clamp to [0, L]
+                    segs.sort(key=lambda s: s.from_distance)
+                    norm = []
+                    for s in segs:
+                        s0 = max(0.0, min(float(s.from_distance), L))
+                        s1 = max(0.0, min(float(s.to_distance),   L))
+                        if s1 > s0:
+                            # keep speed_limit in m/s
+                            norm.append(DataSpeedLimit(speed_limit=float(s.speed_limit),
+                                                       from_distance=s0, to_distance=s1))
+                    segs = norm
+
+                    out = []
+                    cursor = 0.0
+                    carried = None  # last known m/s
+
+                    # Head gap
+                    if segs and segs[0].from_distance > 0.0:
+                        inherit = self._find_upstream_speed_mps(ln, lane_index)
+                        head_spd = carried if carried is not None else (inherit if inherit is not None else default_mps)
+                        out.append(DataSpeedLimit(speed_limit=head_spd, from_distance=0.0, to_distance=min(segs[0].from_distance, L)))
+                        cursor = segs[0].from_distance
+                        carried = head_spd
+
+                    # Segments & internal gaps
+                    for s in segs:
+                        s0, s1, spd = float(s.from_distance), float(s.to_distance), float(s.speed_limit)  # m/s
+                        if s1 <= cursor:
+                            continue
+                        if s0 > cursor:
+                            gap_spd = carried if carried is not None else default_mps
+                            out.append(DataSpeedLimit(speed_limit=gap_spd, from_distance=cursor, to_distance=s0))
+                            cursor = s0
+                            carried = gap_spd
+                        out.append(DataSpeedLimit(speed_limit=spd, from_distance=cursor, to_distance=s1))
+                        cursor = s1
+                        carried = spd
+                        if cursor >= L:
+                            break
+
+                    # Tail gap
+                    if cursor < L:
+                        tail_spd = carried if carried is not None else (self._find_upstream_speed_mps(ln, lane_index) or default_mps)
+                        out.append(DataSpeedLimit(speed_limit=tail_spd, from_distance=cursor, to_distance=L))
+
+                    ln.speed_limits = self._merge_adjacent_equal(out)
+
 
     @staticmethod
     def distance_between(from_point: DataLocation, to_point: DataLocation) -> float:
