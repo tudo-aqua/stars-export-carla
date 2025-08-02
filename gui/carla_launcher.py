@@ -29,28 +29,26 @@ def kill_carla(log: Callable[[str], None] | None = None) -> None:
             except psutil.NoSuchProcess:
                 pass
 
+
 def start_carla(
         exe: str,
         *,
         render_off_screen: bool = True,
-        render_quality_low: bool = True,
+        quality_low: bool = True,
+        map_name: str | None = None,
+        boot: float = 0.0,
+        log: Callable[[str], None] | None = None,
 ) -> None:
     """
-    Launch a CARLA server in its **own** process group.
-
-    Parameters
-    ----------
-    exe : str
-        Path to the ``CarlaUE4`` executable or launcher script.
-    render_off_screen : bool, default False
-        If True, start CARLA with off-screen rendering (adds ``-RenderOffScreen``).
-    render_quality_low : bool, default False
-        If True, force low quality rendering (adds ``-quality-level=Low``).
+    Launch a CARLA server in its own process group and optionally set the map
+    using PythonAPI/util/config.py after an optional boot wait.
     """
+    _log = log or print
+
     cmd = [exe]
     if render_off_screen:
         cmd.append("-RenderOffScreen")
-    if render_quality_low:
+    if quality_low:
         cmd.append("-quality-level=Low")
 
     kwargs: dict[str, Any]
@@ -61,36 +59,49 @@ def start_carla(
 
     subprocess.Popen(cmd, **kwargs)
 
+    # If a map is requested, wait for UE to boot, then switch maps via config.py
+    if map_name:
+        if boot > 0:
+            _log(f">> [CARLA] Waiting {boot:.1f}s for CARLA to boot before loading '{map_name}'")
+            time.sleep(boot)
+        ok = _set_map_via_config_py(exe, map_name, log=_log)
+        if not ok:
+            _log(f">> [CARLA] Warning: failed to set map '{map_name}' via config.py")
+
+
 def restart_carla(
         exe: str,
         *,
         render_off_screen: bool = True,
         render_quality_low: bool = True,
-        cooldown: float = 5,
-        boot: float = 20,
-        log: Callable[[str], None] | None = None
+        map_name: str | None = None,
+        cooldown: float = 5.0,
+        boot: float = 20.0,
+        log: Callable[[str], None] | None = None,
 ) -> None:
     """
-    Hard-restart the CARLA server and wait until it is ready.
+    Hard-restart the CARLA server and wait until it is ready; optionally load a map.
 
-    The routine is a convenience wrapper around `kill_carla` ->
-    *cool-down* -> `start_carla` -> *boot-wait*.
+    The routine is a convenience wrapper around:
+    kill_carla -> cool-down -> start_carla (with flags/map) -> boot-wait (handled in start_carla).
 
     Parameters
     ----------
     exe : str
         Fully qualified path to the CARLA executable.
     render_off_screen : bool, default False
-        Forwarded to `start_carla`.
+        Forwarded to ``start_carla``.
     render_quality_low : bool, default False
-        Forwarded to `start_carla`.
-    cooldown : float, default 5
-        Seconds to wait *after* killing existing instances but *before*
-        spawning a new one.
-    boot : float, default 20
-        Seconds to wait *after* launching CARLA so UE4 can finish loading maps.
-    log : Callable[[str], None], optional
-        Logging callback (defaults to `print`).
+        Forwarded to ``start_carla``.
+    map_name : str | None, default None
+        Forwarded to ``start_carla`` to load after boot.
+    cooldown : float, default 5.0
+        Seconds to wait after killing existing instances but before spawning a new one.
+    boot : float, default 20.0
+        Seconds to wait after launching CARLA before trying to load the map.
+        Only relevant when ``map_name`` is provided.
+    log : Callable[[str], None] | None, default None
+        Optional logger (defaults to ``print``).
     """
     _log = log or print
 
@@ -102,13 +113,14 @@ def restart_carla(
         time.sleep(cooldown)
 
     _log(">> [CARLA] Starting new server …")
-    start_carla(exe,
-                render_off_screen=render_off_screen,
-                render_quality_low=render_quality_low)
-
-    if boot > 0:
-        _log(f">> [CARLA] Waiting {boot:.1f}s for CARLA to boot")
-        time.sleep(boot)
+    start_carla(
+        exe,
+        render_off_screen=render_off_screen,
+        quality_low=render_quality_low,
+        map_name=map_name,
+        boot=boot,
+        log=_log,
+    )
 
     _log(">> [CARLA] Server should now be ready")
 
@@ -121,6 +133,7 @@ def restart_and_connect(
         *,
         render_off_screen: bool = True,
         render_quality_low: bool = True,
+        map_name: str | None = None,
         cooldown: float = 5,
         boot: float = 20,
         log: Callable[[str], None] | None = None
@@ -155,6 +168,7 @@ def restart_and_connect(
         exe,
         render_off_screen=render_off_screen,
         render_quality_low=render_quality_low,
+        map_name=map_name,
         cooldown=cooldown,
         boot=boot,
         log=_log,
@@ -165,3 +179,56 @@ def restart_and_connect(
     client.set_timeout(timeout)
     _log(">> [CARLA] Connected.")
     return client
+
+
+def _find_carla_config_py(exe: str) -> str | None:
+    """
+    Try to find CARLA's PythonAPI/util/config.py relative to the CARLA executable.
+    Returns an absolute path or None if not found.
+    """
+    exe_dir = os.path.dirname(os.path.realpath(exe))
+    candidates = [
+        os.path.join(exe_dir, "PythonAPI", "util", "config.py"),
+        os.path.join(os.path.dirname(exe_dir), "PythonAPI", "util", "config.py"),  # if exe is in a bin/ subdir
+    ]
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def _set_map_via_config_py(
+        exe: str,
+        map_name: str,
+        *,
+        host: str = "localhost",
+        port: int = 2000,
+        log: Callable[[str], None] | None = None,
+) -> bool:
+    """
+    Invoke CARLA's config.py to change the running map, e.g.:
+        python PythonAPI/util/config.py --host <host> --port <port> --map Town05
+    Returns True on success, False otherwise.
+    """
+    _log = log or print
+    config_py = _find_carla_config_py(exe)
+    if not config_py:
+        _log(">> [CARLA] Could not locate PythonAPI/util/config.py next to the executable.")
+        return False
+
+    py = sys.executable or "python"
+    cmd = [py, config_py, "--host", host, "--port", str(port), "--map", map_name]
+    _log(f">> [CARLA] Changing map via config.py: {map_name}")
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        if proc.stdout:
+            _log(proc.stdout.rstrip())
+        if proc.stderr:
+            _log(proc.stderr.rstrip())
+        if proc.returncode != 0:
+            _log(f">> [CARLA] config.py failed with return code {proc.returncode}")
+            return False
+        return True
+    except Exception as e:
+        _log(f">> [CARLA] Failed to run config.py: {e!r}")
+        return False

@@ -12,6 +12,14 @@ from gui.workers.RecordVideoWorker import RecordVideoWorker
 from gui.workers.ThreadWorker import ThreadWorker
 from gui.workers.TransformRecordingWorker import TransformRecordingWorker
 
+# Official CARLA maps from the docs (non-layered + layered "_Opt")
+ALLOWED_NON_LAYERED_MAPS = [
+    "Town01", "Town02", "Town03", "Town04", "Town05", "Town06",
+    "Town07", "Town08", "Town09", "Town10", "Town11", "Town12",
+]
+ALLOWED_LAYERED_MAPS = [f"{t}_Opt" for t in ALLOWED_NON_LAYERED_MAPS]
+ALLOWED_CARLA_MAPS = ALLOWED_NON_LAYERED_MAPS + ALLOWED_LAYERED_MAPS
+
 
 class UnifiedCarlaGUI(tk.Tk):
     """
@@ -46,14 +54,19 @@ class UnifiedCarlaGUI(tk.Tk):
         end_at_default = -1 if self.config.end_at == float("inf") else self.config.end_at
         self.end_at_variable = tk.DoubleVar(value=end_at_default)
 
-        # ── NEW: CARLA rendering options ────────────────────────────────────────────
         self.render_off_screen_variable = tk.BooleanVar(
             value=getattr(self.config, "render_off_screen", False)
         )
         self.render_quality_low_variable = tk.BooleanVar(
             value=getattr(self.config, "render_quality_low", False)
         )
-        # ───────────────────────────────────────────────────────────────────────────
+
+        if getattr(self.config, "selected_map", "") in ALLOWED_CARLA_MAPS:
+            default_map = self.config.selected_map
+        else:
+            default_map = ALLOWED_CARLA_MAPS[0]
+        self.selected_map_variable = tk.StringVar(value=default_map)
+        self._map_combos: list[ttk.Combobox] = []
 
         self._active_worker = None
         self._carla_worker = None
@@ -99,42 +112,35 @@ class UnifiedCarlaGUI(tk.Tk):
                 .pack(side="left", padx=2)
 
     def _tab_server(self, notebook: ttk.Notebook):
-        """
-        Creates and manages the CARLA Server tab within a given notebook widget.
-        """
         frame = ttk.Frame(notebook)
         notebook.add(frame, text="CARLA Server")
-        tk.Label(frame, text="Start or stop a CARLA instance.").pack(pady=5)
+        tk.Label(frame, text="Start or stop a head-less CARLA instance.").pack(pady=5)
 
-        self._entry_row(
-            frame,
-            "CARLA executable:",
-            self.carla_executable_variable,
-            lambda: self._open_file_dialog(self.carla_executable_variable),
-        )
+        self._entry_row(frame, "CARLA executable:", self.carla_executable_variable,
+                        lambda: self._open_file_dialog(self.carla_executable_variable))
 
-        # ── NEW: Rendering options (checkboxes) ─────────────────────────────────────
+        # Map selection (allowed maps only)
+        row = tk.Frame(frame);
+        row.pack(fill="x", pady=2)
+        tk.Label(row, text="Map:", width=26, anchor="w").pack(side="left")
+        ttk.Combobox(
+            row,
+            textvariable=self.selected_map_variable,
+            state="readonly",
+            values=ALLOWED_CARLA_MAPS,
+            width=42
+        ).pack(side="left", fill="x", expand=True)
+
+        # Rendering options (unchanged)
         rendering_options = ttk.LabelFrame(frame, text="Rendering options")
         rendering_options.pack(fill="x", padx=4, pady=6)
+        tk.Checkbutton(rendering_options, text="Render off screen",
+                       variable=self.render_off_screen_variable, anchor="w").pack(fill="x", padx=6, pady=2)
+        tk.Checkbutton(rendering_options, text="Render quality low",
+                       variable=self.render_quality_low_variable, anchor="w").pack(fill="x", padx=6, pady=2)
 
-        tk.Checkbutton(
-            rendering_options,
-            text="Render off screen",
-            variable=self.render_off_screen_variable,
-            anchor="w",
-        ).pack(fill="x", padx=6, pady=2)
-
-        tk.Checkbutton(
-            rendering_options,
-            text="Render quality low",
-            variable=self.render_quality_low_variable,
-            anchor="w",
-        ).pack(fill="x", padx=6, pady=2)
-        # ───────────────────────────────────────────────────────────────────────────
-
-        self.server_btn = tk.Button(
-            frame, text="Start CARLA server", width=25, command=self._toggle_carla
-        )
+        self.server_btn = tk.Button(frame, text="Start CARLA server",
+                                    width=25, command=self._toggle_carla)
         self.server_btn.pack(pady=10)
 
     def _tab_manual(self, notebook: ttk.Notebook):
@@ -163,24 +169,25 @@ class UnifiedCarlaGUI(tk.Tk):
                         lambda: self._open_directory_dialog(self.default_recordings_folder_variable))
         self._entry_row(frame, "New file-name prefix:", self.new_file_name_variable)
 
-        # ── NEW: Rendering options ─────────────────────────────────────────────────
+        # Map selection (allowed maps only)
+        row = tk.Frame(frame);
+        row.pack(fill="x", pady=2)
+        tk.Label(row, text="Map:", width=26, anchor="w").pack(side="left")
+        ttk.Combobox(
+            row,
+            textvariable=self.selected_map_variable,
+            state="readonly",
+            values=ALLOWED_CARLA_MAPS,
+            width=42
+        ).pack(side="left", fill="x", expand=True)
+
+        # Rendering options (unchanged)
         rendering_options = ttk.LabelFrame(frame, text="Rendering options")
         rendering_options.pack(fill="x", padx=4, pady=6)
-
-        tk.Checkbutton(
-            rendering_options,
-            text="Render off screen",
-            variable=self.render_off_screen_variable,
-            anchor="w",
-        ).pack(fill="x", padx=6, pady=2)
-
-        tk.Checkbutton(
-            rendering_options,
-            text="Render quality low",
-            variable=self.render_quality_low_variable,
-            anchor="w",
-        ).pack(fill="x", padx=6, pady=2)
-        # ──────────────────────────────────────────────────────────────────────────
+        tk.Checkbutton(rendering_options, text="Render off screen",
+                       variable=self.render_off_screen_variable, anchor="w").pack(fill="x", padx=6, pady=2)
+        tk.Checkbutton(rendering_options, text="Render quality low",
+                       variable=self.render_quality_low_variable, anchor="w").pack(fill="x", padx=6, pady=2)
 
         self.start_btn = tk.Button(frame, text="Start manual driving",
                                    width=25, command=self._start_manual)
@@ -193,7 +200,6 @@ class UnifiedCarlaGUI(tk.Tk):
         self.stop_btn = tk.Button(frame, text="Stop",
                                   command=self._stop_worker, state="disabled")
         self.stop_btn.pack(pady=8)
-
 
     def _tab_transform(self, notebook: ttk.Notebook):
         """
@@ -233,7 +239,6 @@ class UnifiedCarlaGUI(tk.Tk):
 
         tk.Button(frame, text="Start transform",
                   command=self._start_transform).pack(pady=10)
-
 
     def _tab_video(self, notebook: ttk.Notebook):
         """
@@ -454,14 +459,12 @@ class UnifiedCarlaGUI(tk.Tk):
         end_at_value = self.end_at_variable.get()
         config.end_at = float("inf") if end_at_value < 0 else end_at_value
 
-        # ── NEW: persist rendering options ─────────────────────────────────────────
         config.render_off_screen = self.render_off_screen_variable.get()
         config.render_quality_low = self.render_quality_low_variable.get()
-        # ──────────────────────────────────────────────────────────────────────────
+        config.selected_map = self.selected_map_variable.get().strip()
 
         save(config)
         return config
-
 
     def _validate(self, pairs: List[(str, tk.StringVar)]):
         """

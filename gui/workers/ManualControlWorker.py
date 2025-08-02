@@ -22,7 +22,7 @@ class ManualControlWorker(ThreadWorker):
     def run(self):
         self.log(">> Rebooting CARLA …")
         restart_carla(self.cfg.carla_executable, log=self.log, render_quality_low=self.cfg.render_quality_low,
-                      render_off_screen=self.cfg.render_off_screen)
+                      render_off_screen=self.cfg.render_off_screen, map_name=self.cfg.selected_map)
         if self.cancelled:  # stop pressed during boot wait
             return
 

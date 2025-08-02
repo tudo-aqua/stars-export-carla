@@ -12,6 +12,7 @@ class Config:
     render_off_screen: bool = False
     render_quality_low: bool = False
     recording_extension: str = ".rec"
+    selected_map: str = ""
 
     manual_output_dir: str = ""
     default_recordings_folder: str = ""
