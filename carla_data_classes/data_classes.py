@@ -292,7 +292,7 @@ class DataRotation:
         @param rotation: The rotation that should be transformed
         @return: The DataRotation based on the given rotation
         """
-        return DataRotation(pitch=rotation.pitch, yaw=rotation.yaw, roll=rotation.roll)
+        return DataRotation(pitch=rotation.pitch, yaw=-rotation.yaw, roll=rotation.roll)
 
     @staticmethod
     def from_actor(actor: Actor) -> DataRotation:
