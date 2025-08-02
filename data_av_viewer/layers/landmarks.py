@@ -6,29 +6,45 @@ from .base_layer import register, BaseLayer
 
 @register("landmarks")
 class LandmarkLayer(BaseLayer):
-    slider_key = "landmarks"   # gives a size slider
-    df_key     = "landmarks"
+    slider_key = "landmarks"  # gives a size slider
+    df_key = "landmarks"
 
     # ---------------------------------------------------------------- build df
     @classmethod
     def build_df(cls, blocks, tick):
+        by_id = {}
+        for block in blocks:
+            for road in block.roads:
+                for lane in road.lanes:
+                    for lm in lane.landmarks or []:
+                        rec = by_id.get(lm.id)
+                        if rec is None:
+                            rec = {
+                                "x": lm.location.x,
+                                "y": lm.location.y,
+                                "id": lm.id,
+                                "name": lm.name,
+                                "orientation": lm.orientation.name,
+                                "country": lm.country,
+                                "text": lm.text,
+                                "value": lm.value,
+                                "sub_type": lm.sub_type,
+                                "type": lm.type.name,
+                                "lane_pairs_set": set(),  # collect (road_id, lane_id)
+                            }
+                            by_id[lm.id] = rec
+                        # Add the lane pair that references this landmark
+                        rid = getattr(lane, "road_id", getattr(road, "road_id", None))
+                        rec["lane_pairs_set"].add((rid, lane.lane_id))
+
         rows = []
-        for ln in (l for b in blocks for r in b.roads for l in r.lanes):
-            for lm in ln.landmarks or []:
-                rows.append(dict(
-                    x          = lm.location.x,
-                    y          = lm.location.y,
-                    id         = lm.id,
-                    road_id    = lm.road_id,
-                    name       = lm.name,
-                    orientation= lm.orientation.name,   # enum → text
-                    country    = lm.country,
-                    text       = lm.text,
-                    value      = lm.value,
-                    sub_type   = lm.sub_type,
-                    type       = lm.type.name,
-                    yaw        = lm.rotation.yaw        # for arrow
-                ))
+        for rec in by_id.values():
+            pairs = sorted(rec.pop("lane_pairs_set"))
+            # Indented, multi-line HTML for Plotly hover
+            lines = ["&nbsp;&nbsp;&nbsp;&nbsp;(Road {}, Lane {})".format(r, l) for r, l in pairs]
+            rec["lane_pairs_html"] = "<br>" + "<br>".join(lines) if lines else ""
+            rows.append(rec)
+
         return pd.DataFrame(rows)
 
     # ---------------------------------------------------------------- traces
@@ -37,26 +53,26 @@ class LandmarkLayer(BaseLayer):
         if df.empty:
             return []
 
-        # -------- marker trace (one trace for all landmarks) ---------
         custom = df[[
-            "id", "road_id", "name", "orientation",
-            "country", "text", "value", "sub_type", "type"
+            "id", "name", "orientation",
+            "country", "text", "value", "sub_type", "type",
+            "lane_pairs_html"
         ]].to_numpy()
 
         hover_tpl = (
             "ID: %{customdata[0]}<br>"
-            "Road: %{customdata[1]}<br>"
-            "Name: %{customdata[2]}<br>"
-            "Orientation: %{customdata[3]}<br>"
-            "Country: %{customdata[4]}<br>"
-            "Text: %{customdata[5]}<br>"
-            "Value: %{customdata[6]}<br>"
-            "Sub‑type: %{customdata[7]}<br>"
-            "Type: %{customdata[8]}<br>"
-            "x:%{x:.2f} y:%{y:.2f}<extra></extra>"
+            "Name: %{customdata[1]}<br>"
+            "Orientation: %{customdata[2]}<br>"
+            "Country: %{customdata[3]}<br>"
+            "Text: %{customdata[4]}<br>"
+            "Value: %{customdata[5]}<br>"
+            "Sub-type: %{customdata[6]}<br>"
+            "Type: %{customdata[7]}<br>"
+            "Lanes:%{customdata[8]}<br>"
+            "X:%{x:.2f} Y:%{y:.2f}<extra></extra>"
         )
 
-        marker_trace = go.Scattergl(
+        return [go.Scattergl(
             x=df.x, y=df.y, mode="markers",
             marker=dict(size=self.size["landmarks"], symbol="circle"),
             customdata=custom,
@@ -64,22 +80,4 @@ class LandmarkLayer(BaseLayer):
             hoverlabel=dict(bgcolor="#d62728"),
             name="Landmarks",
             showlegend=True
-        )
-
-        # -------- orientation arrows --------------------------------
-        arrow_len = 3.0  # metres
-        yaw_rad = np.deg2rad(df.yaw.to_numpy())
-        x2 = df.x + np.cos(yaw_rad) * arrow_len
-        y2 = df.y + np.sin(yaw_rad) * arrow_len
-
-        seg_x = np.column_stack([df.x, x2, np.full(len(df), np.nan)]).ravel()
-        seg_y = np.column_stack([df.y, y2, np.full(len(df), np.nan)]).ravel()
-
-        arrow_trace = go.Scattergl(
-            x=seg_x, y=seg_y, mode="lines",
-            line=dict(width=1.5, color="#d62728"),
-            hoverinfo="skip",               # hover on marker is enough
-            showlegend=False
-        )
-
-        return [marker_trace, arrow_trace]
+        )]
