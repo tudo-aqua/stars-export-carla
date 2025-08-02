@@ -330,10 +330,6 @@ class MapRasterizer:
 
                 lane_b = geom2lane[geom_b]
 
-                if (lane_a.road_id == 565 and lane_a.lane_id == 2 and lane_b.road_id == 579 and lane_b.lane_id == -1 or
-                        lane_b.road_id == 565 and lane_b.lane_id == 2 and lane_a.road_id == 579 and lane_a.lane_id == -1):
-                    x = 1
-
                 inter_geom = geom_a.intersection(geom_b)
 
                 if inter_geom.is_empty:
