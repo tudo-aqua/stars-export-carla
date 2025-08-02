@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 from carla import World, Map, Junction, Landmark, LaneType
 from scipy.spatial import KDTree
-from typing import Set, Dict
+from typing import Set, Dict, Any
 
 from shapely import LineString, STRtree, Point, MultiLineString, MultiPoint, GeometryCollection, Polygon
 from shapely.ops import nearest_points
@@ -94,7 +94,7 @@ class MapRasterizer:
             self.save_data_blocks(file_path=save_file_name)
             JSONHelper.zip_and_delete_file(save_file_name)
 
-        self._lane_midpoints = self.getLaneMidpointsArray()
+        self._lane_midpoints = self.get_lane_midpoints_array()
         lane_midpoint_locations = list(
             map(lambda l: (l.location.x, l.location.y, l.location.z), self._lane_midpoints))
         self._kd_tree = KDTree(lane_midpoint_locations)
@@ -104,7 +104,7 @@ class MapRasterizer:
     def flatten(l):
         return [item for sublist in l for item in sublist]
 
-    def getLaneMidpointsArray(self) -> List[DataLaneMidpoint]:
+    def get_lane_midpoints_array(self) -> List[DataLaneMidpoint]:
         roads = MapRasterizer.flatten(list(map(lambda b: b.roads, self._blocks)))
         lanes = MapRasterizer.flatten(list(map(lambda r: r.lanes, roads)))
         lane_midpoints = MapRasterizer.flatten(list(map(lambda l: l.lane_midpoints, lanes)))
@@ -154,23 +154,49 @@ class MapRasterizer:
 
     def add_landmarks_to_lanes(self, data_blocks: List[DataBlock]) -> None:
         """
-        This method adds all available landmarks of the map to the corresponding lanes
+        Attach landmarks to the lanes they actually control:
+        - normal road: same behavior as before (lane validity on that road)
+        - junction road: propagate to predecessor (approach) lanes based on orientation
         """
         landmarks: List[Landmark] = self._map.get_all_landmarks()
-        for landmark in landmarks:
-            data_landmark = self.get_data_landmark_for_landmark(landmark)
-            # Cycle through the landmarks and get their corresponding lane objects
-            landmark_road_id = landmark.road_id
-            data_road = self.get_specific_road_from_blocks(data_blocks, landmark_road_id)
-            if not data_road:
-                return
-            # Check for each lane if it is valid for the given landmark
-            for lane in data_road.lanes:
-                if MapRasterizer.is_lane_valid_for_landmark(landmark, lane):
-                    # The landmark is valid for the current lane. Append to list of landmarks
-                    lane.landmarks.append(data_landmark)
-                    if lane.lane_id > 0:
-                        data_landmark.s = lane.lane_length - data_landmark.s
+
+        for lm in landmarks:
+            print(f"Converting Landmark {lm.id}")
+            d_lm = DataLandmark.from_landmark(lm)  # builds DataLandmark from CARLA Landmark
+            road = self.get_specific_road_from_blocks(data_blocks, lm.road_id)
+            if not road:
+                continue
+
+            # --- non-junction roads: unchanged ------------------------------------
+            if not road.is_junction:
+                for ln in road.lanes:
+                    if self.is_lane_valid_for_landmark(lm, ln):
+                        ln.landmarks.append(d_lm)
+                continue
+
+            # --- junction roads: map to approaches (predecessors) / exits (successors)
+            junc_lanes = [ln for ln in road.lanes if self.is_lane_valid_for_landmark(lm, ln)]
+
+            ori = str(lm.orientation).lower()  # e.g. 'LandmarkOrientation.Positive' → '...positive'
+            applies_pos = ("positive" in ori) or ("both" in ori) or ("none" in ori)
+            applies_neg = ("negative" in ori) or ("both" in ori)
+
+            seen = set()
+            def attach(road_id: int, lane_id: int):
+                key = (road_id, lane_id, lm.id)
+                if key in seen:
+                    return
+                seen.add(key)
+                src_road = self.get_specific_road_from_blocks(data_blocks, road_id)
+                if not src_road or src_road.is_junction:
+                    return  # only attach to approach/exit lanes outside the junction
+                target = next((x for x in src_road.lanes if x.lane_id == lane_id), None)
+                if target is not None:
+                    target.landmarks.append(d_lm)
+
+            for jln in junc_lanes:
+                for pred in jln.predecessor_lanes:
+                    attach(pred.road_id, pred.lane_id)
 
     @staticmethod
     def is_lane_valid_for_landmark(landmark: Landmark, data_lane: DataLane) -> bool:
@@ -379,7 +405,6 @@ class MapRasterizer:
             cand.append(Point(c[0]))
             cand.append(Point(c[-1]))
 
-
         if isinstance(overlap, Point) and point_is_seed:
             return self._scan_to_nose(geom_a, geom_b, overlap, tol=0.01, step=0.01)
 
@@ -413,7 +438,7 @@ class MapRasterizer:
 
         if cand:
             rough_pt = min(cand, key=lambda pt: min(geom_a.project(pt),
-                                                geom_b.project(pt)))
+                                                    geom_b.project(pt)))
             point = self._scan_to_nose(geom_a, geom_b, rough_pt, tol=0.01, step=0.01)
             return point
 
@@ -438,6 +463,7 @@ class MapRasterizer:
         Return the earliest point where the two lanes come within `tol`
         even when the initial rough point is at s=0 on either lane.
         """
+
         def _forward(line_from, line_other):
             s, length = 0.0, line_from.length
             while s < length:
@@ -480,8 +506,6 @@ class MapRasterizer:
                 best_pt, best_score = pt, sc
 
         return best_pt
-
-
 
     def get_data_lane_for_waypoint(self, waypoint: Waypoint, landmarks: List[Landmark]) -> DataLane:
         """
@@ -825,9 +849,10 @@ class MapRasterizer:
                         return True
         return False
 
-    def get_data_road(self, road_id: int) -> DataRoad:
+    def get_data_road_from_id(self, road_id: int) -> Any | None:
         roads = list(map(lambda b: b.roads, self._blocks))
         flat_list = [item for sublist in roads for item in sublist]
         for road in flat_list:
             if road.road_id == road_id:
                 return road
+        return None
