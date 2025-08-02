@@ -13,7 +13,7 @@ class CarlaServerWorker(ThreadWorker):
         Manages the execution of a CARLA simulation runtime environment, allowing for
         restarting and terminating the CARLA executable.
         """
-        restart_carla(self.cfg.carla_executable, log=self.log)
+        restart_carla(exe = self.cfg.carla_executable, log=self.log, render_off_screen=self.cfg.render_off_screen, render_quality_low=self.cfg.render_quality_low)
         try:
             while not self.cancelled: time.sleep(1)
         finally:

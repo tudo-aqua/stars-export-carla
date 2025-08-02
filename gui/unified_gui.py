@@ -46,6 +46,15 @@ class UnifiedCarlaGUI(tk.Tk):
         end_at_default = -1 if self.config.end_at == float("inf") else self.config.end_at
         self.end_at_variable = tk.DoubleVar(value=end_at_default)
 
+        # ── NEW: CARLA rendering options ────────────────────────────────────────────
+        self.render_off_screen_variable = tk.BooleanVar(
+            value=getattr(self.config, "render_off_screen", False)
+        )
+        self.render_quality_low_variable = tk.BooleanVar(
+            value=getattr(self.config, "render_quality_low", False)
+        )
+        # ───────────────────────────────────────────────────────────────────────────
+
         self._active_worker = None
         self._carla_worker = None
 
@@ -92,19 +101,40 @@ class UnifiedCarlaGUI(tk.Tk):
     def _tab_server(self, notebook: ttk.Notebook):
         """
         Creates and manages the CARLA Server tab within a given notebook widget.
-
-        Parameters
-        ----------
-        notebook : ttk.Notebook
-            The notebook widget to which the CARLA Server tab will be added.
         """
         frame = ttk.Frame(notebook)
         notebook.add(frame, text="CARLA Server")
-        tk.Label(frame, text="Start or stop a head-less CARLA instance.").pack(pady=5)
-        self._entry_row(frame, "CARLA executable:", self.carla_executable_variable,
-                        lambda: self._open_file_dialog(self.carla_executable_variable))
-        self.server_btn = tk.Button(frame, text="Start CARLA server",
-                                    width=25, command=self._toggle_carla)
+        tk.Label(frame, text="Start or stop a CARLA instance.").pack(pady=5)
+
+        self._entry_row(
+            frame,
+            "CARLA executable:",
+            self.carla_executable_variable,
+            lambda: self._open_file_dialog(self.carla_executable_variable),
+        )
+
+        # ── NEW: Rendering options (checkboxes) ─────────────────────────────────────
+        rendering_options = ttk.LabelFrame(frame, text="Rendering options")
+        rendering_options.pack(fill="x", padx=4, pady=6)
+
+        tk.Checkbutton(
+            rendering_options,
+            text="Render off screen",
+            variable=self.render_off_screen_variable,
+            anchor="w",
+        ).pack(fill="x", padx=6, pady=2)
+
+        tk.Checkbutton(
+            rendering_options,
+            text="Render quality low",
+            variable=self.render_quality_low_variable,
+            anchor="w",
+        ).pack(fill="x", padx=6, pady=2)
+        # ───────────────────────────────────────────────────────────────────────────
+
+        self.server_btn = tk.Button(
+            frame, text="Start CARLA server", width=25, command=self._toggle_carla
+        )
         self.server_btn.pack(pady=10)
 
     def _tab_manual(self, notebook: ttk.Notebook):
@@ -133,6 +163,25 @@ class UnifiedCarlaGUI(tk.Tk):
                         lambda: self._open_directory_dialog(self.default_recordings_folder_variable))
         self._entry_row(frame, "New file-name prefix:", self.new_file_name_variable)
 
+        # ── NEW: Rendering options ─────────────────────────────────────────────────
+        rendering_options = ttk.LabelFrame(frame, text="Rendering options")
+        rendering_options.pack(fill="x", padx=4, pady=6)
+
+        tk.Checkbutton(
+            rendering_options,
+            text="Render off screen",
+            variable=self.render_off_screen_variable,
+            anchor="w",
+        ).pack(fill="x", padx=6, pady=2)
+
+        tk.Checkbutton(
+            rendering_options,
+            text="Render quality low",
+            variable=self.render_quality_low_variable,
+            anchor="w",
+        ).pack(fill="x", padx=6, pady=2)
+        # ──────────────────────────────────────────────────────────────────────────
+
         self.start_btn = tk.Button(frame, text="Start manual driving",
                                    width=25, command=self._start_manual)
         self.start_btn.pack(pady=8)
@@ -145,15 +194,13 @@ class UnifiedCarlaGUI(tk.Tk):
                                   command=self._stop_worker, state="disabled")
         self.stop_btn.pack(pady=8)
 
+
     def _tab_transform(self, notebook: ttk.Notebook):
         """
         Creates and configures the "Transform" tab in the provided notebook widget. This tab allows
         users to replay a recording and dump processed data. It provides fields for entering the
         recording extension, input recording path, and output folder, along with a button to
         initiate the transformation process.
-
-        Parameters:
-            notebook (ttk.Notebook): The notebook widget to which the "Transform" tab will be added.
         """
         frame = ttk.Frame(notebook)
         notebook.add(frame, text="Transform")
@@ -165,8 +212,28 @@ class UnifiedCarlaGUI(tk.Tk):
         self._entry_row(frame, "Output folder:", self.transformer_output_path_variable,
                         lambda: self._open_directory_dialog(self.transformer_output_path_variable))
 
+        # ── NEW: Rendering options ─────────────────────────────────────────────────
+        rendering_options = ttk.LabelFrame(frame, text="Rendering options")
+        rendering_options.pack(fill="x", padx=4, pady=6)
+
+        tk.Checkbutton(
+            rendering_options,
+            text="Render off screen",
+            variable=self.render_off_screen_variable,
+            anchor="w",
+        ).pack(fill="x", padx=6, pady=2)
+
+        tk.Checkbutton(
+            rendering_options,
+            text="Render quality low",
+            variable=self.render_quality_low_variable,
+            anchor="w",
+        ).pack(fill="x", padx=6, pady=2)
+        # ──────────────────────────────────────────────────────────────────────────
+
         tk.Button(frame, text="Start transform",
                   command=self._start_transform).pack(pady=10)
+
 
     def _tab_video(self, notebook: ttk.Notebook):
         """
@@ -338,13 +405,25 @@ class UnifiedCarlaGUI(tk.Tk):
         Sets up automatic saving for specified variables.
         """
         for variable in (
-                self.carla_executable_variable, self.recording_extension_variable,
-                self.manual_output_dir_variable, self.default_recordings_folder_variable, self.new_file_name_variable,
-                self.transform_input_file_variable, self.transformer_output_path_variable,
-                self.video_input_path_variable, self.video_output_path_variable,
-                self.video_width_variable, self.video_height_variable, self.vehicle_id_variable,
+                self.carla_executable_variable,
+                self.recording_extension_variable,
+                self.manual_output_dir_variable,
+                self.default_recordings_folder_variable,
+                self.new_file_name_variable,
+                self.transform_input_file_variable,
+                self.transformer_output_path_variable,
+                self.video_input_path_variable,
+                self.video_output_path_variable,
+                self.video_width_variable,
+                self.video_height_variable,
+                self.vehicle_id_variable,
                 self.with_bboxes_variable,
-                self.begin_at_variable, self.end_at_variable
+                self.begin_at_variable,
+                self.end_at_variable,
+                # ── NEW: autosave for the two CARLA rendering checkboxes ───────────────
+                self.render_off_screen_variable,
+                self.render_quality_low_variable,
+                # ──────────────────────────────────────────────────────────────────────
         ):
             variable.trace_add("write", self._auto_save)
 
@@ -358,11 +437,6 @@ class UnifiedCarlaGUI(tk.Tk):
         """
         Collects and normalizes configuration data from various sources, updates the
         config object, and saves it.
-
-        Returns
-        -------
-        Config
-            The updated configuration object with normalized and transformed values.
         """
         config = self.config
         config.carla_executable = self.carla_executable_variable.get().strip()
@@ -379,8 +453,15 @@ class UnifiedCarlaGUI(tk.Tk):
         config.begin_at = max(0.0, self.begin_at_variable.get())
         end_at_value = self.end_at_variable.get()
         config.end_at = float("inf") if end_at_value < 0 else end_at_value
+
+        # ── NEW: persist rendering options ─────────────────────────────────────────
+        config.render_off_screen = self.render_off_screen_variable.get()
+        config.render_quality_low = self.render_quality_low_variable.get()
+        # ──────────────────────────────────────────────────────────────────────────
+
         save(config)
         return config
+
 
     def _validate(self, pairs: List[(str, tk.StringVar)]):
         """

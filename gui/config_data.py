@@ -9,6 +9,8 @@ _CONFIG_PATH = Path.home() / ".carla_gui_config.json"
 @dataclass
 class Config:
     carla_executable: str = ""
+    render_off_screen: bool = False
+    render_quality_low: bool = False
     recording_extension: str = ".rec"
 
     manual_output_dir: str = ""

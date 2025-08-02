@@ -29,28 +29,43 @@ def kill_carla(log: Callable[[str], None] | None = None) -> None:
             except psutil.NoSuchProcess:
                 pass
 
-
-def start_carla(exe: str) -> None:
+def start_carla(
+        exe: str,
+        *,
+        render_off_screen: bool = True,
+        render_quality_low: bool = True,
+) -> None:
     """
-    Launch a head-less CARLA server in its **own** process group.
+    Launch a CARLA server in its **own** process group.
 
     Parameters
     ----------
     exe : str
         Path to the ``CarlaUE4`` executable or launcher script.
+    render_off_screen : bool, default False
+        If True, start CARLA with off-screen rendering (adds ``-RenderOffScreen``).
+    render_quality_low : bool, default False
+        If True, force low quality rendering (adds ``-quality-level=Low``).
     """
-    cmd = [exe, "-RenderOffScreen"]
+    cmd = [exe]
+    if render_off_screen:
+        cmd.append("-RenderOffScreen")
+    if render_quality_low:
+        cmd.append("-quality-level=Low")
+
     kwargs: dict[str, Any]
     if sys.platform.startswith("win"):
         kwargs = dict(creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
     else:
         kwargs = dict(preexec_fn=os.setsid)
-    subprocess.Popen(cmd, **kwargs)
 
+    subprocess.Popen(cmd, **kwargs)
 
 def restart_carla(
         exe: str,
         *,
+        render_off_screen: bool = True,
+        render_quality_low: bool = True,
         cooldown: float = 5,
         boot: float = 20,
         log: Callable[[str], None] | None = None
@@ -65,9 +80,13 @@ def restart_carla(
     ----------
     exe : str
         Fully qualified path to the CARLA executable.
+    render_off_screen : bool, default False
+        Forwarded to `start_carla`.
+    render_quality_low : bool, default False
+        Forwarded to `start_carla`.
     cooldown : float, default 5
         Seconds to wait *after* killing existing instances but *before*
-        spawning a new one.  Gives the OS time to release sockets/handles.
+        spawning a new one.
     boot : float, default 20
         Seconds to wait *after* launching CARLA so UE4 can finish loading maps.
     log : Callable[[str], None], optional
@@ -83,7 +102,9 @@ def restart_carla(
         time.sleep(cooldown)
 
     _log(">> [CARLA] Starting new server …")
-    start_carla(exe)
+    start_carla(exe,
+                render_off_screen=render_off_screen,
+                render_quality_low=render_quality_low)
 
     if boot > 0:
         _log(f">> [CARLA] Waiting {boot:.1f}s for CARLA to boot")
@@ -97,6 +118,9 @@ def restart_and_connect(
         host: str = "localhost",
         port: int = 2000,
         timeout: float = 60,
+        *,
+        render_off_screen: bool = True,
+        render_quality_low: bool = True,
         cooldown: float = 5,
         boot: float = 20,
         log: Callable[[str], None] | None = None
@@ -107,14 +131,15 @@ def restart_and_connect(
     Parameters
     ----------
     exe : str
-        Location of the CARLA executable passed through to
-        `restart_carla`.
-    host : str default ``"localhost"``
+        Location of the CARLA executable passed through to `restart_carla`.
+    host : str, default ``"localhost"``
         Connection endpoint for the CARLA RPC server.
     port: int, default ``2000``
         Connection endpoint port for the CARLA RPC server.
     timeout : float, default 60
         Seconds before a socket operation on the client aborts.
+    render_off_screen, render_quality_low : bool
+        Forwarded to `restart_carla`.
     cooldown, boot : float
         Forwarded verbatim to `restart_carla`.
     log : Callable[[str], None], optional
@@ -126,7 +151,14 @@ def restart_and_connect(
         A connected client of Carla ready for world interaction.
     """
     _log = log or print
-    restart_carla(exe, cooldown=cooldown, boot=boot, log=_log)
+    restart_carla(
+        exe,
+        render_off_screen=render_off_screen,
+        render_quality_low=render_quality_low,
+        cooldown=cooldown,
+        boot=boot,
+        log=_log,
+    )
 
     _log(">> [CARLA] Connecting to server …")
     client = carla.Client(host, port)

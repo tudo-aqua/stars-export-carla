@@ -21,7 +21,8 @@ class ManualControlWorker(ThreadWorker):
 
     def run(self):
         self.log(">> Rebooting CARLA …")
-        restart_carla(self.cfg.carla_executable, log=self.log)
+        restart_carla(self.cfg.carla_executable, log=self.log, render_quality_low=self.cfg.render_quality_low,
+                      render_off_screen=self.cfg.render_off_screen)
         if self.cancelled:  # stop pressed during boot wait
             return
 
@@ -86,7 +87,7 @@ class ManualControlWorker(ThreadWorker):
         # Hard-kill everything
         for p in procs:
             try:
-                p.kill()          # unconditional SIGKILL / TerminateProcess
+                p.kill()  # unconditional SIGKILL / TerminateProcess
             except psutil.NoSuchProcess:
                 pass
 

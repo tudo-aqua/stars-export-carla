@@ -16,7 +16,9 @@ class TransformRecordingWorker(ThreadWorker):
         try:
             from helpers.carla_monitor import CarlaMonitor  # type: ignore
             self.log(">> Rebooting CARLA & connecting …")
-            client = restart_and_connect(self.cfg.carla_executable, log=self.log)
+            client = restart_and_connect(self.cfg.carla_executable, log=self.log,
+                                         render_off_screen=self.cfg.render_off_screen,
+                                         render_quality_low=self.cfg.render_quality_low)
             if self.cancelled: return
 
             monitor = CarlaMonitor(carla_client=client)
