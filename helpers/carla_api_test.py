@@ -28,7 +28,7 @@ if __name__ == '__main__':
     landmarks = world.get_map().get_all_landmarks()
     valid_landmarks = []
     for landmark in landmarks:
-        data_road = _rasterizer.get_data_road(landmark.road_id)
+        data_road = _rasterizer.get_data_road_from_id(landmark.road_id)
         if data_road.is_junction and DataLandmarkType(int(landmark.type)) == DataLandmarkType.StopSign or DataLandmarkType(int(landmark.type)) == DataLandmarkType.YieldSign:
             valid_landmarks.append(landmark)
     landmark = list(filter(lambda l: l.id == '947', landmarks))[0]

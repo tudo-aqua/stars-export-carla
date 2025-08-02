@@ -817,25 +817,6 @@ class MapRasterizer:
                     has_previous = False
         return previous_waypoints
 
-    @staticmethod
-    def get_data_landmark_for_landmark(landmark: Landmark) -> DataLandmark:
-        """
-        Returns the DataLandmark object based on the given landmark
-        @param landmark: The landmark that should be converted into a DataLandmark
-        @return: The filled DataLandmark object
-        """
-        orientation = DataLandmarkOrientation(int(landmark.orientation))
-        landmark_type = DataLandmarkType(int(landmark.type))
-        location = DataLocation.from_location(landmark.transform.location)
-        rotation = DataRotation.from_rotation(landmark.transform.rotation)
-        return DataLandmark(id=landmark.id, road_id=landmark.road_id, name=landmark.name, distance=landmark.distance,
-                            s=landmark.s, is_dynamic=landmark.is_dynamic, orientation=orientation,
-                            z_offset=landmark.z_offset, country=landmark.country, type=landmark_type,
-                            sub_type=landmark.sub_type, value=landmark.value, unit=landmark.unit,
-                            height=landmark.height, width=landmark.width, text=landmark.text,
-                            h_offset=landmark.h_offset, pitch=landmark.pitch, roll=landmark.roll, location=location,
-                            rotation=rotation)
-
     def blocks_contain_waypoint(self, lane_id: int, road_id: int) -> bool:
         for block in self._blocks:
             for road in block.roads:

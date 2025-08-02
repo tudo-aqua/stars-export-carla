@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from dataclass_wizard import JSONWizard
 from typing import Tuple, List, Optional, Union
 from carla import Rotation, Vector3D, Actor, Location, Vehicle, Waypoint, TrafficLight, TrafficSign, Walker, \
-    WeatherParameters, BoundingBox
+    WeatherParameters, BoundingBox, Landmark
 from shapely import LineString
 
 from carla_data_classes.data_enums import DataLaneType, DataLandmarkOrientation, DataLandmarkType, DataTrafficSignType, \
@@ -423,6 +423,25 @@ class DataLandmark:
     roll: float  # X-axis rotation
     location: DataLocation
     rotation: DataRotation
+
+    @staticmethod
+    def from_landmark(landmark: Landmark) -> DataLandmark:
+        """
+        Returns the DataLandmark object based on the given landmark
+        @param landmark: The landmark that should be converted into a DataLandmark
+        @return: The filled DataLandmark object
+        """
+        orientation = DataLandmarkOrientation(int(landmark.orientation))
+        landmark_type = DataLandmarkType(int(landmark.type))
+        location = DataLocation.from_location(landmark.transform.location)
+        rotation = DataRotation.from_rotation(landmark.transform.rotation)
+        return DataLandmark(id=landmark.id, road_id=landmark.road_id, name=landmark.name, distance=landmark.distance,
+                            s=landmark.s, is_dynamic=landmark.is_dynamic, orientation=orientation,
+                            z_offset=landmark.z_offset, country=landmark.country, type=landmark_type,
+                            sub_type=landmark.sub_type, value=landmark.value, unit=landmark.unit,
+                            height=landmark.height, width=landmark.width, text=landmark.text,
+                            h_offset=landmark.h_offset, pitch=landmark.pitch, roll=landmark.roll, location=location,
+                            rotation=rotation)
 
 
 @dataclass
