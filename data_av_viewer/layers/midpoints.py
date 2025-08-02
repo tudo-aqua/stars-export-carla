@@ -30,7 +30,7 @@ class MidpointLayer(BaseLayer):
         tpl = ("Road:%{customdata[0]} Lane:%{customdata[1]}<br>"
                "Dist:%{customdata[2]:.2f} m<br>"
                "Yaw:%{customdata[3]:.1f}°<br>"
-               "x:%{x:.2f} y:%{y:.2f}<extra></extra>")
+               "X:%{x:.2f} Y:%{y:.2f}<extra></extra>")
 
         pt = go.Scattergl(
             x=df.x, y=df.y, mode="markers",

@@ -1,17 +1,7 @@
-#!/usr/bin/env python3
-"""
-CARLA viewer – static layers **plus** super‑lightweight dynamic replay.
-
-  • drag‑&‑drop a *.json* with either blocks (static) or tick list (dynamic) or both
-  • layer toggles + per‑layer size sliders (unchanged)
-  • tick slider + play/pause + speed control for the dynamics
-  • only x/y/text of pre‑built actor traces are patched – no lag, even with thousands of frames
-"""
 from __future__ import annotations
 import base64, importlib, pkgutil, pathlib, orjson
-from typing import Dict, List, Tuple
+from typing import  List, Tuple
 
-import numpy as np
 import plotly.graph_objects as go
 from dash import Dash, dcc, html, Input, Output, State, Patch, ALL, ctx, no_update
 

@@ -20,7 +20,7 @@ class TrafficLightLayer(BaseLayer):
         df=self.get_df(self.df_key)
         if df.empty: return []
         tpl=("OD:%{customdata[0]}<br>Pos:%{customdata[1]:.2f} m<br>"
-             "x:%{x:.2f} y:%{y:.2f}<extra></extra>")
+             "X:%{x:.2f} Y:%{y:.2f}<extra></extra>")
         tr=go.Scattergl(
             x=df.x,y=df.y,mode="markers",
             marker=dict(size=self.size["traffic_lights"],symbol="triangle-up"),
