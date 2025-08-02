@@ -1,6 +1,7 @@
 # layers/contact_areas.py
 import pandas as pd, plotly.graph_objects as go
 from .base_layer import register, BaseLayer
+from .utils import color_for_road
 
 
 @register("contact_areas")
@@ -35,6 +36,7 @@ class ContactAreaLayer(BaseLayer):
 
         traces = []
         for _, row in df.iterrows():
+            color = color_for_road(row.lane_1_road_id)
             hover = (f"ID: {row.id}<br>"
                      f"Lane 1: Road {row.lane_1_road_id} Lane {row.lane_1_lane_id}<br>"
                      f"Lane 2: Road {row.lane_2_road_id} Lane {row.lane_2_lane_id}<br>"
@@ -45,9 +47,9 @@ class ContactAreaLayer(BaseLayer):
                     x=[row.x], y=[row.y],  # one point
                     mode="markers",
                     name=str(row.id),  # shows in legend
-                    marker=dict(size=self.size["contact_areas"], symbol="x"),
+                    marker=dict(size=self.size["contact_areas"], symbol="x", color=color),
                     hovertemplate=hover,
-                    hoverlabel=dict(bgcolor="#9467bd"),
+                    hoverlabel=dict(bgcolor=color),
                     showlegend=True
                 )
             )
