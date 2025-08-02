@@ -330,8 +330,8 @@ class MapRasterizer:
 
                 lane_b = geom2lane[geom_b]
 
-                if (lane_a.road_id == 24 and lane_a.lane_id == 1 and lane_b.road_id == 90 and lane_b.lane_id == 1 or
-                        lane_b.road_id == 24 and lane_b.lane_id == 1 and lane_a.road_id == 90 and lane_a.lane_id == 1):
+                if (lane_a.road_id == 565 and lane_a.lane_id == 2 and lane_b.road_id == 579 and lane_b.lane_id == -1 or
+                        lane_b.road_id == 565 and lane_b.lane_id == 2 and lane_a.road_id == 579 and lane_a.lane_id == -1):
                     x = 1
 
                 inter_geom = geom_a.intersection(geom_b)
@@ -342,7 +342,8 @@ class MapRasterizer:
                         processed[key] = None
                         continue
                     p, q = nearest_points(geom_a, geom_b)
-                    point = Point((p.x + q.x) * 0.5, (p.y + q.y) * 0.5)
+                    rough_point = Point((p.x + q.x) * 0.5, (p.y + q.y) * 0.5)
+                    point = self._nose_point(rough_point, geom_a, geom_b, True)
 
                 else:
                     # ---- any kind of overlap / collection ----
@@ -370,7 +371,7 @@ class MapRasterizer:
 
         return roads_list
 
-    def _nose_point(self, overlap, geom_a: LineString, geom_b: LineString) -> Point:
+    def _nose_point(self, overlap, geom_a: LineString, geom_b: LineString, point_is_seed: bool = False) -> Point:
         """
         Return the first shared point (nose) of two overlapping lanes.
         Guaranteed to return a shapely Point.
@@ -381,6 +382,10 @@ class MapRasterizer:
             c = list(ls.coords)
             cand.append(Point(c[0]))
             cand.append(Point(c[-1]))
+
+
+        if isinstance(overlap, Point) and point_is_seed:
+            return self._scan_to_nose(geom_a, geom_b, overlap, tol=0.01, step=0.01)
 
         # collect candidates
         if isinstance(overlap, Point):
@@ -461,12 +466,12 @@ class MapRasterizer:
             return pt0, min(line_from.project(pt0), line_other.project(pt0))
 
         # --- run both directions on both lanes -------------------------
-        best_pt, best_score = None, float('inf')
+        best_pt, best_score = None, float(0)
 
         # forward scan from start of each lane
         for g_from, g_other in ((geom_a, geom_b), (geom_b, geom_a)):
             pt, sc = _forward(g_from, g_other)
-            if sc < best_score:
+            if sc > best_score:
                 best_pt, best_score = pt, sc
 
         # backward scan from rough point on each lane
@@ -475,7 +480,7 @@ class MapRasterizer:
         for g_from, g_other, s_start in ((geom_a, geom_b, s_a),
                                          (geom_b, geom_a, s_b)):
             pt, sc = _backward(g_from, g_other, s_start)
-            if sc < best_score:
+            if sc > best_score:
                 best_pt, best_score = pt, sc
 
         return best_pt
