@@ -160,30 +160,26 @@ class MapRasterizer:
         """
         landmarks: List[Landmark] = self._map.get_all_landmarks()
 
-        for lm in landmarks:
-            print(f"Converting Landmark {lm.id}")
-            d_lm = DataLandmark.from_landmark(lm)  # builds DataLandmark from CARLA Landmark
-            road = self.get_specific_road_from_blocks(data_blocks, lm.road_id)
+        for landmark in landmarks:
+            print(f"Converting Landmark {landmark.id}")
+            data_landmark = DataLandmark.from_landmark(landmark)  # builds DataLandmark from CARLA Landmark
+            road = self.get_specific_road_from_blocks(data_blocks, landmark.road_id)
             if not road:
                 continue
 
             # --- non-junction roads: unchanged ------------------------------------
             if not road.is_junction:
-                for ln in road.lanes:
-                    if self.is_lane_valid_for_landmark(lm, ln):
-                        ln.landmarks.append(d_lm)
+                for lane in road.lanes:
+                    if self.is_lane_valid_for_landmark(landmark, lane):
+                        lane.landmarks.append(data_landmark)
                 continue
 
             # --- junction roads: map to approaches (predecessors) / exits (successors)
-            junc_lanes = [ln for ln in road.lanes if self.is_lane_valid_for_landmark(lm, ln)]
-
-            ori = str(lm.orientation).lower()  # e.g. 'LandmarkOrientation.Positive' → '...positive'
-            applies_pos = ("positive" in ori) or ("both" in ori) or ("none" in ori)
-            applies_neg = ("negative" in ori) or ("both" in ori)
+            junction_lanes = [lane for lane in road.lanes if self.is_lane_valid_for_landmark(landmark, lane)]
 
             seen = set()
             def attach(road_id: int, lane_id: int):
-                key = (road_id, lane_id, lm.id)
+                key = (road_id, lane_id, landmark.id)
                 if key in seen:
                     return
                 seen.add(key)
@@ -192,10 +188,10 @@ class MapRasterizer:
                     return  # only attach to approach/exit lanes outside the junction
                 target = next((x for x in src_road.lanes if x.lane_id == lane_id), None)
                 if target is not None:
-                    target.landmarks.append(d_lm)
+                    target.landmarks.append(data_landmark)
 
-            for jln in junc_lanes:
-                for pred in jln.predecessor_lanes:
+            for junction_lane in junction_lanes:
+                for pred in junction_lane.predecessor_lanes:
                     attach(pred.road_id, pred.lane_id)
 
     @staticmethod
