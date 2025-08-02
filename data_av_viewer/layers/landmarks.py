@@ -53,7 +53,7 @@ class LandmarkLayer(BaseLayer):
             "Value: %{customdata[6]}<br>"
             "Sub‑type: %{customdata[7]}<br>"
             "Type: %{customdata[8]}<br>"
-            "x:%{x:.2f} y:%{y:.2f}<extra></extra>"
+            "x:%{x:.2f} y:%{y:.2f}<extra></extra>"
         )
 
         marker_trace = go.Scattergl(

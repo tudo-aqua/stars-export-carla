@@ -2,10 +2,10 @@
 """
 CARLA viewer – static layers **plus** super‑lightweight dynamic replay.
 
-  • drag‑&‑drop a *.json* with either blocks (static) or tick list (dynamic) or both
-  • layer toggles + per‑layer size sliders (unchanged)
-  • tick slider + play/pause + speed control for the dynamics
-  • only x/y/text of pre‑built actor traces are patched – no lag, even with thousands of frames
+  • drag‑&‑drop a *.json* with either blocks (static) or tick list (dynamic) or both
+  • layer toggles + per‑layer size sliders (unchanged)
+  • tick slider + play/pause + speed control for the dynamics
+  • only x/y/text of pre‑built actor traces are patched – no lag, even with thousands of frames
 """
 from __future__ import annotations
 import base64, importlib, pkgutil, pathlib, orjson
@@ -75,36 +75,36 @@ app = Dash(__name__, suppress_callback_exceptions=True)
 app.layout = html.Div([
     # ---- sidebar -----------------------------------------------------
     html.Div([
-        html.H3("CARLA Viewer"),
+        html.H3("CARLA Viewer"),
         dcc.Upload(id="upload",
-                   children=html.Div(["Drag & Drop or ", html.A("Select JSON")]),
+                   children=html.Div(["Drag & Drop or ", html.A("Select JSON")]),
                    style={"width":"100%","height":"60px","lineHeight":"60px",
                           "border":"1px dashed","borderRadius":"5px",
                           "textAlign":"center","margin":"10px 0"}),
         html.Div(id="msg", style={"fontSize":"12px","color":"#555"}),
 
-        html.H4("Static layers"),
+        html.H4("Static layers"),
         dcc.Checklist(id="layer-ck", options=LAYER_OPTIONS, value=DEFAULT_LAYERS,
                       inputStyle={"margin-right":"4px","margin-left":"12px"}),
 
-        html.H4("Hover enabled for"),
+        html.H4("Hover enabled for"),
         dcc.Checklist(id="hover-ck", options=LAYER_OPTIONS, value=HOVER_DEFAULT,
                       inputStyle={"margin-right":"4px","margin-left":"12px"}),
 
-        html.H4("Marker sizes"),
+        html.H4("Marker sizes"),
         *(_size_slider(l) for l in SIZE_LAYERS),
 
         html.Hr(),
 
-        html.H4("Dynamic replay"),
+        html.H4("Dynamic replay"),
         dcc.Slider(id="tick-sl", min=0, max=0, step=1, value=0, updatemode="drag",
                    tooltip={"placement":"bottom","always_visible":True}),
         html.Div([
-            html.Button("▶ Play", id="play-btn", n_clicks=0,
+            html.Button("▶ Play", id="play-btn", n_clicks=0,
                         style={"width":"60px"}),
-            html.Button("⏸ Pause", id="pause-btn", n_clicks=0,
+            html.Button("⏸ Pause", id="pause-btn", n_clicks=0,
                         style={"width":"60px","marginLeft":"6px"}),
-            html.Span("  speed"),
+            html.Span("  speed"),
             dcc.Slider(id="speed-sl", min=0.2, max=5, updatemode="drag",
                        step=0.2, value=1.0, tooltip={"placement":"bottom"})
         ], style={"marginTop":"4px"})
@@ -139,14 +139,14 @@ app.layout.children.append(
 )
 def parse_upload(contents, fname):
     if not contents:
-        return {}, [], "No file."
+        return {}, [], "No file."
     try:
         ticks, blocks = _load_raw_json(_decode_upload(contents))
         store = ViewerStore.from_source(blocks, ticks[0] if ticks else None)
-        msg = f"Loaded '{fname}'  |  ticks:{len(ticks)}  |  blocks:{len(blocks)}"
+        msg = f"Loaded '{fname}'  |  ticks:{len(ticks)}  |  blocks:{len(blocks)}"
         return store.to_json(), orjson.dumps([t.to_dict() for t in ticks]).decode(), msg
     except Exception as e:
-        return {}, [], f"Error: {e}"
+        return {}, [], f"Error: {e}"
 
 # ----------------------------------------------------------------------
 # 2)  Build base figure + dynamic templates ---------------------------
@@ -195,7 +195,7 @@ def build_fig(json_data, dyn_raw, visible_layers):
     return fig, layer_map, tmpl, {"frames": per_tick}, len(per_tick)-1
 
 # ----------------------------------------------------------------------
-# 3)  Static‑layer toggles / sizes / hover   – unchanged callbacks -----
+# 3)  Static‑layer toggles / sizes / hover   – unchanged callbacks -----
 @app.callback(
     Output("fig", "figure", allow_duplicate=True),
     Input("layer-ck", "value"),

@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 from carla_data_classes import DataActor, DataTrafficLight
 from . import register, BaseRenderer
 
-# Carla TL state → colour map
+# Carla TL state → colour map
 _TL_COLOUR = {0:"#f00", 1:"#ff0", 2:"#0f0", 3:"#0f0", 4:"#777"}   # Fallback/Off = grey
 
 @register("traffic_light")
@@ -24,7 +24,7 @@ class TrafficLightRenderer(BaseRenderer):
             y=[actor.location.y],
             mode="markers",
             marker=dict(size=10, color=_TL_COLOUR.get(actor.state, "#777")),
-            name=f"TL {actor.id}",
+            name=f"TL {actor.id}",
             hoverinfo="text"
         )
 
@@ -33,6 +33,6 @@ class TrafficLightRenderer(BaseRenderer):
     def frame_payload(cls, actor: DataTrafficLight):
         xs = np.asarray([actor.location.x])
         ys = np.asarray([actor.location.y])
-        txt = f"Traffic‑Light {actor.id}<br>State: {actor.state}"
+        txt = f"Traffic‑Light {actor.id}<br>State: {actor.state}"
         style = {"marker.color": _TL_COLOUR.get(actor.state, "#777")}
         return xs, ys, txt, style

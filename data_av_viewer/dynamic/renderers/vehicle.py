@@ -22,7 +22,7 @@ class VehicleRenderer(BaseRenderer):
         if bb:                       # use real bb
             xs = [v.x for v in bb.vertices] + [bb.vertices[0].x]
             ys = [v.y for v in bb.vertices] + [bb.vertices[0].y]
-        else:                        # tiny 1×1 m square around point
+        else:                        # tiny 1×1 m square around point
             x, y = actor.location.x, actor.location.y
             half = 0.5
             xs, ys = zip(*shp_box(x-half, y-half, x+half, y+half).exterior.coords)
@@ -38,7 +38,7 @@ class VehicleRenderer(BaseRenderer):
             fill="toself",
             line=dict(width=1.0, color=base_color),
             fillcolor=rgba(base_color, .45),
-            name=f"{actor.type.lower()} {actor.id}",
+            name=f"{actor.type.lower()} {actor.id}",
             hoverinfo="text"
         )
 
@@ -46,7 +46,7 @@ class VehicleRenderer(BaseRenderer):
     @classmethod
     def frame_payload(cls, actor: DataActor):
         xs, ys = cls._square_xy(actor)
-        txt = (f"ID {actor.id}<br>"
-               f"{actor.type}: {actor.type_id}<br>"
-               f"Speed: {getattr(actor,'velocity',None) and round(actor.velocity.x,1)} m/s")
+        txt = (f"ID {actor.id}<br>"
+               f"{actor.type}: {actor.type_id}<br>"
+               f"Speed: {getattr(actor,'velocity',None) and round(actor.velocity.x,1)} m/s")
         return xs, ys, txt, {}
