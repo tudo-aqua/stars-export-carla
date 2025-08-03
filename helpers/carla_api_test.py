@@ -6,7 +6,7 @@ from carla import World
 from carla_data_classes import DataActorPosition, TickData, DataLandmarkType
 from helpers.carla_api_helper import CarlaAPIHelper
 
-from helpers.map_rasterizer import MapRasterizer
+from data_av_static import MapRasterizer
 
 if __name__ == '__main__':
     print("Connect to carla simulator")

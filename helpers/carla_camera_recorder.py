@@ -9,7 +9,7 @@ from carla import World, Client
 
 from helpers.carla_api_helper import CarlaAPIHelper
 from helpers.json_helper import JSONHelper
-from helpers.map_rasterizer import MapRasterizer
+from data_av_static import MapRasterizer
 
 
 class CarlaCameraRecorder:

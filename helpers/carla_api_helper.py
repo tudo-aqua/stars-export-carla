@@ -4,7 +4,7 @@ from carla import *
 
 from carla_data_classes.data_classes import *
 from helpers.json_helper import JSONHelper
-from helpers.map_rasterizer import MapRasterizer
+from data_av_static import MapRasterizer
 
 ACTOR_BLOCK_FILTERING_SWITCH = True
 USABLE_MAPS = ["Town01", "Town02", "Town10"]

@@ -1,7 +1,6 @@
 import argparse
 import math
 import os
-import time
 from datetime import datetime
 from typing import List
 
@@ -12,10 +11,9 @@ from carla.libcarla import TrafficLight
 
 from carla_data_classes import DataActorPosition, TickData, DataWeatherParameters, DataWeatherParametersType, \
     DataTrafficLight, DataActor, DataTrafficSign
+from data_av_static import MapRasterizer
 from helpers.carla_api_helper import CarlaAPIHelper
-from helpers.carla_recording_generator import CarlaDataGenerator
 from helpers.json_helper import JSONHelper
-from helpers.map_rasterizer import MapRasterizer
 
 
 class CarlaMonitor:
@@ -137,7 +135,8 @@ class CarlaMonitor:
                                                                               CarlaMonitor.SPECIFIC_TRACK_INTERVAL) != 0:
                     continue
                 elapsed_time = (datetime.now() - start_time).total_seconds()
-                print(f"Simulation tick: {tick} of {replay_tick_count} Result Tick: {current_tick} Elapsed time: {elapsed_time}s")
+                print(
+                    f"Simulation tick: {tick} of {replay_tick_count} Result Tick: {current_tick} Elapsed time: {elapsed_time}s")
 
                 # Get all vehicles
                 vehicles = api_helper.get_vehicles()

@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 
 from helpers.carla_api_helper import CarlaAPIHelper
-from helpers.map_rasterizer import MapRasterizer
+from data_av_static import MapRasterizer
 from helper import build_projection_matrix, get_image_point, point_in_canvas, min_distance_to_front
 from python.camera_recorder.CameraPosition import CameraPosition
 from python.camera_recorder.CarlaConnector import connect, load_world
