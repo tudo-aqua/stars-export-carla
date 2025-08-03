@@ -22,30 +22,55 @@ def register(name: str):
     return deco
 
 
-def build_all_traces(store, visible_layers: List[str], size_cfg: Dict[str, int]):
+def build_all_traces(store, visible_layers: List[str], size_cfg: Dict[str, int]) -> Tuple[List[go.BaseTraceType], Dict[str, List[int]], List[dict]]:
     """
-    Iterate over every registered layer, let it build its traces, and
-    return (list_of_traces, layer_map).
+    Iterate over every registered layer, let it build its traces (and shapes),
+    and return (list_of_traces, layer_map, list_of_shapes).
 
-    layer_map maps layer_name -> list[trace_index] so GUI callbacks can
-    toggle visibility, patch sizes, etc.
+    layer_map maps:
+      - layer_name -> list[trace_index]
+      - layer_name + "_shapes_range" -> [start_index, end_index] in the global shapes list
+      - layer_name + "_shape_xy" -> [[x...], [y...]]  (used for resizing shapes)
     """
     traces: List[go.BaseTraceType] = []
     layer_map: Dict[str, List[int]] = {}
+    shapes: List[dict] = []
 
     for name, LayerCls in LAYER_REGISTRY.items():
         layer_obj = LayerCls(store, size_cfg)
-        layer_traces = layer_obj.traces()
 
-        # set initial visibility according to `visible_layers`
+        # ---- traces ---------------------------------------------------
+        layer_traces = layer_obj.traces()
         for tr in layer_traces:
             tr.visible = name in visible_layers
-
         start_idx = len(traces)
         traces.extend(layer_traces)
         layer_map[name] = list(range(start_idx, len(traces)))
 
-    return traces, layer_map
+        # ---- shapes (optional) ---------------------------------------
+        sh_fn = getattr(layer_obj, "shapes", None)
+        if callable(sh_fn):
+            layer_shapes = sh_fn() or []
+            if layer_shapes:
+                init_vis = name in visible_layers                      # ← NEW
+                for s in layer_shapes:                                  # ← NEW
+                    s["visible"] = init_vis
+                    s0 = len(shapes)
+                shapes.extend(layer_shapes)
+                s1 = len(shapes) - 1
+                layer_map[name + "_shapes_range"] = [s0, s1]
+
+                # store the anchor points used to compute/resize the shapes
+                try:
+                    df = layer_obj.get_df(getattr(layer_obj, "df_key", ""))
+                    if df is not None and not df.empty:
+                        layer_map[name + "_shape_xy"] = [df["x"].tolist(), df["y"].tolist()]
+                    else:
+                        layer_map[name + "_shape_xy"] = [[], []]
+                except Exception:
+                    layer_map[name + "_shape_xy"] = [[], []]
+
+    return traces, layer_map, shapes
 
 
 class BaseLayer(ABC):
