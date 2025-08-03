@@ -14,6 +14,7 @@ from carla_data_classes import DataActorPosition, TickData, DataWeatherParameter
 from data_av_static import MapRasterizer
 from helpers.carla_api_helper import CarlaAPIHelper
 from helpers.json_helper import JSONHelper
+from helpers.kinematics import compute_vel_acc_for_ticks
 
 
 class CarlaMonitor:
@@ -196,6 +197,10 @@ class CarlaMonitor:
                                 weather_parameters=weather_parameters)
                 # Save the TickData object in the list
                 ticks.append(tick)
+            print("Calculate velocity and acceleration for actors")
+            compute_vel_acc_for_ticks(ticks)
+            # Strip the first two ticks so that the velocity and acceleration is correct from the beginning
+            ticks = ticks[3:]
             print("Analysis complete. Save to disk.")
             # Save Dynamic data to disk
             file_name = os.path.basename(log_data_path).split(".")[0]
