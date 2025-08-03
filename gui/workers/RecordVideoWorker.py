@@ -11,6 +11,7 @@ class RecordVideoWorker(ThreadWorker):
     """
     Handles video recording tasks using CARLA simulation and exports the video.
     """
+
     def run(self):
         """
         Executes the video recording process with optional bounding box annotations, connects to the CARLA simulator, and
@@ -38,8 +39,12 @@ class RecordVideoWorker(ThreadWorker):
 
         self.log(">> Encoding mp4 …")
         stem = Path(self.cfg.video_input_file).stem
-        rec.save_video(self.cfg.video_output_path, stem,
-                       self.cfg.vehicle_id, self.cfg.begin_at, rec.END_AT, self.cfg.with_bboxes)
+        if self.cfg.with_bboxes:
+            rec.save_video(self.cfg.video_output_path, stem, self.cfg.vehicle_id, self.cfg.begin_at, rec.END_AT,
+                           self.cfg.with_bboxes)
+        else:
+            rec.save_video(self.cfg.video_output_path, stem, self.cfg.vehicle_id, self.cfg.begin_at, rec.END_AT)
+
         self.log(">> Finished video export")
         kill_carla(log=self.log)
 
