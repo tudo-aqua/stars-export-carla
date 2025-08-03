@@ -121,42 +121,42 @@ app.layout.children.append(
 )
 
 
-# ----------------------------------------------------------------------
-# 1)  Parse Upload -----------------------------------------------------
-# ----------------------------------------------------------------------
-# 1)  Parse Upload -----------------------------------------------------
 @app.callback(
     Output("store-json", "data"),
     Output("dyn-ticks", "data"),
     Output("msg", "children"),
     Input("upload", "contents"),
     State("upload", "filename"),
-    State("store-json", "data"),  # ← keep prior static store
+    State("store-json", "data"),  # keep prior static if dynamic upload
+    State("dyn-ticks", "data"),  # keep prior dynamic if static upload
     prevent_initial_call=True
 )
-def parse_upload(contents, fname, prior_store_json):
+def parse_upload(contents, fname, prior_store_json, prior_dyn_json):
     if not contents:
-        # nothing changed
-        return prior_store_json, [], "No file."
+        return prior_store_json, prior_dyn_json, "No file."
 
     try:
-        ticks, blocks = _load_raw_json(_decode_upload(contents))
-        # --- static file (blocks non-empty) ------------------------
+        raw = _decode_upload(contents)
+        ticks, blocks = _load_raw_json(raw)
+
+        # ---- static upload (replace static, keep dynamic) ----
         if blocks:
             store = ViewerStore.from_source(blocks, ticks[0] if ticks else None)
-            msg = f"Loaded static '{fname}'  |  ticks:{len(ticks)}  |  blocks:{len(blocks)}"
-            # reset dynamic ticks when static changes
-            return store.to_json(), [], msg
+            msg = f"Loaded static '{fname}' | blocks:{len(blocks)}"
+            return store.to_json(), (prior_dyn_json or ""), msg
 
-        # --- dynamic file (blocks empty, ticks non-empty) ----------
-        dyn_json = orjson.dumps([t.to_dict() for t in ticks]).decode()
-        msg = f"Loaded dynamic '{fname}' | ticks:{len(ticks)}"
-        # keep prior static store, update only dyn-ticks
-        return prior_store_json, dyn_json, msg
+        # ---- dynamic upload (replace dynamic, keep static) ----
+        if ticks:
+            dyn_json = orjson.dumps([t.to_dict() for t in ticks]).decode()
+            msg = f"Loaded dynamic '{fname}' | ticks:{len(ticks)}"
+            return prior_store_json, dyn_json, msg
+
+        # Nothing recognized — keep everything
+        return prior_store_json, prior_dyn_json, f"'{fname}': no static or dynamic content found."
 
     except Exception as e:
-        # on error, leave static untouched, clear dynamic
-        return prior_store_json, [], f"Error: {e}"
+        # On error, keep everything as-is
+        return prior_store_json, prior_dyn_json, f"Error while loading '{fname}': {e}"
 
 
 # ----------------------------------------------------------------------
@@ -168,26 +168,22 @@ def parse_upload(contents, fname, prior_store_json):
     Output("dyn-data", "data"),
     Output("tick-sl", "max"),
     Input("store-json", "data"),
-    State("dyn-ticks", "data"),
+    Input("dyn-ticks", "data"),
     State("layer-ck", "value"),
     prevent_initial_call=True
 )
 def build_fig(json_data, dyn_raw, visible_layers):
-    if not json_data:
-        return go.Figure(), {}, {}, {}, 0
+    static_traces, layer_map, shapes = [], {}, []
+    if json_data:
+        store = ViewerStore.from_json(json_data)
+        static_traces, layer_map, shapes = build_all_traces(store, visible_layers, DEFAULT_SIZES)
 
-    # --- static layers (now also returns shapes) ----------------------
-    store = ViewerStore.from_json(json_data)
-    static_traces, layer_map, shapes = build_all_traces(store, visible_layers, DEFAULT_SIZES)
-
-    # --- dynamic templates & per-tick payload -------------------------
-    dyn_templates = []
-    per_tick = []
+    # dynamic (optional)
+    dyn_templates, per_tick = [], []
     if dyn_raw:
         ticks = [TickData.from_dict(d) for d in orjson.loads(dyn_raw)]
         dyn_templates, per_tick = build_dynamic_templates(ticks)
 
-    # ---- compose figure ----------------------------------------------
     fig = go.Figure(data=static_traces + dyn_templates)
     if shapes:
         fig.layout.shapes = tuple(shapes)
@@ -199,17 +195,34 @@ def build_fig(json_data, dyn_raw, visible_layers):
         yaxis=dict(showgrid=False)
     )
 
-    # remember original hovertpl for static layers
     tmpl = {i: t.hovertemplate for i, t in enumerate(fig.data)}
-
-    # keep indices for dynamic traces (for patching)
     if dyn_templates:
-        layer_map["dynamic"] = list(
-            range(len(static_traces),
-                  len(static_traces) + len(dyn_templates))
-        )
+        layer_map["dynamic"] = list(range(len(static_traces),
+                                          len(static_traces) + len(dyn_templates)))
 
-    return fig, layer_map, tmpl, {"frames": per_tick}, len(per_tick) - 1
+    # ─── PRIME FRAME-0 FOR DYNAMICS ────────────────────────────────────
+    # (so hover/text/style are already set before the slider ever moves)
+    if per_tick:
+        frame0 = per_tick[0]
+        # only the dynamic traces (they live after all static_traces)
+        for tr, (xs, ys, txt, style) in zip(dyn_templates, frame0):
+            # geometry
+            tr.x = xs
+            tr.y = ys
+            # hover-text
+            tr.text = txt
+            # any per-frame style keys, e.g. "marker.color"
+            for prop, val in style.items():
+                # split e.g. "marker.color" → target.marker.color = val
+                target = tr
+                *path, leaf = prop.split(".")
+                for p in path:
+                    target = getattr(target, p)
+                setattr(target, leaf, val)
+    # ─────────────────────────────────────────────────────────────────────
+
+    tick_max = (len(per_tick) - 1) if per_tick else 0
+    return fig, layer_map, tmpl, {"frames": per_tick}, tick_max
 
 
 # ----------------------------------------------------------------------
@@ -346,8 +359,8 @@ def patch_hover(enabled, layer_map, tpl):
 # 4)  Tick slider patches the dynamic traces --------------------------
 @app.callback(
     Output("fig", "figure", allow_duplicate=True),
-    Input("tick-sl", "value"),
-    State("dyn-data", "data"),
+    Input("tick-sl", "value"),  # when the slider moves…
+    Input("dyn-data", "data"),  # …or when new dynamic data loads ← NEW
     State("layer-map", "data"),
     prevent_initial_call=True
 )

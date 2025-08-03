@@ -1,52 +1,101 @@
 # dynamic/renderers/vehicle.py
+
 from __future__ import annotations
+import math
 import numpy as np
 from shapely.geometry import box as shp_box
 import plotly.graph_objects as go
-from layers.utils import rgba
-from carla_data_classes import DataActor
+from carla_data_classes import DataActor, DataVehicle
 from . import register, BaseRenderer
 
-# both Vehicles **and** Pedestrians → square bounding box with opaque fill
+
+def _footprint_xy_from_vertices(verts):
+    """Return a single XY loop for the bottom face (4 lowest-z verts)."""
+    if not verts or len(verts) < 4:
+        return None
+
+    pts = np.array([(v.x, v.y, v.z) for v in verts], dtype=float)
+    # take the 4 lowest z as the bottom face (works on slopes / pitches)
+    idx = np.argsort(pts[:, 2])[:4]
+    bottom = pts[idx, :2]
+
+    # order polygon vertices consistently (ccw) and close the loop
+    c = bottom.mean(axis=0)
+    ang = np.arctan2(bottom[:, 1] - c[1], bottom[:, 0] - c[0])
+    order = np.argsort(ang)
+    poly = bottom[order]
+    poly = np.vstack([poly, poly[0]])  # close
+
+    return poly[:, 0], poly[:, 1]
+
+
 @register("square_bbox")
 class VehicleRenderer(BaseRenderer):
+    """Render Vehicles as filled bounding‐boxes in black on top."""
 
     @classmethod
     def matches(cls, actor: DataActor) -> bool:
-        return actor.type in {"Vehicle", "Pedestrian"}
+        return isinstance(actor, DataVehicle)
 
-    # ------------------------------------------------------------------
-    @staticmethod
-    def _square_xy(actor: DataActor):
-        bb = actor.bounding_box
-        if bb:                       # use real bb
-            xs = [v.x for v in bb.vertices] + [bb.vertices[0].x]
-            ys = [v.y for v in bb.vertices] + [bb.vertices[0].y]
-        else:                        # tiny 1×1 m square around point
-            x, y = actor.location.x, actor.location.y
-            half = 0.5
-            xs, ys = zip(*shp_box(x-half, y-half, x+half, y+half).exterior.coords)
-        return np.asarray(xs), np.asarray(ys)
-
-    # ------------------------------------------------------------------
     @classmethod
-    def make_template(cls, actor: DataActor, base_color: str) -> go.Scatter:
-        xs, ys = cls._square_xy(actor)
+    def make_template(cls, actor: DataVehicle, base_color: str):
+        xs, ys = _footprint_xy_from_vertices(getattr(actor.bounding_box, "vertices", []))
+        if xs is None:
+            # small fallback square if bbox missing
+            x, y = actor.location.x, actor.location.y
+            xs = np.array([x - 0.5, x + 0.5, x + 0.5, x - 0.5, x - 0.5])
+            ys = np.array([y - 0.5, y - 0.5, y + 0.5, y + 0.5, y - 0.5])
+
         return go.Scatter(
-            x=xs, y=ys,
+            x=xs,
+            y=ys,
             mode="lines",
             fill="toself",
-            line=dict(width=1.0, color=base_color),
-            fillcolor=rgba(base_color, .45),
-            name=f"{actor.type.lower()} {actor.id}",
-            hoverinfo="text"
+            hoveron="fills",
+            hoverinfo="text",
+            line=dict(width=1.0, color="black"),
+            fillcolor="black",
+            name=f"Vehicle {actor.id}",
         )
 
-    # ------------------------------------------------------------------
     @classmethod
     def frame_payload(cls, actor: DataActor):
-        xs, ys = cls._square_xy(actor)
-        txt = (f"ID {actor.id}<br>"
-               f"{actor.type}: {actor.type_id}<br>"
-               f"Speed: {getattr(actor,'velocity',None) and round(actor.velocity.x,1)} m/s")
+        """
+        Return the per‐frame payload for hover/text and style.
+        Displays ID, type, attributes (one per line), velocity, and acceleration.
+        """
+        # Compute the 2D footprint (bottom 4 verts or fallback square)
+        xs, ys = _footprint_xy_from_vertices(getattr(actor.bounding_box, "vertices", []))
+        if xs is None:
+            # fallback: 1×1 m square around the actor’s location
+            x, y = actor.location.x, actor.location.y
+            half = 0.5
+            xs = np.array([x - half, x + half, x + half, x - half, x - half])
+            ys = np.array([y - half, y - half, y + half, y + half, y - half])
+
+        # Build hover‐text lines
+        lines = [
+            f"Vehicle Id: {actor.id}",
+            f"{actor.type}: {actor.type_id}",
+        ]
+
+        # If attributes exist, list each on its own indented line
+        if getattr(actor, "attributes", None):
+            lines.append("Attributes:")
+            # assume actor.attributes is a dict; adjust if it's a list
+            for name, val in actor.attributes.items():
+                lines.append(f"&nbsp;&nbsp;{name}: {val!r}")
+
+        # Append velocity and acceleration
+        vel = getattr(actor, "velocity", None)
+        acc = getattr(actor, "acceleration", None)
+        lines.append(f"Velocity: {vel if vel is not None else 'n/a'}")
+        lines.append(f"Acceleration: {acc if acc is not None else 'n/a'}")
+        lines.append(f"X: {actor.location.x:.2f} Y: {actor.location.y:.2f} Z: {actor.location.z:.2f}")
+
+        # Join with HTML line breaks
+        txt = "<br>".join(lines) + "<br>"
+
+        # Return the XY, the hover‐text, and no per‐frame style changes
         return xs, ys, txt, {}
+
