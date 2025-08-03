@@ -50,9 +50,9 @@ class UnifiedCarlaGUI(tk.Tk):
         self.video_height_variable = tk.IntVar(value=self.config.video_height)
         self.vehicle_id_variable = tk.IntVar(value=self.config.vehicle_id)
         self.with_bboxes_variable = tk.BooleanVar(value=self.config.with_bboxes)
-        self.begin_at_variable = tk.DoubleVar(value=self.config.begin_at)
+        self.begin_at_variable = tk.StringVar(value=str(self.config.begin_at))
         end_at_default = -1 if self.config.end_at == float("inf") else self.config.end_at
-        self.end_at_variable = tk.DoubleVar(value=end_at_default)
+        self.end_at_variable = tk.StringVar(value=str(end_at_default))
 
         self.render_off_screen_variable = tk.BooleanVar(
             value=getattr(self.config, "render_off_screen", False)
@@ -265,13 +265,62 @@ class UnifiedCarlaGUI(tk.Tk):
         self._entry_row(video_parameters_label_frame, "Width:", self.video_width_variable, width=8)
         self._entry_row(video_parameters_label_frame, "Height:", self.video_height_variable, width=8)
         self._entry_row(video_parameters_label_frame, "Vehicle ID (-1 = ego):", self.vehicle_id_variable, width=8)
-        self._entry_row(video_parameters_label_frame, "Start at (s):", self.begin_at_variable, width=8)
-        self._entry_row(video_parameters_label_frame, "End at (s, -1 = file end):", self.end_at_variable, width=8)
+
+        vcmd = (self.register(self._validate_number), "%P")  # %P = proposed value
+
+        # Start at (s)
+        row = tk.Frame(video_parameters_label_frame)
+        row.pack(fill="x", pady=2)
+        tk.Label(row, text="Start at (s):", width=26, anchor="w").pack(side="left")
+        tk.Entry(
+            row,
+            textvariable=self.begin_at_variable,  # StringVar (see __init__ note)
+            width=8,
+            validate="key",
+            validatecommand=vcmd
+        ).pack(side="left", fill="x", expand=True)
+
+        # End at (s, -1 = file end)
+        row = tk.Frame(video_parameters_label_frame)
+        row.pack(fill="x", pady=2)
+        tk.Label(row, text="End at (s, -1 = file end):", width=26, anchor="w").pack(side="left")
+        tk.Entry(
+            row,
+            textvariable=self.end_at_variable,  # StringVar (see __init__ note)
+            width=8,
+            validate="key",
+            validatecommand=vcmd
+        ).pack(side="left", fill="x", expand=True)
+        # --------------------------------------------------------------
+
         tk.Checkbutton(video_parameters_label_frame, text="Draw 3-D bounding boxes",
                        variable=self.with_bboxes_variable).pack(anchor="w", padx=4, pady=4)
 
+        # ── Rendering options for video export ─────────────────────────
+        rendering_options = ttk.LabelFrame(frame, text="Rendering options")
+        rendering_options.pack(fill="x", padx=4, pady=6)
+        tk.Checkbutton(
+            rendering_options,
+            text="Render quality low",
+            variable=self.render_quality_low_variable
+        ).pack(anchor="w", padx=4, pady=4)
+        # ───────────────────────────────────────────────────────────────
+
         tk.Button(frame, text="Start recording",
                   command=self._start_video).pack(pady=10)
+
+    def _validate_number(self, proposed: str) -> bool:
+        """
+        Entry validator: allow empty, integers, or floats (with optional leading '-').
+        This lets users type partial values like '-', '.', '-.' while editing.
+        """
+        if proposed in ("", "-", ".", "-."):
+            return True
+        try:
+            float(proposed)
+            return True
+        except ValueError:
+            return False
 
     def _attach_worker(self, worker: ThreadWorker, *, enable_move: bool = False):
         """
@@ -387,9 +436,21 @@ class UnifiedCarlaGUI(tk.Tk):
         config.vehicle_id = self.vehicle_id_variable.get()
         config.with_bboxes = self.with_bboxes_variable.get()
 
-        config.begin_at = max(0.0, self.begin_at_variable.get())
-        end_at_value = self.end_at_variable.get()
-        config.end_at = float("inf") if end_at_value < 0 else end_at_value
+        def _to_float(s: str, default: float) -> float:
+            s = (s or "").strip()
+            if not s:
+                return default
+            return float(s)
+
+        config.begin_at = max(0.0, _to_float(self.begin_at_variable.get(), 0.0))
+
+        end_str = (self.end_at_variable.get() or "").strip()
+        if not end_str:
+            # empty -> use file end
+            config.end_at = float("inf")
+        else:
+            end_val = float(end_str)
+            config.end_at = float("inf") if end_val < 0 else end_val
 
         self._attach_worker(RecordVideoWorker(config, self._log))
 
@@ -435,8 +496,18 @@ class UnifiedCarlaGUI(tk.Tk):
     def _auto_save(self, *_):
         """
         Handles automatic saving of current configurations.
+        Skips saving while numeric fields are in an in-progress state.
         """
-        self._collect_cfg()
+        # Skip when user is mid-typing a number
+        transient = {"", "-", ".", "-."}
+        if (self.begin_at_variable.get() in transient or
+                self.end_at_variable.get() in transient):
+            return
+        try:
+            self._collect_cfg()
+        except Exception:
+            # Ignore transient parsing glitches while editing
+            pass
 
     def _collect_cfg(self) -> Config:
         """
@@ -454,17 +525,45 @@ class UnifiedCarlaGUI(tk.Tk):
         config.video_input_file = self.video_input_path_variable.get().strip()
         config.video_output_path = self.video_output_path_variable.get().strip()
         config.with_bboxes = self.with_bboxes_variable.get()
+        config.video_width = self.video_width_variable.get()
+        config.video_height = self.video_height_variable.get()
+        config.vehicle_id = self.vehicle_id_variable.get()
 
-        config.begin_at = max(0.0, self.begin_at_variable.get())
-        end_at_value = self.end_at_variable.get()
-        config.end_at = float("inf") if end_at_value < 0 else end_at_value
+        # ---- tolerant numeric parsing (works with StringVar or DoubleVar) ----
+        def _parse_var_as_float(var, default: float) -> float:
+            try:
+                val = var.get()
+            except Exception:
+                return default
+            # normalize to string for consistent handling
+            s = str(val).strip()
+            if s in ("", "-", ".", "-."):
+                return default
+            try:
+                return float(s)
+            except ValueError:
+                return default
 
-        config.render_off_screen = self.render_off_screen_variable.get()
-        config.render_quality_low = self.render_quality_low_variable.get()
-        config.selected_map = self.selected_map_variable.get().strip()
+        # begin_at: clamp to >= 0
+        begin = _parse_var_as_float(self.begin_at_variable, 0.0)
+        config.begin_at = max(0.0, begin)
+
+        # end_at: empty -> file end; any negative -> file end
+        end_val = _parse_var_as_float(self.end_at_variable, float("inf"))
+        config.end_at = float("inf") if end_val < 0 else end_val
+        # ---------------------------------------------------------------------
+
+        # rendering + selected map (if you added these previously)
+        if hasattr(self, "render_off_screen_variable"):
+            config.render_off_screen = self.render_off_screen_variable.get()
+        if hasattr(self, "render_quality_low_variable"):
+            config.render_quality_low = self.render_quality_low_variable.get()
+        if hasattr(self, "selected_map_variable"):
+            config.selected_map = self.selected_map_variable.get().strip()
 
         save(config)
         return config
+
 
     def _validate(self, pairs: List[(str, tk.StringVar)]):
         """
