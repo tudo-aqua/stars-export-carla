@@ -6,7 +6,8 @@ from shapely import Point, LineString, STRtree
 from shapely.ops import nearest_points
 
 from carla_data_classes import (
-    DataBlock, DataRoad, DataLane, DataContactArea, DataLocation, DataContactLaneInfo, DataLandmark
+    DataBlock, DataRoad, DataLane, DataContactArea, DataLocation, DataContactLaneInfo, DataLandmark,
+    DataStaticTrafficLight
 )
 
 if TYPE_CHECKING:
@@ -54,6 +55,7 @@ class _BlockBuilder:
                 data_blocks.append(data_block)
         self.ctx.blocks = data_blocks
         self.add_landmarks_to_lanes(data_blocks)
+        self.ctx.update_static_traffic_lights_from_landmarks(data_blocks)
         self.ctx.close_speed_limit_gaps(data_blocks, default_speed_kmh=30.0)
         return data_blocks
 
@@ -91,8 +93,7 @@ class _BlockBuilder:
             lanes=data_lanes
         )
 
-    def get_data_roads_for_junction(self, junction: Junction, landmarks: List[Landmark]) -> List[
-        DataRoad]:
+    def get_data_roads_for_junction(self, junction: Junction, landmarks: List[Landmark]) -> List[DataRoad]:
         """
         Returns a list of filled DataRoads and gathers information about included DataLanes from the provided junction.
 

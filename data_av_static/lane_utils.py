@@ -69,24 +69,12 @@ class _LaneUtils:
                                                                  road_id=waypoint.road_id),
                 all_waypoints))
 
-        traffic_light_posts = list(filter(lambda l: l.type == '1000001', landmarks))
-        traffic_lights = []
-        for traffic_light_post in traffic_light_posts:
-            if traffic_light_post.road_id == waypoint.road_id:
-                for lane_validity in traffic_light_post.get_lane_validities():
-                    if lane_validity[0] <= waypoint.lane_id <= lane_validity[1]:
-                        dynamic_traffic_light = self.ctx.world.get_traffic_light_from_opendrive_id(
-                            traffic_light_post.id)
-                        static_traffic_light = self.ctx.get_data_static_traffic_light_for_traffic_light(
-                            traffic_light_post, dynamic_traffic_light)
-                        traffic_lights.append(static_traffic_light)
-
         # Build and return DataLane
         data_lane = DataLane(road_id=waypoint.road_id, lane_id=waypoint.lane_id,
                              lane_type=DataLaneType(int(waypoint.lane_type)), lane_width=waypoint.lane_width,
                              lane_length=lane_length, s=waypoint.s, predecessor_lanes=predecessor_lanes,
                              successor_lanes=successor_lanes, intersecting_lanes=[], lane_midpoints=lane_midpoints,
-                             speed_limits=[], landmarks=[], contact_areas=[], traffic_lights=traffic_lights)
+                             speed_limits=[], landmarks=[], contact_areas=[], traffic_lights=[])
 
         geom = LineString([(m.location.x, m.location.y) for m in lane_midpoints])
         data_lane._geom = geom
