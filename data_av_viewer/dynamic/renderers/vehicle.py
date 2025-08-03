@@ -1,11 +1,10 @@
 # dynamic/renderers/vehicle.py
 
 from __future__ import annotations
-import math
 import numpy as np
-from shapely.geometry import box as shp_box
 import plotly.graph_objects as go
 from carla_data_classes import DataActor, DataVehicle
+from helpers.kinematics import actor_speed_kmh, actor_accel_mps2
 from . import register, BaseRenderer
 
 
@@ -87,10 +86,8 @@ class VehicleRenderer(BaseRenderer):
                 lines.append(f"&nbsp;&nbsp;{name}: {val!r}")
 
         # Append velocity and acceleration
-        vel = getattr(actor, "velocity", None)
-        acc = getattr(actor, "acceleration", None)
-        lines.append(f"Velocity: {vel if vel is not None else 'n/a'}")
-        lines.append(f"Acceleration: {acc if acc is not None else 'n/a'}")
+        lines.append(f"Velocity: {actor_speed_kmh(actor):.2f} km/h")
+        lines.append(f"Acceleration: {actor_accel_mps2(actor):.2f} m/s²")
         lines.append(f"X: {actor.location.x:.2f} Y: {actor.location.y:.2f} Z: {actor.location.z:.2f}")
 
         # Join with HTML line breaks
