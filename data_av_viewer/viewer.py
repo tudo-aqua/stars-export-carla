@@ -123,24 +123,40 @@ app.layout.children.append(
 
 # ----------------------------------------------------------------------
 # 1)  Parse Upload -----------------------------------------------------
+# ----------------------------------------------------------------------
+# 1)  Parse Upload -----------------------------------------------------
 @app.callback(
     Output("store-json", "data"),
     Output("dyn-ticks", "data"),
     Output("msg", "children"),
     Input("upload", "contents"),
     State("upload", "filename"),
+    State("store-json", "data"),  # ← keep prior static store
     prevent_initial_call=True
 )
-def parse_upload(contents, fname):
+def parse_upload(contents, fname, prior_store_json):
     if not contents:
-        return {}, [], "No file."
+        # nothing changed
+        return prior_store_json, [], "No file."
+
     try:
         ticks, blocks = _load_raw_json(_decode_upload(contents))
-        store = ViewerStore.from_source(blocks, ticks[0] if ticks else None)
-        msg = f"Loaded '{fname}'  |  ticks:{len(ticks)}  |  blocks:{len(blocks)}"
-        return store.to_json(), orjson.dumps([t.to_dict() for t in ticks]).decode(), msg
+        # --- static file (blocks non-empty) ------------------------
+        if blocks:
+            store = ViewerStore.from_source(blocks, ticks[0] if ticks else None)
+            msg = f"Loaded static '{fname}'  |  ticks:{len(ticks)}  |  blocks:{len(blocks)}"
+            # reset dynamic ticks when static changes
+            return store.to_json(), [], msg
+
+        # --- dynamic file (blocks empty, ticks non-empty) ----------
+        dyn_json = orjson.dumps([t.to_dict() for t in ticks]).decode()
+        msg = f"Loaded dynamic '{fname}' | ticks:{len(ticks)}"
+        # keep prior static store, update only dyn-ticks
+        return prior_store_json, dyn_json, msg
+
     except Exception as e:
-        return {}, [], f"Error: {e}"
+        # on error, leave static untouched, clear dynamic
+        return prior_store_json, [], f"Error: {e}"
 
 
 # ----------------------------------------------------------------------
