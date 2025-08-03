@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import os
 import sys, tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 from typing import List, Callable
@@ -375,7 +377,9 @@ class UnifiedCarlaGUI(tk.Tk):
             self._carla_worker.cancel()
             self.server_btn.config(text="Start CARLA server")
         else:
-            if not self._validate([("CARLA executable", self.carla_executable_variable)]):
+            if not self._validate_paths([
+                ("CARLA executable", self.carla_executable_variable, "file"),
+            ]):
                 return
             self._carla_worker = CarlaServerWorker(self._collect_cfg(), self._log)
             self._carla_worker.start()
@@ -386,9 +390,11 @@ class UnifiedCarlaGUI(tk.Tk):
         Starts the manual recording process by validating input parameters, collecting configuration data,
         and attaching the ManualControlWorker for the task.
         """
-        required = [("CARLA executable", self.carla_executable_variable),
-                    ("CARLA output folder", self.manual_output_dir_variable)]
-        if not self._validate(required): return
+        if not self._validate_paths([
+            ("CARLA executable", self.carla_executable_variable, "file"),
+            ("CARLA output folder", self.manual_output_dir_variable, "dir"),
+        ]):
+            return
         self._attach_worker(ManualControlWorker(self._collect_cfg(), self._log),
                             enable_move=True)
 
@@ -398,6 +404,10 @@ class UnifiedCarlaGUI(tk.Tk):
         """
         if not self.new_file_name_variable.get().strip():
             return messagebox.showerror("Missing", "File-name prefix required.")
+        if not self._validate_paths([
+            ("Archive recordings folder", self.default_recordings_folder_variable, "dir"),
+        ]):
+            return
         self._attach_worker(
             MoveLatestRecordingWorker(self._collect_cfg(), self.new_file_name_variable.get(), self._log))
         return None
@@ -407,10 +417,12 @@ class UnifiedCarlaGUI(tk.Tk):
         Starts the recording transformation process by validating input parameters, collecting configuration data,
         and attaching the TransformRecordingWorker for the task.
         """
-        required = [("CARLA executable", self.carla_executable_variable),
-                    ("Input recording", self.transform_input_file_variable),
-                    ("Output folder", self.transformer_output_path_variable)]
-        if not self._validate(required): return
+        if not self._validate_paths([
+            ("CARLA executable", self.carla_executable_variable, "file"),
+            ("Input recording", self.transform_input_file_variable, "file"),
+            ("Output folder", self.transformer_output_path_variable, "dir"),
+        ]):
+            return
 
         config = self._collect_cfg()
         config.transform_input_file = self.transform_input_file_variable.get().strip()
@@ -422,10 +434,12 @@ class UnifiedCarlaGUI(tk.Tk):
         Starts the video recording process by validating input parameters, collecting configuration data,
         and attaching the RecordVideoWorker for the task.
         """
-        required = [("CARLA executable", self.carla_executable_variable),
-                    ("Input recording", self.video_input_path_variable),
-                    ("Output folder", self.video_output_path_variable)]
-        if not self._validate(required): return
+        if not self._validate_paths([
+            ("CARLA executable", self.carla_executable_variable, "file"),
+            ("Input recording", self.video_input_path_variable, "file"),
+            ("Output folder", self.video_output_path_variable, "dir"),
+        ]):
+            return
 
         config = self._collect_cfg()
         config.video_input_file = self.video_input_path_variable.get().strip()
@@ -564,24 +578,6 @@ class UnifiedCarlaGUI(tk.Tk):
         save(config)
         return config
 
-
-    def _validate(self, pairs: List[(str, tk.StringVar)]):
-        """
-        Validates whether the provided fields contain non-empty values.
-
-        Parameters:
-            pairs (list of tuple): A list of tuples where each tuple contains
-                a label (str) and a variable (tk.StringVar).
-
-        Returns:
-            bool: True if all field values are non-empty; otherwise, False.
-        """
-        for label, var in pairs:
-            if not var.get().strip():
-                messagebox.showerror("Missing", f"{label} required.")
-                return False
-        return True
-
     def _open_file_dialog(self, variable: tk.StringVar):
         """
         Selects a file using a file dialog and sets it to the provided variable.
@@ -661,6 +657,37 @@ class UnifiedCarlaGUI(tk.Tk):
         self.log.insert("end", txt + "\n")
         self.log.see("end")
         self.log.configure(state="disabled")
+
+    def _validate_paths(self, specs: list[tuple[str, tk.Variable, str]]) -> bool:
+        """
+        Validate that the given variables point to existing paths.
+
+        specs: list of (label, variable, kind) where kind in {"file","dir","any"}.
+        Shows a messagebox and returns False on the first invalid item.
+        """
+        for label, var, kind in specs:
+            try:
+                value = var.get().strip()
+            except Exception:
+                value = str(var).strip()
+
+            if not value:
+                messagebox.showerror("Missing", f"{label} required.")
+                return False
+
+            if kind == "file":
+                if not os.path.isfile(value):
+                    messagebox.showerror("Invalid path", f"{label} does not exist as a file:\n{value}")
+                    return False
+            elif kind == "dir":
+                if not os.path.isdir(value):
+                    messagebox.showerror("Invalid path", f"{label} does not exist as a folder:\n{value}")
+                    return False
+            else:  # "any"
+                if not os.path.exists(value):
+                    messagebox.showerror("Invalid path", f"{label} path does not exist:\n{value}")
+                    return False
+        return True
 
 
 if __name__ == "__main__":
