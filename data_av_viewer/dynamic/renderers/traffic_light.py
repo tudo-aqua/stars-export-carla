@@ -33,6 +33,6 @@ class TrafficLightRenderer(BaseRenderer):
     def frame_payload(cls, actor: DataTrafficLight):
         xs = np.asarray([actor.location.x])
         ys = np.asarray([actor.location.y])
-        txt = f"Traffic‑Light {actor.id}<br>State: {actor.state}"
+        txt = f"Traffic Light {actor.id}<br>State: {actor.state}"
         style = {"marker.color": _TL_COLOUR.get(actor.state, "#777")}
         return xs, ys, txt, style
