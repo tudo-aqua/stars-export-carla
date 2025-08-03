@@ -151,7 +151,7 @@ class JSONHelper:
             logfile.write(json_string)
 
     @staticmethod
-    def load_data_blocks(source: Union[str, os.PathLike, IO]) -> [DataBlock]:
+    def load_data_blocks(source: Union[str, os.PathLike, IO]) -> List[DataBlock]:
         """Load JSON from either a filesystem path or a file-like (e.g. ZipExtFile)."""
 
         # Determine if we need to open it ourselves
