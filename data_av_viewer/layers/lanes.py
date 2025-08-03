@@ -59,12 +59,11 @@ class LaneLayer(BaseLayer):
 
             traces.append(go.Scattergl(
                 x=xs, y=ys, mode="lines",
-                name=f"Lane {row.road_id}of Road {row.lane_id}",
+                name=f"Lane {row.lane_id} on road {row.road_id}",
                 line=dict(width=self.size["lanes"], color=color),
                 customdata=custom,
                 hovertemplate=hover_tpl,
-                hoverlabel=dict(bgcolor=color),
-                showlegend=False
+                hoverlabel=dict(bgcolor=color)
             ))
 
         return traces
