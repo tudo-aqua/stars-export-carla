@@ -36,7 +36,7 @@ def start_carla(
         render_off_screen: bool = True,
         quality_low: bool = True,
         map_name: str | None = None,
-        boot: float = 0.0,
+        boot: float = 20.0,
         log: Callable[[str], None] | None = None,
 ) -> None:
     """
@@ -60,10 +60,11 @@ def start_carla(
     subprocess.Popen(cmd, **kwargs)
 
     # If a map is requested, wait for UE to boot, then switch maps via config.py
+    if boot > 0:
+        _log(f">> [CARLA] Waiting {boot:.1f}s for CARLA to boot")
+        time.sleep(boot)
     if map_name:
-        if boot > 0:
-            _log(f">> [CARLA] Waiting {boot:.1f}s for CARLA to boot before loading '{map_name}'")
-            time.sleep(boot)
+        _log(f">> [CARLA] Loading map {map_name}")
         ok = _set_map_via_config_py(exe, map_name, log=_log)
         if not ok:
             _log(f">> [CARLA] Warning: failed to set map '{map_name}' via config.py")
