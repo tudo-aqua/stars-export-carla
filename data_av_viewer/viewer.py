@@ -96,17 +96,7 @@ app.layout = html.Div([
         "☰ Menu",
         id="menu-toggle",
         n_clicks=0,
-        style={
-            "position": "absolute",
-            "top": "10px",
-            "left": "10px",
-            "zIndex": 1001,
-            "backgroundColor": "rgba(255,255,255,0.8)",
-            "border": "none",
-            "padding": "5px 10px",
-            "fontSize": "18px",
-            "cursor": "pointer",
-        }
+        className="menu-toggle open"
     ),
 
     # 3) your existing menu contents, wrapped and given the full style
@@ -114,9 +104,7 @@ app.layout = html.Div([
         html.H3("CARLA Viewer"),
         dcc.Upload(
             id="upload", children=html.Div(["Drag & Drop or ", html.A("Select JSON")]),
-            style={"width": "100%", "height": "60px", "lineHeight": "60px",
-                   "border": "1px dashed", "borderRadius": "5px",
-                   "textAlign": "center", "margin": "10px 0"}
+            className="upload-area"
         ),
         html.Div(id="msg", style={"fontSize": "12px", "color": "#555"}),
 
@@ -125,7 +113,7 @@ app.layout = html.Div([
             id="layer-ck",
             options=LAYER_OPTIONS,
             value=DEFAULT_LAYERS,
-            inputStyle={"margin-right": "4px", "margin-left": "12px"}
+            inputStyle={"marginRight": "4px", "marginLeft": "12px"}
         ),
 
         # … the rest of your menu: hover-ck, size sliders, slider & buttons …
@@ -134,7 +122,7 @@ app.layout = html.Div([
             id="hover-ck",
             options=LAYER_OPTIONS,
             value=HOVER_DEFAULT,
-            inputStyle={"margin-right": "4px", "margin-left": "12px"}
+            inputStyle={"marginRight": "4px", "marginLeft": "12px"}
         ),
 
         html.H4("Marker sizes"),
@@ -163,29 +151,8 @@ app.layout = html.Div([
                 "scrollZoom": True,
                 "doubleClick": "reset",
             },
-            style={
-                "position": "absolute",
-                "top": "10px",
-                "left": "10px",
-                "right": "10px",
-                "bottom": "10px",
-                "width": "100%",
-                "height": "100%",
-                "zIndex": 1,
-                "overflow": "hidden",  # hide any inner graph scrollbar
-            },
-        ),
-        style={
-            "position": "absolute",
-            "top": 0,
-            "left": 0,
-            "width": "100%",
-            "height": "100%",
-            "margin": 0,
-            "padding": 0,
-            "overflow": "hidden",  # ensure no scroll on the graph wrapper
-            "zIndex": 1,
-        },
+            className="graph-container"
+        )
     ),
 
     # ---- client-side stores -----------------------------------
@@ -194,16 +161,7 @@ app.layout = html.Div([
     dcc.Store(id="dyn-data"),
     dcc.Store(id="layer-map"),
     dcc.Store(id="hover-tpl"),
-],
-    # ---- root container styles ---------------------------------------
-    style={
-        "position": "relative",
-        "width": "100%",
-        "height": "100vh",
-        "overflow": "hidden",  # hide both horizontal & vertical scrollbars
-        "margin": 0,
-        "padding": 0,
-    })
+])
 
 # An interval that drives playback (disabled by default)
 app.layout.children.append(
@@ -213,13 +171,14 @@ app.layout.children.append(
 
 @app.callback(
     Output("menu-content", "style"),
+    Output("menu-toggle", "className"),
     Input("menu-toggle", "n_clicks"),
 )
-def toggle_menu(n_clicks):
-    # odd clicks → collapse; even (including 0) → expand
-    if n_clicks and n_clicks % 2 == 1:
-        return {"display": "none"}
-    return FULL_MENU_STYLE
+def toggle_menu(n):
+    # odd → closed; even → open
+    if n and n % 2 == 1:
+        return {"display": "none"}, "menu-toggle"
+    return FULL_MENU_STYLE, "menu-toggle open"
 
 
 @app.callback(
