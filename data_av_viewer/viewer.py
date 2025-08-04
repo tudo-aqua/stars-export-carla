@@ -65,60 +65,161 @@ def _size_slider(layer):
 # ----------------------------------------------------------------------
 # Dash layout ----------------------------------------------------------
 app = Dash(__name__, suppress_callback_exceptions=True)
+
+FULL_MENU_STYLE = {
+    "position": "absolute",
+    "top": "10px",
+    "left": "10px",
+    "width": "300px",
+    "maxHeight": "calc(100vh - 20px)",
+    "overflowY": "auto",
+    "backgroundColor": "rgba(255,255,255,0.9)",
+    "zIndex": 1000,
+    "padding": "10px",
+    "borderRadius": "5px",
+    "boxShadow": "0 2px 4px rgba(0,0,0,0.2)",
+}
+
+INITIAL_FIG = go.Figure()
+INITIAL_FIG.update_layout(
+    autosize=True,
+    margin=dict(l=10, r=10, t=10, b=48),
+    dragmode="pan",
+    hovermode="closest",
+    xaxis=dict(scaleanchor="y", scaleratio=1, showgrid=False),
+    yaxis=dict(showgrid=False, automargin=True),
+)
+
 app.layout = html.Div([
-    # ---- sidebar -----------------------------------------------------
+    # 2) the toggle button
+    html.Button(
+        "☰ Menu",
+        id="menu-toggle",
+        n_clicks=0,
+        style={
+            "position": "absolute",
+            "top": "10px",
+            "left": "10px",
+            "zIndex": 1001,
+            "backgroundColor": "rgba(255,255,255,0.8)",
+            "border": "none",
+            "padding": "5px 10px",
+            "fontSize": "18px",
+            "cursor": "pointer",
+        }
+    ),
+
+    # 3) your existing menu contents, wrapped and given the full style
     html.Div([
         html.H3("CARLA Viewer"),
-        dcc.Upload(id="upload",
-                   children=html.Div(["Drag & Drop or ", html.A("Select JSON")]),
-                   style={"width": "100%", "height": "60px", "lineHeight": "60px",
-                          "border": "1px dashed", "borderRadius": "5px",
-                          "textAlign": "center", "margin": "10px 0"}),
+        dcc.Upload(
+            id="upload", children=html.Div(["Drag & Drop or ", html.A("Select JSON")]),
+            style={"width": "100%", "height": "60px", "lineHeight": "60px",
+                   "border": "1px dashed", "borderRadius": "5px",
+                   "textAlign": "center", "margin": "10px 0"}
+        ),
         html.Div(id="msg", style={"fontSize": "12px", "color": "#555"}),
 
         html.H4("Static layers"),
-        dcc.Checklist(id="layer-ck", options=LAYER_OPTIONS, value=DEFAULT_LAYERS,
-                      inputStyle={"margin-right": "4px", "margin-left": "12px"}),
+        dcc.Checklist(
+            id="layer-ck",
+            options=LAYER_OPTIONS,
+            value=DEFAULT_LAYERS,
+            inputStyle={"margin-right": "4px", "margin-left": "12px"}
+        ),
 
+        # … the rest of your menu: hover-ck, size sliders, slider & buttons …
         html.H4("Hover enabled for"),
-        dcc.Checklist(id="hover-ck", options=LAYER_OPTIONS, value=HOVER_DEFAULT,
-                      inputStyle={"margin-right": "4px", "margin-left": "12px"}),
+        dcc.Checklist(
+            id="hover-ck",
+            options=LAYER_OPTIONS,
+            value=HOVER_DEFAULT,
+            inputStyle={"margin-right": "4px", "margin-left": "12px"}
+        ),
 
         html.H4("Marker sizes"),
         *(_size_slider(l) for l in SIZE_LAYERS),
 
         html.Hr(),
-
         html.H4("Dynamic replay"),
-        dcc.Slider(id="tick-sl", min=0, max=0, step=1, value=0, updatemode="drag",
-                   tooltip={"placement": "bottom", "always_visible": True}),
+        dcc.Slider(id="tick-sl", min=0, max=0, step=1, value=0,
+                   updatemode="drag", tooltip={"placement": "bottom", "always_visible": True}),
         html.Div([
-            html.Button("▶ Play", id="play-btn", n_clicks=0,
-                        style={"width": "60px"}),
+            html.Button("▶ Play", id="play-btn", n_clicks=0, style={"width": "60px"}),
             html.Button("⏸ Pause", id="pause-btn", n_clicks=0,
                         style={"width": "60px", "marginLeft": "6px"}),
-            html.Span("  speed"),
-            dcc.Slider(id="speed-sl", min=0.2, max=5, updatemode="drag",
-                       step=0.2, value=1.0, tooltip={"placement": "bottom"})
-        ], style={"marginTop": "4px"})
-    ], style={"width": "300px", "float": "left", "padding": "10px"}),
+            html.Span(" speed"),
+            dcc.Slider(id="speed-sl", min=0.2, max=5, step=0.2, value=1.0,
+                       updatemode="drag", tooltip={"placement": "bottom"})
+        ], style={"marginTop": "4px"}),
+    ], id="menu-content", style=FULL_MENU_STYLE),
 
-    # ---- main figure -------------------------------------------------
-    html.Div([dcc.Graph(id="fig", style={"height": "100vh"})],
-             style={"margin-left": "320px"}),
+    # ---- main figure (full-screen) -----------------------------
+    html.Div(
+        dcc.Graph(
+            id="fig",
+            figure=INITIAL_FIG,
+            config={
+                "scrollZoom": True,
+                "doubleClick": "reset",
+            },
+            style={
+                "position": "absolute",
+                "top": "10px",
+                "left": "10px",
+                "right": "10px",
+                "bottom": "10px",
+                "width": "100%",
+                "height": "100%",
+                "zIndex": 1,
+                "overflow": "hidden",  # hide any inner graph scrollbar
+            },
+        ),
+        style={
+            "position": "absolute",
+            "top": 0,
+            "left": 0,
+            "width": "100%",
+            "height": "100%",
+            "margin": 0,
+            "padding": 0,
+            "overflow": "hidden",  # ensure no scroll on the graph wrapper
+            "zIndex": 1,
+        },
+    ),
 
-    # ---- client‑side stores -----------------------------------------
-    dcc.Store(id="store-json"),  # static layers – same as before
-    dcc.Store(id="dyn-ticks"),  # list[TickData]     (raw)
-    dcc.Store(id="dyn-data"),  # dict {templates, per_tick}
-    dcc.Store(id="layer-map"),  # map layer‑name -> trace‑idxs
-    dcc.Store(id="hover-tpl")  # original hover templates
-])
+    # ---- client-side stores -----------------------------------
+    dcc.Store(id="store-json"),
+    dcc.Store(id="dyn-ticks"),
+    dcc.Store(id="dyn-data"),
+    dcc.Store(id="layer-map"),
+    dcc.Store(id="hover-tpl"),
+],
+    # ---- root container styles ---------------------------------------
+    style={
+        "position": "relative",
+        "width": "100%",
+        "height": "100vh",
+        "overflow": "hidden",  # hide both horizontal & vertical scrollbars
+        "margin": 0,
+        "padding": 0,
+    })
 
 # An interval that drives playback (disabled by default)
 app.layout.children.append(
     dcc.Interval(id="play-ivl", disabled=True, interval=500)
 )
+
+
+@app.callback(
+    Output("menu-content", "style"),
+    Input("menu-toggle", "n_clicks"),
+)
+def toggle_menu(n_clicks):
+    # odd clicks → collapse; even (including 0) → expand
+    if n_clicks and n_clicks % 2 == 1:
+        return {"display": "none"}
+    return FULL_MENU_STYLE
 
 
 @app.callback(
@@ -165,7 +266,7 @@ def parse_upload(contents, fname, prior_store_json, prior_dyn_json):
     Output("fig", "figure"),
     Output("layer-map", "data"),
     Output("hover-tpl", "data"),
-    Output("dyn-data", "data"),
+    Output("dyn-data", "data"),  # ← renamed
     Output("tick-sl", "max"),
     Input("store-json", "data"),
     Input("dyn-ticks", "data"),
@@ -189,10 +290,14 @@ def build_fig(json_data, dyn_raw, visible_layers):
         fig.layout.shapes = tuple(shapes)
 
     fig.update_layout(
-        dragmode="pan", hovermode="closest", uirevision="keep",
+        autosize=True,
+        margin=dict(l=10, r=10, t=10, b=48),
+        dragmode="pan",
+        hovermode="closest",
+        uirevision="keep",
         legend=dict(itemsizing="constant"),
         xaxis=dict(scaleanchor="y", scaleratio=1, showgrid=False),
-        yaxis=dict(showgrid=False)
+        yaxis=dict(showgrid=False, automargin=True),
     )
 
     tmpl = {i: t.hovertemplate for i, t in enumerate(fig.data)}
