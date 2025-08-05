@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-import os, sys, time, subprocess, signal
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import psutil
 
 from carla_interaction_gui.carla_launcher import restart_carla, kill_carla
-from carla_interaction_gui.workers.ThreadWorker import ThreadWorker
 from carla_interaction_gui.config_data import Config
+from carla_interaction_gui.workers.ThreadWorker import ThreadWorker
 
 
 class ManualControlWorker(ThreadWorker):

@@ -1,10 +1,12 @@
 import os
+from typing import List, Optional
 
 from carla import *
 
-from carla_data_classes.data_classes import *
-from helpers.json_helper import JSONHelper
+from carla_data_classes.dynamic import TickData, DataBlock, DataActor, DataVehicle, DataTrafficSign, DataPedestrian
+from carla_data_classes.static import DataLocation
 from data_av_static import MapRasterizer
+from helpers.json_helper import JSONHelper
 
 ACTOR_BLOCK_FILTERING_SWITCH = True
 USABLE_MAPS = ["Town01", "Town02", "Town10"]

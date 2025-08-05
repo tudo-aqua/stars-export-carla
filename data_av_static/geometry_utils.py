@@ -4,7 +4,7 @@ import numpy as np
 from shapely import LineString, Point, MultiLineString, MultiPoint, GeometryCollection, Polygon
 from shapely.ops import nearest_points
 
-from carla_data_classes import DataLocation, DataLane
+from carla_data_classes.static import DataLocation, DataLane
 
 if TYPE_CHECKING:
     from .rasterizer import MapRasterizer

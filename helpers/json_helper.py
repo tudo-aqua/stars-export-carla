@@ -1,13 +1,13 @@
 import json
 import os
 import re
+import zipfile
 from datetime import datetime
 from os.path import dirname
-from typing import List, Union, IO
-import zipfile
 from pathlib import Path
+from typing import List, Union, IO
 
-from carla_data_classes import DataBlock, TickData, DataWeatherParameters
+from carla_data_classes.dynamic import TickData, DataBlock, DataWeatherParameters
 
 
 class JSONHelper:

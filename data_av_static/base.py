@@ -1,6 +1,9 @@
 from typing import List
+
 from carla import World, Map
-from carla_data_classes import DataBlock
+
+from carla_data_classes.dynamic import DataBlock
+
 
 class _Base:
     """

@@ -1,11 +1,14 @@
 # dynamic/renderers/vehicle.py
 
 from __future__ import annotations
+
 import numpy as np
 import plotly.graph_objects as go
-from carla_data_classes import DataActor, DataVehicle
+
+from carla_data_classes.dynamic import DataActor, DataVehicle
 from helpers.kinematics import actor_speed_kmh, actor_accel_mps2
 from . import register, BaseRenderer
+
 
 def _footprint_xy_from_vertices(verts):
     """Return a single XY loop for the bottom face (4 lowest-z verts)."""

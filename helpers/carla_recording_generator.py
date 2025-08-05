@@ -7,11 +7,10 @@ from datetime import datetime
 from typing import List
 
 import carla
-from carla import VehicleLightState as vLS, WeatherParameters, Vehicle, Actor, Map
-from carla import World, Client
+from carla import World, Client, WeatherParameters, Actor
 
-from carla_data_classes import DataWeatherParameters
-from carla_data_classes.data_enums import DataWeatherParametersType
+from carla_data_classes.dynamic import DataWeatherParameters
+from carla_data_classes.enums.DataWeatherParametersType import DataWeatherParametersType
 from helpers.carla_api_helper import CarlaAPIHelper
 from helpers.json_helper import JSONHelper
 

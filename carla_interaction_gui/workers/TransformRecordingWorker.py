@@ -1,6 +1,7 @@
+import traceback
+
 from carla_interaction_gui.carla_launcher import restart_and_connect, kill_carla
 from carla_interaction_gui.workers.ThreadWorker import ThreadWorker
-import traceback
 
 
 class TransformRecordingWorker(ThreadWorker):
@@ -39,5 +40,5 @@ class TransformRecordingWorker(ThreadWorker):
         Cancels the current operation and terminates the Carla simulation environment
         associated with it.
         """
-        super().cancel();
+        super().cancel()
         kill_carla(log=self.log)

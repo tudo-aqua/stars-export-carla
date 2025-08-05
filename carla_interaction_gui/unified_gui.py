@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import os
-import sys, tkinter as tk
+import sys
+import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
-from typing import List, Callable
+from typing import Callable
 
 from carla_interaction_gui.carla_launcher import kill_carla
 from carla_interaction_gui.config_data import Config, load, save
@@ -122,7 +123,7 @@ class UnifiedCarlaGUI(tk.Tk):
                         lambda: self._open_file_dialog(self.carla_executable_variable))
 
         # Map selection (allowed maps only)
-        row = tk.Frame(frame);
+        row = tk.Frame(frame)
         row.pack(fill="x", pady=2)
         tk.Label(row, text="Map:", width=26, anchor="w").pack(side="left")
         ttk.Combobox(
@@ -172,7 +173,7 @@ class UnifiedCarlaGUI(tk.Tk):
         self._entry_row(frame, "New file-name prefix:", self.new_file_name_variable)
 
         # Map selection (allowed maps only)
-        row = tk.Frame(frame);
+        row = tk.Frame(frame)
         row.pack(fill="x", pady=2)
         tk.Label(row, text="Map:", width=26, anchor="w").pack(side="left")
         ttk.Combobox(

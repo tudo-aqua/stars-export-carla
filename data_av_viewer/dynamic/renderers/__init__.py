@@ -5,10 +5,15 @@ Just drop a ``*.py`` in this package and decorate the class with
 @register("<nice_name>").  See *vehicle.py* and *traffic_light.py*.
 """
 from __future__ import annotations
-import importlib, pkgutil, pathlib, inspect
+
+import importlib
+import pathlib
+import pkgutil
 from typing import Dict, Type
+
 import plotly.graph_objects as go
-from carla_data_classes import DataActor
+
+from carla_data_classes.dynamic import DataActor
 
 # ---------------------------------------------------------------------
 RENDERER_REGISTRY: Dict[str, "Type[BaseRenderer]"] = {}

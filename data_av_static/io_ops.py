@@ -5,7 +5,7 @@ from typing import List, TYPE_CHECKING
 
 from scipy.spatial import KDTree
 
-from carla_data_classes import DataBlock
+from carla_data_classes.dynamic import DataBlock
 from helpers.json_helper import JSONHelper
 
 if TYPE_CHECKING:

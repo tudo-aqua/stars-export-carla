@@ -3,10 +3,9 @@ from typing import List, Tuple, TYPE_CHECKING
 from carla import Waypoint, Actor, Location, Landmark
 from shapely import LineString, Point
 
-from carla_data_classes import (
-    DataLane, DataLaneMidpoint, DataLocation, DataRotation, DataLaneType,
-    DataContactLaneInfo, DataSpeedLimit
-)
+from carla_data_classes.enums.DataLaneType import DataLaneType
+from carla_data_classes.static import DataLaneMidpoint, DataLocation, DataLane, DataContactLaneInfo, DataRotation, \
+    DataSpeedLimit
 
 if TYPE_CHECKING:
     from .rasterizer import MapRasterizer

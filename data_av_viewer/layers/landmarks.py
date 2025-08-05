@@ -2,7 +2,7 @@
 import pandas as pd
 import plotly.graph_objects as go
 
-from carla_data_classes import DataLandmarkType
+from carla_data_classes.enums.DataLandmarkType import DataLandmarkType
 from .base_layer import register, BaseLayer
 
 # ----------------------------------------------------------------------

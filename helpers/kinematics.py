@@ -1,9 +1,11 @@
 # helpers/kinematics.py
 from __future__ import annotations
-from typing import List, Dict, Optional
-import math
 
-from carla_data_classes import TickData, DataActor, DataVector3D
+import math
+from typing import List, Dict, Optional
+
+from carla_data_classes.dynamic import DataActor, TickData
+from carla_data_classes.static import DataVector3D
 
 
 def vector_norm(v: Optional[DataVector3D]) -> float:

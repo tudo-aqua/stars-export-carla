@@ -1,11 +1,15 @@
 # dynamic/actor_traces.py
 
 from __future__ import annotations
+
 from typing import Dict, List, Tuple, Any
+
 import numpy as np
 import plotly.graph_objects as go
-from carla_data_classes import TickData, DataActor
+
+from carla_data_classes.dynamic import DataActor, TickData
 from .renderers import RENDERER_REGISTRY, BaseRenderer
+
 
 def _choose_renderer(actor: DataActor) -> type[BaseRenderer] | None:
     for cls in RENDERER_REGISTRY.values():

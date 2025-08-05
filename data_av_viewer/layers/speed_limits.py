@@ -1,5 +1,7 @@
 from __future__ import annotations
+
 from typing import List
+
 import pandas as pd
 import plotly.graph_objects as go
 
@@ -63,7 +65,6 @@ class SpeedLimitsLayer(BaseLayer):
                     mid_items = []
                     for mp in midpoints:
                         # DataLaneMidpoint has distance_to_start and DataLocation with .to_tuple()
-                        # (see data_classes.py). :contentReference[oaicite:10]{index=10}
                         try:
                             x, y = mp.location.to_tuple()
                         except Exception:

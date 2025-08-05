@@ -1,14 +1,20 @@
 from __future__ import annotations
-import base64, importlib, pkgutil, pathlib, orjson
+
+import base64
+import importlib
+import orjson
+import pathlib
+import pkgutil
 from typing import List, Tuple
 
 import plotly.graph_objects as go
 from dash import Dash, dcc, html, Input, Output, State, Patch, ALL, ctx, no_update
 
-from carla_data_classes import TickData, DataBlock
-from viewer_store import ViewerStore
+from carla_data_classes.dynamic import DataBlock
+from carla_data_classes.dynamic.TickData import TickData
+from dynamic.actor_traces import build_dynamic_templates
 from layers.base_layer import build_all_traces, LAYER_REGISTRY
-from dynamic.actor_traces import build_dynamic_templates  # <── our helper
+from viewer_store import ViewerStore
 
 # ----------------------------------------------------------------------
 # auto‑import all static layer modules ---------------------------------
@@ -395,8 +401,8 @@ def patch_sizes(values, ids, layer_map):
         total_w = 2 * lamp_r + 2 * pad
         total_h = 3 * (2 * lamp_r) + 2 * gap + 2 * pad
         border_w = max(1, int(s / 3))
-        D = 2.0 * lamp_r + gap  # center-to-center vertical spacing
-        return lamp_r, gap, pad, total_w, total_h, border_w, D
+        d = 2.0 * lamp_r + gap  # center-to-center vertical spacing
+        return lamp_r, gap, pad, total_w, total_h, border_w, d
 
     for val, item in zip(values, ids):
         lname = item["layer"]
@@ -412,7 +418,7 @@ def patch_sizes(values, ids, layer_map):
             xs, ys = layer_map.get(lname + "_shape_xy", [[], []])
             if xs and ys:
                 # NOTE: correct unpack order + variable name
-                lamp_r, gap, pad, total_w, total_h, border_w, D = tl_geom(val)
+                lamp_r, gap, pad, total_w, total_h, border_w, d = tl_geom(val)
                 i = s0
                 for x, y in zip(xs, ys):
                     # rectangle
@@ -427,7 +433,7 @@ def patch_sizes(values, ids, layer_map):
                     patch["layout"]["shapes"][i]["line"]["width"] = border_w
                     i += 1
                     # three circles (top, mid, bottom)
-                    for off in (+D, 0.0, -D):
+                    for off in (+d, 0.0, -d):
                         cy = y + off
                         patch["layout"]["shapes"][i]["x0"] = x - lamp_r
                         patch["layout"]["shapes"][i]["x1"] = x + lamp_r

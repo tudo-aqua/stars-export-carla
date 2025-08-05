@@ -9,8 +9,9 @@ from carla import World, Client
 from carla import WorldSnapshot, Vehicle, WeatherParameters
 from carla.libcarla import TrafficLight
 
-from carla_data_classes import DataActorPosition, TickData, DataWeatherParameters, DataWeatherParametersType, \
-    DataTrafficLight, DataActor, DataTrafficSign
+from carla_data_classes.dynamic import DataWeatherParameters, DataActorPosition, DataActor, DataTrafficLight, TickData, \
+    DataTrafficSign
+from carla_data_classes.enums.DataWeatherParametersType import DataWeatherParametersType
 from data_av_static import MapRasterizer
 from helpers.carla_api_helper import CarlaAPIHelper
 from helpers.json_helper import JSONHelper

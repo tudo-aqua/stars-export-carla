@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING
 
-from carla_data_classes import DataRoad
+from carla_data_classes.static import DataRoad
 
 if TYPE_CHECKING:
     from .rasterizer import MapRasterizer

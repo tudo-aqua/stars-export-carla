@@ -1,10 +1,13 @@
 # dynamic/renderers/traffic_light.py
 
 from __future__ import annotations
-import numpy as np
+
 import math
+
+import numpy as np
 import plotly.graph_objects as go
-from carla_data_classes import DataActor, DataTrafficLight
+
+from carla_data_classes.dynamic import DataActor, DataTrafficLight
 from . import register, BaseRenderer
 
 
