@@ -1,10 +1,24 @@
-def ensure_runtime_types(ns: dict) -> None:
-    # Import inside the function to avoid import cycles at import time.
+# carla_data_classes/__init__.py
+
+def ensure_core_types(ns: dict) -> None:
+    """
+    Injects only the core types used in base-class annotations into the caller's
+    module globals. Safe to call from any dynamic actor module (no circular imports).
+    """
     from .dynamic.DataBoundingBox import DataBoundingBox
     from .static.DataLocation import DataLocation
     from .static.DataRotation import DataRotation
+    # optional vector type; ignore if not present
+    try:
+        from .static.DataVector3D import DataVector3D  # noqa: F401
+    except Exception:
+        DataVector3D = None  # type: ignore
 
-    # Only set if not already present in the module's globals
-    ns.setdefault("DataBoundingBox", DataBoundingBox)
-    ns.setdefault("DataLocation", DataLocation)
-    ns.setdefault("DataRotation", DataRotation)
+    for name, val in [
+        ("DataBoundingBox", DataBoundingBox),
+        ("DataLocation", DataLocation),
+        ("DataRotation", DataRotation),
+        ("DataVector3D", DataVector3D),
+    ]:
+        if val is not None and name not in ns:
+            ns[name] = val

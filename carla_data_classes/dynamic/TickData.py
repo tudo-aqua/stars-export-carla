@@ -3,8 +3,12 @@ from typing import List
 
 from dataclass_wizard import JSONWizard
 
+# top of the file (before the @dataclass)
+from carla_data_classes import ensure_core_types as _ensure_core_types
 from carla_data_classes.dynamic.DataActorPosition import DataActorPosition
 from carla_data_classes.dynamic.DataWeatherParameters import DataWeatherParameters
+
+_ensure_core_types(globals())
 
 
 @dataclass

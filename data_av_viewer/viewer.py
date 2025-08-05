@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import base64
 import importlib
-import orjson
 import pathlib
 import pkgutil
+import traceback
 from typing import List, Tuple
 
+import orjson
 import plotly.graph_objects as go
 from dash import Dash, dcc, html, Input, Output, State, Patch, ALL, ctx, no_update
 
-from carla_data_classes.dynamic import DataBlock
+from carla_data_classes.dynamic import DataBlock, DataVehicle
 from carla_data_classes.dynamic.TickData import TickData
 from dynamic.actor_traces import build_dynamic_templates
 from layers.base_layer import build_all_traces, LAYER_REGISTRY
@@ -34,7 +35,7 @@ def _load_raw_json(raw: bytes) -> Tuple[List[TickData], List[DataBlock]]:
     try:
         return TickData.from_json(raw), []
     except Exception:
-        pass
+        print(traceback.format_exc())
 
     # try DataBlock(s)
     try:
@@ -104,15 +105,17 @@ TIMES: list[float] = []
 BASE_DT_S: float = 0.05
 SPEED_MAX = 3.0  # set to 2.0 if you prefer 0 → 2× instead of 0 → 3×
 
+
 def speed_marks(max_speed: float):
     mid = 1.0
     return {
         0.0: "0×",
-        round(max_speed/4, 2): f"{max_speed/4:g}×",
+        round(max_speed / 4, 2): f"{max_speed / 4:g}×",
         mid: "1×",
-        round(max_speed/2, 2): f"{max_speed/2:g}×",
+        round(max_speed / 2, 2): f"{max_speed / 2:g}×",
         max_speed: f"{max_speed:g}×",
     }
+
 
 app.layout = html.Div([
     # 2) the toggle button
@@ -166,7 +169,7 @@ app.layout = html.Div([
                 min=0.0,
                 max=SPEED_MAX,
                 step=0.05,
-                value=1.0,                          # 1× in the middle
+                value=1.0,  # 1× in the middle
                 marks=speed_marks(SPEED_MAX),
                 updatemode="drag",
                 tooltip={"placement": "bottom"}
@@ -229,6 +232,9 @@ def parse_upload(contents, fname, prior_store_json, prior_dyn_json):
     try:
         raw = _decode_upload(contents)
         ticks, blocks = _load_raw_json(raw)
+
+        vehicle_locations = [pos.actor.location for tick in ticks for pos in tick.actor_positions if
+                             isinstance(pos.actor, DataVehicle)]
 
         # ---- static upload (replace static, keep dynamic) ----
         if blocks:
@@ -510,14 +516,14 @@ def patch_tick(tick_idx, layer_map):
 @app.callback(
     Output("play-ivl", "disabled"),
     Output("play-ivl", "interval"),
-    Output("tick-sl",  "value"),
-    Input("play-btn",   "n_clicks"),
-    Input("pause-btn",  "n_clicks"),
-    Input("play-ivl",   "n_intervals"),  # fires each frame while playing
-    Input("speed-sl",   "value"),        # live speed changes
-    State("tick-sl",    "value"),
-    State("tick-sl",    "max"),
-    State("play-ivl",   "disabled"),
+    Output("tick-sl", "value"),
+    Input("play-btn", "n_clicks"),
+    Input("pause-btn", "n_clicks"),
+    Input("play-ivl", "n_intervals"),  # fires each frame while playing
+    Input("speed-sl", "value"),  # live speed changes
+    State("tick-sl", "value"),
+    State("tick-sl", "max"),
+    State("play-ivl", "disabled"),
     prevent_initial_call=True
 )
 def player(play_clicks, pause_clicks, _n_intervals, speed, cur_tick, tick_max, is_disabled):
@@ -528,6 +534,7 @@ def player(play_clicks, pause_clicks, _n_intervals, speed, cur_tick, tick_max, i
       - Interval: advance tick; retime for next→following / speed
       - Speed change: retime immediately if playing; speed==0 pauses
     """
+
     # helpers
     def next_idx(i: int | None) -> int:
         if i is None:
@@ -578,7 +585,7 @@ def player(play_clicks, pause_clicks, _n_intervals, speed, cur_tick, tick_max, i
             return True, no_update, no_update
         cur = 0 if cur_tick is None else cur_tick
         nxt = next_idx(cur)
-        ms  = interval_ms_for(cur, nxt, speed)
+        ms = interval_ms_for(cur, nxt, speed)
         return False, ms, no_update  # enable interval and set first ms
 
     # --- timer fired: advance one frame ---
@@ -590,7 +597,7 @@ def player(play_clicks, pause_clicks, _n_intervals, speed, cur_tick, tick_max, i
             return True, no_update, no_update
         nxt = next_idx(cur_tick)
         fol = next_idx(nxt)
-        ms  = interval_ms_for(nxt, fol, speed)
+        ms = interval_ms_for(nxt, fol, speed)
         return no_update, ms, nxt
 
     # nothing to do

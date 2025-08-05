@@ -4,11 +4,13 @@ from typing import Optional
 from carla import TrafficSign
 from dataclass_wizard import JSONWizard
 
-from carla_data_classes import ensure_runtime_types as _ensure_runtime_types
+# top of the file (before the @dataclass)
+from carla_data_classes import ensure_core_types as _ensure_core_types
 from carla_data_classes.dynamic.DataActor import DataActor
 from carla_data_classes.enums.DataTrafficSignType import DataTrafficSignType
 
-_ensure_runtime_types(globals())
+_ensure_core_types(globals())
+
 
 
 @dataclass

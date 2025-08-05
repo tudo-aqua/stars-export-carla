@@ -4,10 +4,14 @@ from typing import Optional
 from carla import TrafficLight
 from dataclass_wizard import JSONWizard
 
+# top of the file (before the @dataclass)
+from carla_data_classes import ensure_core_types as _ensure_core_types
 from carla_data_classes.dynamic.DataActor import DataActor
 from carla_data_classes.static.DataLocation import DataLocation
 from carla_data_classes.static.DataRotation import DataRotation
 from carla_data_classes.static.DataStaticTrafficLight import DataStaticTrafficLight
+
+_ensure_core_types(globals())
 
 
 @dataclass

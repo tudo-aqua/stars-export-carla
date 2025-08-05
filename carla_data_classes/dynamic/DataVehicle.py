@@ -3,8 +3,12 @@ from dataclasses import dataclass
 from carla import Vehicle
 from dataclass_wizard import JSONWizard
 
+# top of the file (before the @dataclass)
+from carla_data_classes import ensure_core_types as _ensure_core_types
 from carla_data_classes.dynamic.DataActor import DataActor
 from carla_data_classes.static.DataVector3D import DataVector3D
+
+_ensure_core_types(globals())
 
 
 @dataclass
