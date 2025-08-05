@@ -1,6 +1,6 @@
 import threading
 
-from gui.config_data import Config
+from carla_interaction_gui.config_data import Config
 
 
 class ThreadWorker(threading.Thread):

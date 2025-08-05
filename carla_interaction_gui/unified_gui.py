@@ -5,14 +5,14 @@ import sys, tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 from typing import List, Callable
 
-from gui.carla_launcher import kill_carla
-from gui.config_data import Config, load, save
-from gui.workers.CarlaServerWorker import CarlaServerWorker
-from gui.workers.ManualControlWorker import ManualControlWorker
-from gui.workers.MoveLatestRecordingWorker import MoveLatestRecordingWorker
-from gui.workers.RecordVideoWorker import RecordVideoWorker
-from gui.workers.ThreadWorker import ThreadWorker
-from gui.workers.TransformRecordingWorker import TransformRecordingWorker
+from carla_interaction_gui.carla_launcher import kill_carla
+from carla_interaction_gui.config_data import Config, load, save
+from carla_interaction_gui.workers.CarlaServerWorker import CarlaServerWorker
+from carla_interaction_gui.workers.ManualControlWorker import ManualControlWorker
+from carla_interaction_gui.workers.MoveLatestRecordingWorker import MoveLatestRecordingWorker
+from carla_interaction_gui.workers.RecordVideoWorker import RecordVideoWorker
+from carla_interaction_gui.workers.ThreadWorker import ThreadWorker
+from carla_interaction_gui.workers.TransformRecordingWorker import TransformRecordingWorker
 
 # Official CARLA maps from the docs (non-layered + layered "_Opt")
 ALLOWED_NON_LAYERED_MAPS = [

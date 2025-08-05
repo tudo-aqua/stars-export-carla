@@ -1,5 +1,5 @@
-from gui.carla_launcher import restart_and_connect, kill_carla
-from gui.workers.ThreadWorker import ThreadWorker
+from carla_interaction_gui.carla_launcher import restart_and_connect, kill_carla
+from carla_interaction_gui.workers.ThreadWorker import ThreadWorker
 import traceback
 
 

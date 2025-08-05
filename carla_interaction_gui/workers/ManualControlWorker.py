@@ -5,9 +5,9 @@ from pathlib import Path
 
 import psutil
 
-from gui.carla_launcher import restart_carla, kill_carla
-from gui.workers.ThreadWorker import ThreadWorker
-from gui.config_data import Config
+from carla_interaction_gui.carla_launcher import restart_carla, kill_carla
+from carla_interaction_gui.workers.ThreadWorker import ThreadWorker
+from carla_interaction_gui.config_data import Config
 
 
 class ManualControlWorker(ThreadWorker):

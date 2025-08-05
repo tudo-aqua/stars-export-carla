@@ -2,8 +2,8 @@ import shutil
 import time
 from pathlib import Path
 
-from gui.config_data import Config
-from gui.workers.ThreadWorker import ThreadWorker
+from carla_interaction_gui.config_data import Config
+from carla_interaction_gui.workers.ThreadWorker import ThreadWorker
 
 
 class MoveLatestRecordingWorker(ThreadWorker):
