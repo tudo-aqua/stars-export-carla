@@ -160,7 +160,7 @@ class UnifiedCarlaGUI(tk.Tk):
         """
         frame = ttk.Frame(notebook)
         notebook.add(frame, text="Manual Drive")
-        tk.Label(frame, text="Kill → start CARLA → run manual_control.py.").pack(pady=5)
+        tk.Label(frame, text="Let's you manually drive around in CARLA.").pack(pady=5)
 
         self._entry_row(frame, "CARLA executable:", self.carla_executable_variable,
                         lambda: self._open_file_dialog(self.carla_executable_variable))
@@ -196,7 +196,7 @@ class UnifiedCarlaGUI(tk.Tk):
         self.start_btn.pack(pady=8)
 
         self.move_btn = tk.Button(frame, text="Move 'manual_recording'",
-                                  command=self._move_latest, state="disabled")
+                                  command=self._move_latest, state="active")
         self.move_btn.pack(pady=2)
 
         self.stop_btn = tk.Button(frame, text="Stop",
@@ -346,9 +346,6 @@ class UnifiedCarlaGUI(tk.Tk):
             self._active_worker = worker
             self.stop_btn.config(state="normal")
 
-        if enable_move:
-            self.move_btn.config(state="normal")
-
         # poll until *this* worker finishes
         def poll():
             """
@@ -360,9 +357,6 @@ class UnifiedCarlaGUI(tk.Tk):
                 if worker is self._active_worker:
                     self._active_worker = None
                     self.stop_btn.config(state="disabled")
-
-                if isinstance(worker, ManualControlWorker):
-                    self.move_btn.config(state="disabled")
 
         poll()
         return None
