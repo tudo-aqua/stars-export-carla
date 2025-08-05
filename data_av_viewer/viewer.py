@@ -90,6 +90,24 @@ INITIAL_FIG.update_layout(
     yaxis=dict(showgrid=False, automargin=True),
 )
 
+# Global cache of the per-tick frames,
+# so we don’t keep shuttling ~200 MB of JSON back and forth on every slider move.
+FRAMES: list = []
+TIMES: list[float] = []
+# Typical delta-t between ticks (seconds); set after loading dynamic data
+BASE_DT_S: float = 0.05
+SPEED_MAX = 3.0  # set to 2.0 if you prefer 0 → 2× instead of 0 → 3×
+
+def speed_marks(max_speed: float):
+    mid = 1.0
+    return {
+        0.0: "0×",
+        round(max_speed/4, 2): f"{max_speed/4:g}×",
+        mid: "1×",
+        round(max_speed/2, 2): f"{max_speed/2:g}×",
+        max_speed: f"{max_speed:g}×",
+    }
+
 app.layout = html.Div([
     # 2) the toggle button
     html.Button(
@@ -137,8 +155,16 @@ app.layout = html.Div([
             html.Button("⏸ Pause", id="pause-btn", n_clicks=0,
                         style={"width": "60px", "marginLeft": "6px"}),
             html.Span(" speed"),
-            dcc.Slider(id="speed-sl", min=0.2, max=5, step=0.2, value=1.0,
-                       updatemode="drag", tooltip={"placement": "bottom"})
+            dcc.Slider(
+                id="speed-sl",
+                min=0.0,
+                max=SPEED_MAX,
+                step=0.05,
+                value=1.0,                          # 1× in the middle
+                marks=speed_marks(SPEED_MAX),
+                updatemode="drag",
+                tooltip={"placement": "bottom"}
+            )
         ], style={"marginTop": "4px"}),
     ], id="menu-content", style=FULL_MENU_STYLE),
 
@@ -158,7 +184,6 @@ app.layout = html.Div([
     # ---- client-side stores -----------------------------------
     dcc.Store(id="store-json"),
     dcc.Store(id="dyn-ticks"),
-    dcc.Store(id="dyn-data"),
     dcc.Store(id="layer-map"),
     dcc.Store(id="hover-tpl"),
 ])
@@ -225,7 +250,6 @@ def parse_upload(contents, fname, prior_store_json, prior_dyn_json):
     Output("fig", "figure"),
     Output("layer-map", "data"),
     Output("hover-tpl", "data"),
-    Output("dyn-data", "data"),  # ← renamed
     Output("tick-sl", "max"),
     Input("store-json", "data"),
     Input("dyn-ticks", "data"),
@@ -233,17 +257,48 @@ def parse_upload(contents, fname, prior_store_json, prior_dyn_json):
     prevent_initial_call=True
 )
 def build_fig(json_data, dyn_raw, visible_layers):
+    from statistics import median
+    global FRAMES, TIMES, BASE_DT_S
+
+    FRAMES.clear()
+    TIMES.clear()
+
+    # --- static layers ---
     static_traces, layer_map, shapes = [], {}, []
     if json_data:
         store = ViewerStore.from_json(json_data)
-        static_traces, layer_map, shapes = build_all_traces(store, visible_layers, DEFAULT_SIZES)
+        static_traces, layer_map, shapes = build_all_traces(
+            store, visible_layers, DEFAULT_SIZES
+        )
 
-    # dynamic (optional)
+    # --- dynamic: build templates + cache frames & times ---
     dyn_templates, per_tick = [], []
     if dyn_raw:
         ticks = [TickData.from_dict(d) for d in orjson.loads(dyn_raw)]
         dyn_templates, per_tick = build_dynamic_templates(ticks)
 
+        # cache frames (for patch_tick)
+        FRAMES.extend(per_tick)
+
+        # extract a time value (seconds) from each TickData
+        def tval(t):
+            for name in ("timestamp", "time", "sim_time", "elapsed", "current_time", "current_tick"):
+                if hasattr(t, name):
+                    return float(getattr(t, name))
+            raise AttributeError("TickData lacks a usable time attribute")
+
+        TIMES.extend(tval(t) for t in ticks)
+
+        # compute a robust base Δt (median of positive diffs) as fallback
+        if len(TIMES) >= 2:
+            diffs = [b - a for a, b in zip(TIMES, TIMES[1:]) if (b - a) > 1e-9]
+            if diffs:
+                BASE_DT_S = max(median(diffs), 1e-3)
+            else:
+                span = max(TIMES[-1] - TIMES[0], 1e-3)
+                BASE_DT_S = span / max(len(TIMES) - 1, 1)
+
+    # --- assemble figure ---
     fig = go.Figure(data=static_traces + dyn_templates)
     if shapes:
         fig.layout.shapes = tuple(shapes)
@@ -259,34 +314,28 @@ def build_fig(json_data, dyn_raw, visible_layers):
         yaxis=dict(showgrid=False, automargin=True),
     )
 
-    tmpl = {i: t.hovertemplate for i, t in enumerate(fig.data)}
-    if dyn_templates:
-        layer_map["dynamic"] = list(range(len(static_traces),
-                                          len(static_traces) + len(dyn_templates)))
-
-    # ─── PRIME FRAME-0 FOR DYNAMICS ────────────────────────────────────
-    # (so hover/text/style are already set before the slider ever moves)
+    # prime tick-0 so hover & style work immediately
     if per_tick:
         frame0 = per_tick[0]
-        # only the dynamic traces (they live after all static_traces)
         for tr, (xs, ys, txt, style) in zip(dyn_templates, frame0):
-            # geometry
             tr.x = xs
             tr.y = ys
-            # hover-text
             tr.text = txt
-            # any per-frame style keys, e.g. "marker.color"
             for prop, val in style.items():
-                # split e.g. "marker.color" → target.marker.color = val
                 target = tr
                 *path, leaf = prop.split(".")
                 for p in path:
                     target = getattr(target, p)
                 setattr(target, leaf, val)
-    # ─────────────────────────────────────────────────────────────────────
 
-    tick_max = (len(per_tick) - 1) if per_tick else 0
-    return fig, layer_map, tmpl, {"frames": per_tick}, tick_max
+    tmpl = {i: t.hovertemplate for i, t in enumerate(fig.data)}
+    if dyn_templates:
+        layer_map["dynamic"] = list(
+            range(len(static_traces), len(static_traces) + len(dyn_templates))
+        )
+
+    tick_max = len(per_tick) - 1 if per_tick else 0
+    return fig, layer_map, tmpl, tick_max
 
 
 # ----------------------------------------------------------------------
@@ -423,29 +472,30 @@ def patch_hover(enabled, layer_map, tpl):
 # 4)  Tick slider patches the dynamic traces --------------------------
 @app.callback(
     Output("fig", "figure", allow_duplicate=True),
-    Input("tick-sl", "value"),  # when the slider moves…
-    Input("dyn-data", "data"),  # …or when new dynamic data loads ← NEW
+    Input("tick-sl", "value"),
     State("layer-map", "data"),
     prevent_initial_call=True
 )
-def patch_tick(tick_idx, dyn_data, layer_map):
-    if not dyn_data or not layer_map or "dynamic" not in layer_map:
+def patch_tick(tick_idx, layer_map):
+    from dash import no_update
+    global FRAMES
+
+    if tick_idx is None or not FRAMES or "dynamic" not in layer_map:
         return no_update
-    if tick_idx is None:
-        return no_update
-    frame = dyn_data["frames"][tick_idx]
+
+    frame = FRAMES[tick_idx]
     patch = Patch()
     for idx, (xs, ys, txt, style) in zip(layer_map["dynamic"], frame):
-        # xs may be empty → actor not present in this tick
         patch["data"][idx]["x"] = xs
         patch["data"][idx]["y"] = ys
         patch["data"][idx]["text"] = txt
-        for prop, val in style.items():  # e.g. "marker.color"
+        for prop, val in style.items():
             tgt = patch["data"][idx]
             parts = prop.split(".")
             for p in parts[:-1]:
                 tgt = tgt[p]
             tgt[parts[-1]] = val
+
     return patch
 
 
@@ -454,30 +504,91 @@ def patch_tick(tick_idx, dyn_data, layer_map):
 @app.callback(
     Output("play-ivl", "disabled"),
     Output("play-ivl", "interval"),
-    Input("play-btn", "n_clicks"),
-    Input("pause-btn", "n_clicks"),
-    State("speed-sl", "value"),
+    Output("tick-sl",  "value"),
+    Input("play-btn",   "n_clicks"),
+    Input("pause-btn",  "n_clicks"),
+    Input("play-ivl",   "n_intervals"),  # fires each frame while playing
+    Input("speed-sl",   "value"),        # live speed changes
+    State("tick-sl",    "value"),
+    State("tick-sl",    "max"),
+    State("play-ivl",   "disabled"),
     prevent_initial_call=True
 )
-def control_play(play, pause, speed):
+def player(play_clicks, pause_clicks, _n_intervals, speed, cur_tick, tick_max, is_disabled):
+    """
+    Single source of truth for playback:
+      - Play: enable interval with dt = actual(current→next)/speed
+      - Pause: disable interval
+      - Interval: advance tick; retime for next→following / speed
+      - Speed change: retime immediately if playing; speed==0 pauses
+    """
+    # helpers
+    def next_idx(i: int | None) -> int:
+        if i is None:
+            return 0
+        return i + 1 if (tick_max is not None and i + 1 <= tick_max) else 0
+
+    def dt_seconds(cur: int | None, nxt: int) -> float:
+        # use recorded times if available; else BASE_DT_S
+        if TIMES and len(TIMES) >= 2 and cur is not None:
+            if nxt > cur:
+                dt = TIMES[nxt] - TIMES[cur]
+                return dt if dt > 0 else BASE_DT_S
+            # wrap around
+            return BASE_DT_S
+        return BASE_DT_S
+
+    def interval_ms_for(cur: int | None, nxt: int, spd: float) -> int | None:
+        if spd <= 0:
+            return None  # means "pause"
+        dt = dt_seconds(cur, nxt)
+        # Convert to ms and scale by speed; clamp to ≥1ms
+        return max(int((dt * 1000) / max(spd, 1e-3)), 1)
+
     trig = ctx.triggered_id
-    playing = trig == "play-btn"
-    period = int(1000 / max(speed, 0.1))
-    return (not playing), period
 
+    # --- PAUSE button ---
+    if trig == "pause-btn":
+        # Disable interval, keep its current ms value and tick
+        return True, no_update, no_update
 
-@app.callback(
-    Output("tick-sl", "value"),
-    Input("play-ivl", "n_intervals"),
-    State("tick-sl", "value"),
-    State("tick-sl", "max"),
-    prevent_initial_call=True
-)
-def advance_tick(_, cur, mx):
-    if cur is None:
-        return no_update
-    nxt = (cur + 1) % (mx + 1) if mx >= 0 else 0
-    return nxt
+    # --- speed changed (apply immediately) ---
+    if trig == "speed-sl":
+        # If slider is at 0 → pause
+        if speed <= 0:
+            return True, no_update, no_update
+        # If playing, retime interval right now for current→next
+        if not is_disabled and cur_tick is not None:
+            nxt = next_idx(cur_tick)
+            ms = interval_ms_for(cur_tick, nxt, speed)
+            return no_update, ms, no_update
+        # If paused, just keep paused; new speed used on next Play
+        return no_update, no_update, no_update
+
+    # --- PLAY button ---
+    if trig == "play-btn":
+        if speed <= 0:
+            # do not start when speed==0
+            return True, no_update, no_update
+        cur = 0 if cur_tick is None else cur_tick
+        nxt = next_idx(cur)
+        ms  = interval_ms_for(cur, nxt, speed)
+        return False, ms, no_update  # enable interval and set first ms
+
+    # --- timer fired: advance one frame ---
+    if trig == "play-ivl":
+        if cur_tick is None or tick_max is None or tick_max < 0:
+            return no_update, no_update, no_update
+        # if speed was set to 0 while timer running, pause now
+        if speed <= 0:
+            return True, no_update, no_update
+        nxt = next_idx(cur_tick)
+        fol = next_idx(nxt)
+        ms  = interval_ms_for(nxt, fol, speed)
+        return no_update, ms, nxt
+
+    # nothing to do
+    return no_update, no_update, no_update
 
 
 # ----------------------------------------------------------------------
