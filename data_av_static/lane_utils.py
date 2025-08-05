@@ -1,4 +1,4 @@
-from typing import List, Tuple, TYPE_CHECKING
+from typing import List, Tuple, TYPE_CHECKING, Iterable, Optional
 
 from carla import Waypoint, Actor, Location, Landmark
 from shapely import LineString, Point
@@ -75,7 +75,9 @@ class _LaneUtils:
                              successor_lanes=successor_lanes, intersecting_lanes=[], lane_midpoints=lane_midpoints,
                              speed_limits=[], landmarks=[], contact_areas=[], traffic_lights=[])
 
-        geom = LineString([(m.location.x, m.location.y) for m in lane_midpoints])
+        coords = [(m.location.x, m.location.y) for m in lane_midpoints if m is not None]
+        fallback_xy = (waypoint.transform.location.x, waypoint.transform.location.y)
+        geom = self._safe_linestring_from_coords(coords, fallback_xy=fallback_xy)
         data_lane._geom = geom
         data_lane.speed_limits = self._compute_speed_limits_for_lane(
             geom=geom,
@@ -289,6 +291,40 @@ class _LaneUtils:
             segments.append(DataSpeedLimit(from_distance=seg_start, to_distance=lane_length, speed_limit=curr_v))
 
         return segments
+
+    def _safe_linestring_from_coords(self, coords: Iterable[Tuple[float, float]],
+                                     fallback_xy: Optional[Tuple[float, float]] = None,
+                                     eps: float = 1e-3,
+                                     ) -> LineString:
+        """
+        Build a LineString robustly:
+          - removes consecutive duplicate points
+          - if <2 points remain, creates a tiny segment at fallback_xy (or the first coord)
+        """
+        pts: List[Tuple[float, float]] = [(float(x), float(y)) for (x, y) in coords]
+
+        if not pts and fallback_xy is not None:
+            pts = [fallback_xy]
+
+        # drop consecutive duplicates
+        dedup: List[Tuple[float, float]] = []
+        for p in pts:
+            if not dedup or p != dedup[-1]:
+                dedup.append(p)
+
+        if len(dedup) >= 2:
+            return LineString(dedup)
+
+        # Not enough points → synthesize a tiny segment
+        if dedup:
+            x, y = dedup[0]
+        elif fallback_xy is not None:
+            x, y = fallback_xy
+        else:
+            # last resort: origin
+            x, y = 0.0, 0.0
+
+        return LineString([(x, y), (x + eps, y + eps)])
 
     @staticmethod
     def get_all_waypoints_until_start_of_lane(lane: Waypoint, precision: float = 2.0) -> List[Waypoint]:
