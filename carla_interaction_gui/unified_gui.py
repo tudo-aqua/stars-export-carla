@@ -35,6 +35,8 @@ class UnifiedCarlaGUI(tk.Tk):
         self.geometry("950x800")
         self.resizable(True, True)
 
+        self._current_stop_button: tk.Button | None = None
+
         self.config: Config = load()
 
         self.carla_executable_variable = tk.StringVar(value=self.config.carla_executable)
@@ -146,6 +148,10 @@ class UnifiedCarlaGUI(tk.Tk):
                                     width=25, command=self._toggle_carla)
         self.server_btn.pack(pady=10)
 
+        self.stop_btn_server = tk.Button(frame, text="Stop",
+                                         command=self._stop_worker, state="disabled")
+        self.stop_btn_server.pack(pady=2)
+
     def _tab_manual(self, notebook: ttk.Notebook):
         """
         Initializes and organizes elements in the "Manual Drive" tab. Provides controls and input
@@ -200,9 +206,9 @@ class UnifiedCarlaGUI(tk.Tk):
                                   command=self._move_latest, state="active")
         self.move_btn.pack(pady=2)
 
-        self.stop_btn = tk.Button(frame, text="Stop",
-                                  command=self._stop_worker, state="disabled")
-        self.stop_btn.pack(pady=8)
+        self.stop_btn_manual = tk.Button(frame, text="Stop",
+                                         command=self._stop_worker, state="disabled")
+        self.stop_btn_manual.pack(pady=8)
 
     def _tab_transform(self, notebook: ttk.Notebook):
         """
@@ -242,6 +248,9 @@ class UnifiedCarlaGUI(tk.Tk):
 
         tk.Button(frame, text="Start transform",
                   command=self._start_transform).pack(pady=10)
+        self.stop_btn_transform = tk.Button(frame, text="Stop",
+                                            command=self._stop_worker, state="disabled")
+        self.stop_btn_transform.pack(pady=8)
 
     def _tab_video(self, notebook: ttk.Notebook):
         """
@@ -312,6 +321,10 @@ class UnifiedCarlaGUI(tk.Tk):
         tk.Button(frame, text="Start recording",
                   command=self._start_video).pack(pady=10)
 
+        self.stop_btn_video = tk.Button(frame, text="Stop",
+                                        command=self._stop_worker, state="disabled")
+        self.stop_btn_video.pack(pady=8)
+
     def _validate_number(self, proposed: str) -> bool:
         """
         Entry validator: allow empty, integers, or floats (with optional leading '-').
@@ -325,7 +338,7 @@ class UnifiedCarlaGUI(tk.Tk):
         except ValueError:
             return False
 
-    def _attach_worker(self, worker: ThreadWorker, *, enable_move: bool = False):
+    def _attach_worker(self, worker: ThreadWorker, *, stop_button: tk.Button | None = None, enable_move: bool = False):
         """
         Attaches a worker to the system and manages its execution, UI updates, and
         state tracking.
@@ -342,22 +355,23 @@ class UnifiedCarlaGUI(tk.Tk):
 
         worker.start()
 
-        # keep track of the 1 exclusive task that may run at a time
         if worker.exclusive:
             self._active_worker = worker
-            self.stop_btn.config(state="normal")
+            # enable the specific stop button for this task
+            if stop_button is not None:
+                stop_button.config(state="normal")
+                self._current_stop_button = stop_button
 
-        # poll until *this* worker finishes
         def poll():
-            """
-            Polls the state of a worker thread and updates UI elements accordingly.
-            """
             if worker.is_alive():
                 self.after(500, poll)
             else:
                 if worker is self._active_worker:
                     self._active_worker = None
-                    self.stop_btn.config(state="disabled")
+                    # disable whichever stop button was tied to this worker
+                    if self._current_stop_button is not None:
+                        self._current_stop_button.config(state="disabled")
+                        self._current_stop_button = None
 
         poll()
         return None
@@ -371,14 +385,19 @@ class UnifiedCarlaGUI(tk.Tk):
         if self._carla_worker and self._carla_worker.is_alive():
             self._carla_worker.cancel()
             self.server_btn.config(text="Start CARLA server")
+            if hasattr(self, "stop_btn_server"):
+                self.stop_btn_server.config(state="disabled")
         else:
             if not self._validate_paths([
                 ("CARLA executable", self.carla_executable_variable, "file"),
             ]):
                 return
+            self._clear_log()
             self._carla_worker = CarlaServerWorker(self._collect_cfg(), self._log)
             self._carla_worker.start()
             self.server_btn.config(text="Stop CARLA server")
+            if hasattr(self, "stop_btn_server"):
+                self.stop_btn_server.config(state="normal")
 
     def _start_manual(self):
         """
@@ -390,8 +409,12 @@ class UnifiedCarlaGUI(tk.Tk):
             ("CARLA output folder", self.manual_output_dir_variable, "dir"),
         ]):
             return
-        self._attach_worker(ManualControlWorker(self._collect_cfg(), self._log),
-                            enable_move=True)
+        self._clear_log()
+        self._attach_worker(
+            ManualControlWorker(self._collect_cfg(), self._log),
+            stop_button=self.stop_btn_manual,
+            enable_move=True
+        )
 
     def _move_latest(self):
         """
@@ -419,10 +442,12 @@ class UnifiedCarlaGUI(tk.Tk):
         ]):
             return
 
+        self._clear_log()
         config = self._collect_cfg()
         config.transform_input_file = self.transform_input_file_variable.get().strip()
         config.transformer_output_path = self.transformer_output_path_variable.get().strip()
-        self._attach_worker(TransformRecordingWorker(config, self._log))
+        self._attach_worker(TransformRecordingWorker(config, self._log),
+                            stop_button=self.stop_btn_transform)
 
     def _start_video(self):
         """
@@ -436,6 +461,7 @@ class UnifiedCarlaGUI(tk.Tk):
         ]):
             return
 
+        self._clear_log()
         config = self._collect_cfg()
         config.video_input_file = self.video_input_path_variable.get().strip()
         config.video_output_path = self.video_output_path_variable.get().strip()
@@ -461,18 +487,47 @@ class UnifiedCarlaGUI(tk.Tk):
             end_val = float(end_str)
             config.end_at = float("inf") if end_val < 0 else end_val
 
-        self._attach_worker(RecordVideoWorker(config, self._log))
+        self._attach_worker(RecordVideoWorker(config, self._log),
+                            stop_button=self.stop_btn_video)
 
     def _stop_worker(self):
         """
         Stops the active worker and the CARLA worker, if they are running, and resets the relevant
         GUI components. Also terminates the CARLA server processes.
         """
-        if self._active_worker:
-            self._active_worker.cancel()
-        if self._carla_worker and self._carla_worker.is_alive():
-            self._carla_worker.cancel()
-            self.server_btn.config(text="Start CARLA server")
+        w = getattr(self, "_active_worker", None)
+        if w:
+            try:
+                w.cancel()
+            except Exception:
+                pass
+            try:
+                # wait a bit so the thread can actually exit and not leave the flag set
+                w.join(timeout=5.0)
+            except Exception:
+                pass
+            # Regardless, clear the flag so we don’t block subsequent starts
+            self._active_worker = None
+            # Disable the common stop button if you have one
+            try:
+                self.stop_btn.config(state="disabled")
+            except Exception:
+                pass
+
+        if getattr(self, "_carla_worker", None) and self._carla_worker.is_alive():
+            try:
+                self._carla_worker.cancel()
+            except Exception:
+                pass
+            try:
+                self._carla_worker.join(timeout=5.0)
+            except Exception:
+                pass
+            try:
+                self.server_btn.config(text="Start CARLA server")
+            except Exception:
+                pass
+
         kill_carla()
 
     def _setup_autosave(self):
@@ -651,6 +706,11 @@ class UnifiedCarlaGUI(tk.Tk):
         self.log.configure(state="normal")
         self.log.insert("end", txt + "\n")
         self.log.see("end")
+        self.log.configure(state="disabled")
+
+    def _clear_log(self):
+        self.log.configure(state="normal")
+        self.log.delete("1.0", "end")
         self.log.configure(state="disabled")
 
     def _validate_paths(self, specs: list[tuple[str, tk.Variable, str]]) -> bool:
