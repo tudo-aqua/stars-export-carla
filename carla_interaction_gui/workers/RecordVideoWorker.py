@@ -19,7 +19,7 @@ class RecordVideoWorker(ThreadWorker):
         """
         RecCls = BoxRec if self.cfg.with_bboxes else RawRec
 
-        self.log(">> Rebooting CARLA & connecting …")
+        self.log(">> [CARLA] Rebooting CARLA & connecting")
         client = restart_and_connect(self.cfg.carla_executable, log=self.log)
         if self.cancelled:
             return
@@ -34,10 +34,10 @@ class RecordVideoWorker(ThreadWorker):
             begin_at=self.cfg.begin_at,
             end_at=self.cfg.end_at if self.cfg.end_at != float("inf") else sys.maxsize
         )
-        self.log(f">> Recording video (bboxes={self.cfg.with_bboxes}) …")
+        self.log(f">> [Recorder] Recording video (bboxes={self.cfg.with_bboxes})")
         rec.record_camera_in_simulation_run(**args)
 
-        self.log(">> Encoding mp4 …")
+        self.log(">> [Recorder] Encoding mp4")
         stem = Path(self.cfg.video_input_file).stem
         if self.cfg.with_bboxes:
             rec.save_video(self.cfg.video_output_path, stem, self.cfg.vehicle_id, self.cfg.begin_at, rec.END_AT,
@@ -45,7 +45,7 @@ class RecordVideoWorker(ThreadWorker):
         else:
             rec.save_video(self.cfg.video_output_path, stem, self.cfg.vehicle_id, self.cfg.begin_at, rec.END_AT)
 
-        self.log(">> Finished video export")
+        self.log(">> [Recorder] Finished video export")
         kill_carla(log=self.log)
 
     def cancel(self):

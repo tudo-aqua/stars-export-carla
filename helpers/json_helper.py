@@ -97,7 +97,7 @@ class JSONHelper:
     def log_error(file_name: str, name: str, error_message: str) -> None:
         path = JSONHelper.get_file_path_for_name(name=file_name, folder=JSONHelper.ERROR_FOLDER, file_ending="txt",
                                                  add_date=True)
-        print(f"Log {file_name} to", path)
+        print(f">> [Error] Log {file_name} to", path)
         with open(path, "a") as aborted_runs:
             aborted_runs.write(f"{datetime.now()}: {name}\n")
             aborted_runs.write(f"\t\t {error_message}\n")
@@ -106,7 +106,7 @@ class JSONHelper:
     def log_aborted_run(name) -> None:
         path = JSONHelper.get_file_path_for_name(name="aborted_runs", folder=JSONHelper.ERROR_FOLDER, file_ending="txt",
                                                  add_date=True)
-        print("Log aborted run to", path)
+        print(">> [Error] Log aborted run to", path)
         with open(path, "a") as aborted_runs:
             aborted_runs.write(f"{datetime.now()}: {name}\n")
 
@@ -114,7 +114,7 @@ class JSONHelper:
     def log_invalid_run(name) -> None:
         path = JSONHelper.get_file_path_for_name(name="invalid_runs", folder=JSONHelper.ERROR_FOLDER, file_ending="txt",
                                                  add_date=True)
-        print("Log invalid run to", path)
+        print(">> [Error] Log invalid run to", path)
         with open(path, "a") as aborted_runs:
             aborted_runs.write(f"{datetime.now()}: {name}\n")
 
@@ -123,7 +123,7 @@ class JSONHelper:
         path = JSONHelper.get_file_path_for_name(name="failed_carla_runs", folder=JSONHelper.ERROR_FOLDER,
                                                  file_ending="txt",
                                                  add_date=True)
-        print("Log aborted run to", path)
+        print(">> [Error] Log aborted run to", path)
         with open(path, "a") as aborted_runs:
             aborted_runs.write(f"{datetime.now()}: {name}\n")
 
@@ -196,7 +196,7 @@ class JSONHelper:
                 match = re.search(r'param weather = "(.*?)"', line)
                 if match:
                     weather_value = match.group(1)
-                    print(f"Extracted weather value: {weather_value}")
+                    print(f">> [Scenic] Extracted weather value: {weather_value}")
                     return DataWeatherParameters.from_enum_value(weather_value)
 
     @staticmethod
@@ -215,15 +215,15 @@ class JSONHelper:
         modes = {zipfile.ZIP_DEFLATED: 'deflated',
                  zipfile.ZIP_STORED: 'stored',
                  }
-        print('creating archive')
+        print(f'>> [ZIP] Creating zip archive at path: "{path}"')
         zip_file_path = os.path.splitext(path)[0] + ".zip"
         archive_name = os.path.basename(path)
         zf = zipfile.ZipFile(zip_file_path, mode='w')
         try:
-            print(f'adding {path}', modes[compression])
+            print(f'>> [ZIP] Adding file to zip: {path}')
             zf.write(path, arcname=archive_name, compress_type=compression)
         finally:
-            print('closing')
+            print('>> [ZIP] Close zip file')
             zf.close()
 
     @staticmethod

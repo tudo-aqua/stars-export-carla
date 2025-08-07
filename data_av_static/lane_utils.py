@@ -65,7 +65,7 @@ class _LaneUtils:
                 - Traffic lights
                 - Contact areas and landmarks
         """
-        print(f"Converting road {waypoint.road_id} with lane {waypoint.lane_id}")
+        print(f">> [Data-AV Transformer] Converting road {waypoint.road_id} with lane {waypoint.lane_id}")
         # Get the length of the lane
         lane_length: float = self.get_length_of_lane(waypoint)
         # Get a list of leading lanes

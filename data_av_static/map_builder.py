@@ -246,7 +246,7 @@ class _BlockBuilder:
         landmarks: List[Landmark] = self.ctx.map.get_all_landmarks()
 
         for landmark in landmarks:
-            print(f"Converting Landmark {landmark.id}")
+            print(f">> [Data-AV Transformer] Converting Landmark {landmark.id}")
             data_landmark = DataLandmark.from_landmark(landmark)  # builds DataLandmark from CARLA Landmark
             road = self.get_specific_road_from_blocks(data_blocks, landmark.road_id)
             if not road:

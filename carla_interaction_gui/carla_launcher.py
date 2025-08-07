@@ -1,8 +1,13 @@
 from __future__ import annotations
-import os, sys, subprocess, time
-import psutil
-import carla
+
+import os
+import subprocess
+import sys
+import time
 from typing import Callable, Any
+
+import carla
+import psutil
 
 
 def kill_carla(log: Callable[[str], None] | None = None) -> None:
@@ -64,7 +69,7 @@ def start_carla(
         _log(f">> [CARLA] Waiting {boot:.1f}s for CARLA to boot")
         time.sleep(boot)
     if map_name:
-        _log(f">> [CARLA] Loading map {map_name}")
+        _log(f">> [CARLA] Loading map: '{map_name}'")
         ok = _set_map_via_config_py(exe, map_name, log=_log)
         if not ok:
             _log(f">> [CARLA] Warning: failed to set map '{map_name}' via config.py")
@@ -106,14 +111,14 @@ def restart_carla(
     """
     _log = log or print
 
-    _log(">> [CARLA] Killing existing instances …")
+    _log(">> [CARLA] Killing existing instances")
     kill_carla(_log)
 
     if cooldown > 0:
         _log(f">> [CARLA] Waiting {cooldown:.1f}s before restart")
         time.sleep(cooldown)
 
-    _log(">> [CARLA] Starting new server …")
+    _log(">> [CARLA] Starting new server")
     start_carla(
         exe,
         render_off_screen=render_off_screen,
@@ -175,7 +180,7 @@ def restart_and_connect(
         log=_log,
     )
 
-    _log(">> [CARLA] Connecting to server …")
+    _log(">> [CARLA] Connecting to server")
     client = carla.Client(host, port)
     client.set_timeout(timeout)
     _log(">> [CARLA] Connected.")
@@ -219,7 +224,7 @@ def _set_map_via_config_py(
 
     py = sys.executable or "python"
     cmd = [py, config_py, "--host", host, "--port", str(port), "--map", map_name]
-    _log(f">> [CARLA] Changing map via config.py: {map_name}")
+    _log(f">> [CARLA] Changing map via config.py to: '{map_name}'")
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
         if proc.stdout:

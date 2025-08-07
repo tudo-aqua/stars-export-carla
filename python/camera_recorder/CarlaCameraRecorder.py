@@ -7,9 +7,9 @@ import carla
 import cv2
 import numpy as np
 
-from helpers.carla_api_helper import CarlaAPIHelper
 from data_av_static import MapRasterizer
 from helper import build_projection_matrix, get_image_point, point_in_canvas, min_distance_to_front
+from helpers.carla_api_helper import CarlaAPIHelper
 from python.camera_recorder.CameraPosition import CameraPosition
 from python.camera_recorder.CarlaConnector import connect, load_world
 from python.camera_recorder.SafetyBoxStyle import SafetyBoxStyle
@@ -47,7 +47,7 @@ class CarlaCameraRecorder:
         self.show_preview = show_preview
 
     def __start_replay__(self, logfile: str, output:str, api_helper: CarlaAPIHelper, world: carla.World) -> Tuple[List[Tuple[Any, str, bool, bool, queue.Queue]], carla.Vehicle]:
-        print("Start with simulation replay")
+        print(">> [Recorder] Start with simulation replay")
         api_helper.start_replaying(logfile)
 
         # Tick until vehicles are spawned
@@ -249,12 +249,12 @@ class CarlaCameraRecorder:
 
             # Check if the current tick is within the specified range
             current_tick = recording_frequency * tick
-            print(f"\rTick {tick} of {self.tick_count}. Simulation Tick: {float(current_tick):.2f}")
+            print(f">> [CARLA] Tick {tick:05d} of {self.tick_count:05d}. Simulation Tick: {float(current_tick):.2f}")
             if current_tick < self.begin_at:
-                print(f"Current tick {current_tick} is not within [{self.begin_at}, {self.end_at}]")
+                print(f">> [Recorder] Current tick {current_tick} is not within [{self.begin_at}, {self.end_at}]")
                 continue
             if current_tick > self.end_at:
-                print(f"Current tick {current_tick} is not within [{self.begin_at}, {self.end_at}]")
+                print(f">> [Recorder] Current tick {current_tick} is not within [{self.begin_at}, {self.end_at}]")
                 break
 
             new_location = ego_vehicle.get_location()

@@ -37,12 +37,12 @@ class CarlaMonitor:
         Read Weather data from given json data into DataWeatherParameters data class
         @return: DataWeatherParameters from given json file, or DataWeatherParameters. Default if file does not exist
         """
-        print("Evaluating weather data at path:", weather_file)
+        print(f">> [IO] Evaluating weather data at path: '{weather_file}'")
         # Check if th weather file exists
         if not os.path.exists(weather_file):
             # Take default weather as no weather was saved
-            print("There is no weather data for the recording file:", weather_file,
-                  "Take Default")
+            print(f">> [IO] There is no weather data for the recording file: '{weather_file}'")
+            print(">> [CARLA] Take default weather parameters.")
             return DataWeatherParameters.from_weather(WeatherParameters.Default, DataWeatherParametersType.Default)
         # Load weather data from file
         weather_data = JSONHelper.load_weather_from_scenic(weather_file)
@@ -54,38 +54,38 @@ class CarlaMonitor:
         @param file_path: The file name of the simulation run to monitor
         @return: None
         """
-        print("Evaluate recorder data at path", file_path)
+        print(f">> [IO] Evaluate recorder data at path: '{file_path}'")
         log_data_path = file_path
 
         try:
             # Check data from carla recording for validity
             info = self.client.show_recorder_file_info(log_data_path, True)
             if info == "File is not a CARLA recorder/n":
-                print("The file at path", file_path, "is not a CARLA recorder")
+                print(">> [CARLA] The file at path", file_path, "is not a CARLA recorder")
                 return
 
             if info.__contains__("not found"):
-                print("The file at path", file_path, "cannot be found.")
+                print(">> [IO] The file at path", file_path, "cannot be found.")
                 return
 
             # Get recording frequency in the recorded file using the recorder_file_info and split
             recording_frequency = float(info.split("Frame 2 at ")[1].split(" seconds")[0])
 
-            print(f"Recording frequency: {recording_frequency}")
+            print(f">> [CARLA] Recording frequency: {recording_frequency:.3f}s")
 
             # Get count of all ticks in the recorded file using the recorder_file_info and split
             replay_tick_count = int(info.split("Frames: ")[1].split("Duration")[0])
 
-            print(f"Replay Tick Count: {replay_tick_count}")
+            print(f">> [CARLA] Replay Tick Count: {replay_tick_count}")
 
-            print("Create dynamic information for the recording file:", log_data_path)
+            print(f">> [Data-AV Transformer] Create dynamic information for the recording file: '{log_data_path}'")
 
             weather_parameters: DataWeatherParameters = CarlaMonitor.get_simulation_run_weather(
                 weather_file=weather_file_path)
 
             # Get map name of recording
             map_name = info.split("Map: ")[1].split("\nDate")[0]
-            print(f"Load map {map_name}")
+            print(f">> [CARLA] Load map: '{map_name}'")
 
             # Load map from recording
             self.client.load_world(map_name)
@@ -97,7 +97,7 @@ class CarlaMonitor:
             rasterizer = MapRasterizer(world)
             api_helper = CarlaAPIHelper(self.client, world, rasterizer)
 
-            print("Load or calculate Data Blocks")
+            print(">> [Data-AV Transformer] Load or calculate map data.")
             # Calculate the static data for the current map
             blocks = rasterizer.load_or_calculate_data_map(log_file_path=result_file_path, map_name=map_name)
 
@@ -120,7 +120,7 @@ class CarlaMonitor:
             start_time = datetime.now()
             ticks = []
 
-            print("Start with simulation replay")
+            print(">> [Data-AV Transformer] Start with simulation replay")
 
             # Tick the world for each frame in the replay
             for tick in range(1, replay_tick_count):
@@ -138,14 +138,14 @@ class CarlaMonitor:
                     continue
                 elapsed_time = (datetime.now() - start_time).total_seconds()
                 print(
-                    f"Simulation tick: {tick} of {replay_tick_count} Result Tick: {current_tick} Elapsed time: {elapsed_time}s")
+                    f">> [CARLA] Simulation tick: {tick:05d} of {replay_tick_count:05d}; Result Tick: {current_tick:3f}; Elapsed time: {elapsed_time:3f}s")
 
                 # Get all vehicles
                 vehicles = api_helper.get_vehicles()
                 # Check if there are already vehicles spawned
                 if len(vehicles) == 0:
                     # Skip monitoring, as there are no vehicles to monitor
-                    print("There are no vehicles at the current tick. Skip")
+                    print(">> [CARLA] There are no vehicles at the current tick. Skip")
                     continue
 
                 # Get all actors that are in the block of the ego vehicle
@@ -180,7 +180,8 @@ class CarlaMonitor:
                     wp_is_in_blocks = rasterizer.blocks_contain_waypoint(nearest_lane_midpoint.lane_id,
                                                                          nearest_lane_midpoint.road_id)
                     if not wp_is_in_blocks:
-                        print("The waypoint for the current actor is not in the rasterized blocks")
+                        print(
+                            ">> [Data-AV Transformer] The waypoint for the current actor is not in the rasterized blocks")
                         JSONHelper.log_invalid_run(log_data_path)
                         abort = True
                         raise KeyboardInterrupt
@@ -198,11 +199,12 @@ class CarlaMonitor:
                                 weather_parameters=weather_parameters)
                 # Save the TickData object in the list
                 ticks.append(tick)
-            print("Calculate velocity and acceleration for actors")
+            print(">> [Data-AV Transformer] Calculate velocity and acceleration for actors")
             compute_vel_acc_for_ticks(ticks)
             # Strip the first two ticks so that the velocity and acceleration is correct from the beginning
             ticks = ticks[3:]
-            print("Analysis complete. Save to disk.")
+            print(">> [Data-AV Transformer] Analysis complete.")
+            print(">> [IO] Save data to disk.")
             # Save Dynamic data to disk
             file_name = os.path.basename(log_data_path).split(".")[0]
             save_file_name = os.path.join(result_file_path, f"{JSONHelper.DYNAMIC_FILE_NAME_PREFIX}_{file_name}.json")
@@ -217,8 +219,8 @@ class CarlaMonitor:
             saved_dynamic_data = api_helper.save_dynamic_data(ticks=ticks, file_path=save_file_name)
             JSONHelper.zip_and_delete_file(save_file_name)
         except RuntimeError as err:
-            print("Logged failed Carla run")
-            print(f"Unexpected {err}, {type(err)}")
+            print(">> [Error] Logged failed Carla run")
+            print(f">> [Error] Unexpected {err}, {type(err)}")
             JSONHelper.log_error("failed_run", name=log_data_path, error_message=f"{err}")
         finally:
             settings = self.world.get_settings()
@@ -231,7 +233,7 @@ class CarlaMonitor:
 
             # Destroy all actors for the current simulation
             actors = self.world.get_actors()
-            print(f"destroying {len(actors)} actors")
+            print(f">> [CARLA] Destroying {len(actors)} actors")
             self.client.apply_batch([carla.command.DestroyActor(x) for x in actors])
 
 

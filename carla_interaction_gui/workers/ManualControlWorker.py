@@ -22,7 +22,7 @@ class ManualControlWorker(ThreadWorker):
         self._proc: subprocess.Popen | None = None
 
     def run(self):
-        self.log(">> Rebooting CARLA …")
+        self.log(">> [CARLA] Rebooting CARLA")
         restart_carla(self.cfg.carla_executable, log=self.log, render_quality_low=self.cfg.render_quality_low,
                       render_off_screen=self.cfg.render_off_screen, map_name=self.cfg.selected_map)
         if self.cancelled:  # stop pressed during boot wait
@@ -36,7 +36,7 @@ class ManualControlWorker(ThreadWorker):
             return
 
         # launch in separate process group so we can later kill the group
-        self.log(">> Launching manual_control.py")
+        self.log(">> [CARLA] Launching manual_control.py")
         creation: dict[str, int | None] = {}
         if sys.platform.startswith("win"):
             creation["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
@@ -60,7 +60,7 @@ class ManualControlWorker(ThreadWorker):
         finally:
             self._terminate_manual_control()
             kill_carla()
-            self.log(">> manual_control.py & CARLA shut down")
+            self.log(">> [CARLA] manual_control.py and CARLA are now shut down")
 
     def cancel(self):
         """Called by the GUI when the user presses *Stop*."""

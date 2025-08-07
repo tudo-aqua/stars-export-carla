@@ -55,7 +55,7 @@ class _IOOps:
         saved to disk.
         """
         if self.ctx.data_map:
-            print("Map is already calculated. Nothing new to be done.")
+            print(">> [Data-AV Transformer] Map is already calculated. Nothing new to be done.")
             return self.ctx.data_map
         log_dir = Path(log_file_path)
         # Look for any file named static_data_*.zip
@@ -63,7 +63,8 @@ class _IOOps:
         # Optionally, ensure they’re actual files
         if any(p.is_file() for p in matches):
             # Load the collected static data from the json file
-            print(f"Static data was already calculated. Load data from file: '{matches[0]}'")
+            print(f">> [Data-AV Transformer] The map data was already calculated.")
+            print(">> [IO] Load map data from file: '{matches[0]}'")
             self.ctx.data_map = self.load_data_map(matches[0])
         else:
             self.ctx.data_map = self.ctx.get_data_map()

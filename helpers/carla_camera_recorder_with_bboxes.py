@@ -1,5 +1,6 @@
 import argparse
 import os
+import queue
 import sys
 
 import carla
@@ -7,11 +8,10 @@ import cv2
 import numpy as np
 from carla import Vehicle
 from carla import World, Client
-import queue
 
+from data_av_static import MapRasterizer
 from helpers.carla_api_helper import CarlaAPIHelper
 from helpers.json_helper import JSONHelper
-from data_av_static import MapRasterizer
 
 
 class CarlaCameraRecorder:
@@ -31,7 +31,7 @@ class CarlaCameraRecorder:
         @param vehicle_id: The id of the vehicle that should be recorded
         """
         log_data_path = os.path.abspath(path)
-        print("Evaluate recorder data at path", log_data_path)
+        print(f">> [IO] Evaluate recorder data at path: '{log_data_path}'")
         filename = os.path.basename(path)
 
         # Extract log file when path is zipped
@@ -44,11 +44,11 @@ class CarlaCameraRecorder:
         # Check data from carla recording for validity
         info = self.client.show_recorder_file_info(log_data_path, True)
         if info == "File is not a CARLA recorder\n":
-            print("The file at path", log_data_path, "is not a CARLA recorder")
+            print(f">> [CARLA] The file at path '{log_data_path}' is not a CARLA recorder")
             return
 
         if info.__contains__("not found"):
-            print("The file at path", log_data_path, "cannot be found.")
+            print(">> [IO] The file at path '{log_data_path}' cannot be found.")
             return
 
         # Get recording frequency in the recorded file using the recorder_file_info and split
@@ -104,7 +104,7 @@ class CarlaCameraRecorder:
         rasterizer = MapRasterizer(world)
         api_helper = CarlaAPIHelper(self.client, world, rasterizer)
 
-        print("Start with simulation replay")
+        print(">> [Recorder] Start with simulation replay")
 
         # Start replay of simulation
         api_helper.start_replaying(log_data_path)
@@ -206,16 +206,14 @@ class CarlaCameraRecorder:
 
             current_tick = recording_frequency * tick
             if current_tick < begin_at:
-                print(f"Current tick {current_tick} is not within [{begin_at}, {end_at}]")
+                print(f">> [Recorder] Current tick {current_tick} is not within [{begin_at}, {end_at}]")
                 continue
             if current_tick > end_at:
-                print(f"Current tick {current_tick} is not within [{begin_at}, {end_at}]")
+                print(f">> [Recorder] Current tick {current_tick} is not within [{begin_at}, {end_at}]")
                 break
             transform = ego_cam.get_transform()
             spectator.set_transform(carla.Transform(transform.location, transform.rotation))
-            print(f"Tick {tick} of {replay_tick_count}. Simulation Tick: {current_tick}")
-            # while CarlaCameraRecorder.COUNTER < tick:
-            #     x = ""
+            print(f">> [CARLA] Tick {tick} of {replay_tick_count}. Simulation Tick: {current_tick}")
 
         self.client.reload_world()
 
@@ -310,7 +308,7 @@ class CarlaCameraRecorder:
                                                                           begin_at=begin_at,
                                                                           end_at=end_at)
             recording_path = os.path.join(image_save_folder, image_name)
-            print(f"Save image {image_name}")
+            print(f">> [IO] Save image {image_name}")
             image.save_to_disk(recording_path)
 
     @staticmethod
@@ -345,7 +343,7 @@ class CarlaCameraRecorder:
 
         fourcc = cv2.VideoWriter_fourcc('m', 'p', '4', 'v')
         video = cv2.VideoWriter(video_path, fourcc, 20, (width, height))
-        print(f"Save video to {video_path}")
+        print(f">> [IO] Save video to {video_path}")
 
         for image in images:
             video.write(cv2.imread(os.path.join(image_folder, image)))

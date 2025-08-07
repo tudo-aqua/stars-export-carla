@@ -106,7 +106,6 @@ class CarlaDataGenerator:
         blueprints = self.get_actor_blueprints(world, args.filterv, args.generationv)
         blueprintsWalkers = self.get_actor_blueprints(world, args.filterw, args.generationw)
 
-
         blueprints = [x for x in blueprints if x.get_attribute('base_type') == 'car']
 
         blueprints = sorted(blueprints, key=lambda bp: bp.id)
@@ -257,9 +256,9 @@ class CarlaDataGenerator:
         maps = CarlaAPIHelper.get_usable_maps(client)
         map = random.choice(maps)
         if map == "/Game/Carla/Maps/Town10HD_Opt":
-            print("Map", map, "is already loaded.")
+            print(f"Map '{map}' is already loaded.")
             return map
-        print("Load map", map)
+        print(f"Load map '{map}'")
         client.load_world(map)
         return map
 

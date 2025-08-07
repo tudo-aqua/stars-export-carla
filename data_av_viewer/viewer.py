@@ -144,7 +144,7 @@ app.layout = html.Div([
             inputStyle={"marginRight": "4px", "marginLeft": "12px"}
         ),
 
-        # … the rest of your menu: hover-ck, size sliders, slider & buttons …
+        # the rest of your menu: hover-ck, size sliders, slider & buttons
         html.H4("Hover enabled for"),
         dcc.Checklist(
             id="hover-ck",

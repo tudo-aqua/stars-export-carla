@@ -16,14 +16,14 @@ class TransformRecordingWorker(ThreadWorker):
         """
         try:
             from helpers.carla_monitor import CarlaMonitor  # type: ignore
-            self.log(">> Rebooting CARLA & connecting …")
+            self.log(">> [CARLA] Rebooting CARLA & connecting")
             client = restart_and_connect(self.cfg.carla_executable, log=self.log,
                                          render_off_screen=self.cfg.render_off_screen,
                                          render_quality_low=self.cfg.render_quality_low)
             if self.cancelled: return
 
             monitor = CarlaMonitor(carla_client=client)
-            self.log(f">> Transforming {self.cfg.transform_input_file}")
+            self.log(f">> [Data-AV Transformer] Transforming {self.cfg.transform_input_file}")
             monitor.monitor_simulation_run(
                 file_path=self.cfg.transform_input_file,
                 weather_file_path="",
@@ -33,7 +33,7 @@ class TransformRecordingWorker(ThreadWorker):
             self.log(traceback.format_exc())
         finally:
             kill_carla(log=self.log)
-            self.log(">> Done.")
+            self.log(">> [Data-AV Transformer] Done.")
 
     def cancel(self):
         """

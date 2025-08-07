@@ -111,7 +111,7 @@ class UnifiedCarlaGUI(tk.Tk):
         tk.Entry(row, textvariable=var, width=width) \
             .pack(side="left", fill="x", expand=True)
         if browse:
-            tk.Button(row, text="…", command=browse) \
+            tk.Button(row, text="...", command=browse) \
                 .pack(side="left", padx=2)
 
     def _tab_server(self, notebook: ttk.Notebook):
