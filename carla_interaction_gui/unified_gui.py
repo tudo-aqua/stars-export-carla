@@ -20,8 +20,7 @@ ALLOWED_NON_LAYERED_MAPS = [
     "Town01", "Town02", "Town03", "Town04", "Town05", "Town06",
     "Town07", "Town08", "Town09", "Town10", "Town11", "Town12",
 ]
-ALLOWED_LAYERED_MAPS = [f"{t}_Opt" for t in ALLOWED_NON_LAYERED_MAPS]
-ALLOWED_CARLA_MAPS = ALLOWED_NON_LAYERED_MAPS + ALLOWED_LAYERED_MAPS
+ALLOWED_CARLA_MAPS = ALLOWED_NON_LAYERED_MAPS
 
 
 class UnifiedCarlaGUI(tk.Tk):
