@@ -1,3 +1,4 @@
+import math
 from collections import deque
 from typing import List, Optional, Set, Tuple, Dict, TYPE_CHECKING
 
@@ -8,6 +9,7 @@ from shapely.ops import nearest_points
 from carla_data_classes.static import DataRoad, DataLandmark, DataLane, DataLocation, DataContactArea, \
     DataContactLaneInfo
 from carla_data_classes.static.DataBlock import DataBlock
+from carla_data_classes.static.DataCrosswalk import DataCrosswalk
 from carla_data_classes.static.DataJunction import DataJunction
 from carla_data_classes.static.DataMap import DataMap
 
@@ -20,7 +22,7 @@ class _BlockBuilder:
         self.ctx = ctx
 
     @staticmethod
-    def _build_data_map(blocks: List[DataBlock]) -> DataMap:
+    def _build_data_map(blocks: List[DataBlock], crosswalks: List[DataCrosswalk]) -> DataMap:
         """
         Flatten the DataBlock list into the two collections expected by
         DataMap (straights & junctions).
@@ -40,7 +42,7 @@ class _BlockBuilder:
                 else:
                     straights.append(rd)
 
-        return DataMap(straights=straights, junctions=list(junctions_by_id.values()))
+        return DataMap(straights=straights, junctions=list(junctions_by_id.values()), crosswalks=crosswalks)
 
     def get_data_map(self, distance: float = 0.1) -> DataMap:
         """
@@ -81,7 +83,10 @@ class _BlockBuilder:
         self.add_landmarks_to_lanes(data_blocks)
         self.ctx.update_static_traffic_lights_from_landmarks(data_blocks)
         self.ctx.close_speed_limit_gaps(data_blocks, default_speed_kmh=30.0)
-        data_map = self._build_data_map(blocks=data_blocks)
+
+        crosswalks = self._collect_crosswalks()
+        data_map = self._build_data_map(blocks=data_blocks, crosswalks=crosswalks)
+
         self.ctx.data_map = data_map
         return data_map
 
@@ -279,6 +284,52 @@ class _BlockBuilder:
             for junction_lane in junction_lanes:
                 for pred in junction_lane.predecessor_lanes:
                     attach(pred.road_id, pred.lane_id)
+
+    def _collect_crosswalks(self) -> List[DataCrosswalk]:
+        """
+        Parse CARLA's flat list of Location into multiple crosswalk polygons.
+        The list encodes polygons as sequences where the first point is repeated
+        at the end to mark closure: A, B, C, A, D, E, F, D, ...
+        """
+        try:
+            locs = self.ctx.map.get_crosswalks()  # list[carla.Location]
+        except Exception:
+            return []
+
+        if not locs:
+            return []
+
+        def same(a, b, eps=1e-3) -> bool:
+            # tolerant equality for float coords (meters)
+            return (math.isclose(a.x, b.x, abs_tol=eps) and
+                    math.isclose(a.y, b.y, abs_tol=eps) and
+                    math.isclose(getattr(a, "z", 0.0), getattr(b, "z", 0.0), abs_tol=eps))
+
+        result: List[DataCrosswalk] = []
+        i, n, cw_id = 0, len(locs), 0
+
+        while i < n:
+            start = locs[i]
+            # find the next index j > i where locs[j] == start (polygon closure)
+            j = i + 1
+            while j < n and not same(locs[j], start):
+                j += 1
+
+            if j >= n:
+                # incomplete tail (no closing repeat) -> ignore the remainder
+                break
+
+            # vertices are from i .. j-1 (exclude the repeated closing point at j)
+            poly = locs[i:j]
+            if len(poly) >= 3:  # at least a triangle
+                vertices = [DataLocation(p.x, p.y, getattr(p, "z", 0.0)) for p in poly]
+                result.append(DataCrosswalk(id=cw_id, vertices=vertices))
+                cw_id += 1
+
+            # continue after the closing repeated point
+            i = j + 1
+
+        return result
 
     @staticmethod
     def collect_all_lanes_waypoints(starting_waypoints: List[Waypoint]) -> List[Waypoint]:

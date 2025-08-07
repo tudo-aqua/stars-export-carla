@@ -4,6 +4,7 @@ from typing import List
 from dataclass_wizard import JSONWizard
 
 from carla_data_classes.static import DataRoad
+from carla_data_classes.static.DataCrosswalk import DataCrosswalk
 from carla_data_classes.static.DataJunction import DataJunction
 
 
@@ -15,6 +16,7 @@ class DataMap(JSONWizard):
 
     straights: List[DataRoad]
     junctions: List[DataJunction]
+    crosswalks: List[DataCrosswalk]
 
     def get_all_lanes(self) -> List["DataLane"]:
         lanes = []
