@@ -8,6 +8,7 @@ def ensure_core_types(ns: dict) -> None:
     from .dynamic.DataBoundingBox import DataBoundingBox
     from .static.DataLocation import DataLocation
     from .static.DataRotation import DataRotation
+    from typing import Optional
     # optional vector type; ignore if not present
     try:
         from .static.DataVector3D import DataVector3D  # noqa: F401
@@ -19,6 +20,7 @@ def ensure_core_types(ns: dict) -> None:
         ("DataLocation", DataLocation),
         ("DataRotation", DataRotation),
         ("DataVector3D", DataVector3D),
+        ("Optional", Optional),
     ]:
         if val is not None and name not in ns:
             ns[name] = val
