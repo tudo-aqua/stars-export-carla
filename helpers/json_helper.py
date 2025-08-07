@@ -9,6 +9,7 @@ from typing import List, Union, IO
 
 from carla_data_classes.dynamic import TickData, DataWeatherParameters
 from carla_data_classes.static.DataBlock import DataBlock
+from carla_data_classes.static.DataMap import DataMap
 
 
 class JSONHelper:
@@ -136,12 +137,12 @@ class JSONHelper:
             logfile.write(json_string)
 
     @staticmethod
-    def log_data_blocks(blocks: List[DataBlock], path: os.path) -> None:
+    def log_data_map(map: DataMap, path: os.path) -> None:
         directory = os.path.dirname(path)
         if not os.path.exists(directory):
             os.makedirs(directory)
         with open(path, "w") as logfile:
-            json_string = DataBlock.list_to_json(blocks)
+            json_string = DataMap.to_json(map)
             logfile.write(json_string)
 
     @staticmethod
@@ -152,7 +153,7 @@ class JSONHelper:
             logfile.write(json_string)
 
     @staticmethod
-    def load_data_blocks(source: Union[str, os.PathLike, IO]) -> List[DataBlock]:
+    def load_data_map(source: Union[str, os.PathLike, IO]) -> DataMap:
         """Load JSON from either a filesystem path or a file-like (e.g. ZipExtFile)."""
 
         # Determine if we need to open it ourselves
@@ -173,7 +174,7 @@ class JSONHelper:
                 f.close()
 
         # Convert your list of dicts into DataBlock instances
-        return DataBlock.from_list(data)
+        return DataMap.from_dict(data)
 
     @staticmethod
     def load_tick_data(path: os.path) -> List[TickData]:

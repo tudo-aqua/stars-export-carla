@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import pandas as pd
 import plotly.graph_objects as go
+
+from carla_data_classes.static.DataMap import DataMap
 from .base_layer import register, BaseLayer
 
 
@@ -16,8 +18,8 @@ class TrafficLightLayer(BaseLayer):
     The DataFrame aggregates by open_drive_id and collects all (road, lane)
     pairs that reference each light, so hover can list the affected lanes.
     """
-    slider_key   = "traffic_lights"
-    df_key       = "traffic_lights"
+    slider_key = "traffic_lights"
+    df_key = "traffic_lights"
     default_size = 12  # slider default
 
     # ------------------------------- map slider size -> data-unit geometry
@@ -28,9 +30,9 @@ class TrafficLightLayer(BaseLayer):
         Tuned to be clearly visible and non-overlapping.
         """
         s = float(size or 0)
-        lamp_r = 0.05 * s            # meters (or your map units)
-        gap    = 0.60 * lamp_r
-        pad    = 0.80 * lamp_r
+        lamp_r = 0.05 * s  # meters (or your map units)
+        gap = 0.60 * lamp_r
+        pad = 0.80 * lamp_r
         total_w = 2 * lamp_r + 2 * pad
         total_h = 3 * (2 * lamp_r) + 2 * gap + 2 * pad
         border_w = max(1, int(s / 3))  # px
@@ -39,38 +41,37 @@ class TrafficLightLayer(BaseLayer):
 
     # -------------------------------------------------------------- build df
     @classmethod
-    def build_df(cls, blocks, tick):
+    def build_df(cls, data_map: DataMap, tick):
         """
         Aggregate by open_drive_id so one marker represents one post, and
         collect all lanes that reference it for hover.
         """
         by_od = {}
-        for b in blocks:
-            for r in b.roads:
-                for l in r.lanes:
-                    for tl in (l.traffic_lights or []):
-                        od = getattr(tl, "open_drive_id", getattr(tl, "opendrive_id", None))
-                        if od is None:
-                            continue
-                        rec = by_od.get(od)
-                        if rec is None:
-                            rec = {
-                                "x": getattr(tl.location, "x", None),
-                                "y": getattr(tl.location, "y", None),
-                                "od": od,
-                                "dist": getattr(tl, "position_distance", None),
-                                "lane_pairs_set": set(),  # (road_id, lane_id)
-                            }
-                            by_od[od] = rec
-                        rid = getattr(l, "road_id", getattr(r, "road_id", None))
-                        rec["lane_pairs_set"].add((rid, l.lane_id))
+        for r in data_map.get_all_roads():
+            for l in r.lanes:
+                for tl in (l.traffic_lights or []):
+                    od = getattr(tl, "open_drive_id", getattr(tl, "opendrive_id", None))
+                    if od is None:
+                        continue
+                    rec = by_od.get(od)
+                    if rec is None:
+                        rec = {
+                            "x": getattr(tl.location, "x", None),
+                            "y": getattr(tl.location, "y", None),
+                            "od": od,
+                            "dist": getattr(tl, "position_distance", None),
+                            "lane_pairs_set": set(),  # (road_id, lane_id)
+                        }
+                        by_od[od] = rec
+                    rid = getattr(l, "road_id", getattr(r, "road_id", None))
+                    rec["lane_pairs_set"].add((rid, l.lane_id))
 
         rows = []
         for rec in by_od.values():
             pairs = sorted(rec.pop("lane_pairs_set"))
             # same pattern as landmarks layer: multi-line, indented HTML
             lines = [f"&nbsp;&nbsp;&nbsp;&nbsp;(Road {rd}, Lane {ln})" for rd, ln in pairs]
-            rec["lane_pairs_html"]  = "<br>" + "<br>".join(lines) if lines else ""
+            rec["lane_pairs_html"] = "<br>" + "<br>".join(lines) if lines else ""
             rec["lane_pairs_count"] = len(pairs)
             rows.append(rec)
 

@@ -8,7 +8,7 @@ from carla_data_classes.static import DataLaneMidpoint, DataLocation, DataLane, 
     DataSpeedLimit
 
 if TYPE_CHECKING:
-    from .rasterizer import MapRasterizer
+    pass
 
 
 class _LaneUtils:
@@ -17,11 +17,28 @@ class _LaneUtils:
 
     def get_lane_midpoints_array(self) -> List[DataLaneMidpoint]:
         """
-        Return a flat list of all-lane midpoints from computed blocks.
+        Return a flat list with the mid-points of every lane contained in the
+        already-computed DataMap (``self.ctx.data_map``).
+
+        The traversal order is:
+            1.  straight-road list  -> lanes
+            2.  every junction      -> its roads -> lanes
+            3.  every lane          -> lane_midpoints
         """
-        roads = self.ctx.flatten(list(map(lambda b: b.roads, self.ctx.blocks)))
-        lanes = self.ctx.flatten(list(map(lambda r: r.lanes, roads)))
-        lane_midpoints = self.ctx.flatten(list(map(lambda l: l.lane_midpoints, lanes)))
+        if not getattr(self.ctx, "data_map", None):
+            return []
+
+        # --- gather all roads ----------------------------------------------------
+        straight_roads = self.ctx.data_map.straights  # List[DataRoad]
+        junction_roads = self.ctx.flatten(
+            [j.roads for j in self.ctx.data_map.junctions]  # List[List[DataRoad]]
+        )
+        all_roads = straight_roads + junction_roads  # flat List[DataRoad]
+
+        # --- collect lanes & mid-points -----------------------------------------
+        lanes = self.ctx.flatten([r.lanes for r in all_roads])  # List[DataLane]
+        lane_midpoints = self.ctx.flatten([l.lane_midpoints for l in lanes])
+
         return lane_midpoints
 
     def get_closest_lane_midpoint(self, location: DataLocation) -> DataLaneMidpoint:

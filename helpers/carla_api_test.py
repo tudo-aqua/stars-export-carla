@@ -22,7 +22,7 @@ if __name__ == '__main__':
     map_name = world.get_map().name
 
     # Calculate the static data for the current map
-    data_blocks = _rasterizer.load_or_calculate_data_blocks(map_name, map_name, False)
+    data_blocks = _rasterizer.load_or_calculate_data_map(map_name, map_name, False)
 
     actors = world.get_actors()
     landmarks = world.get_map().get_all_landmarks()

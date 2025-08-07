@@ -4,10 +4,10 @@ import carla
 from carla import Client
 from carla import World
 
+from data_av_static import MapRasterizer
 from helpers.carla_api_helper import CarlaAPIHelper
 from helpers.carla_monitor import CarlaMonitor
 from helpers.json_helper import JSONHelper
-from data_av_static import MapRasterizer
 
 
 def generate_static_map_data(client: Client, update_existing: bool) -> None:
@@ -32,7 +32,7 @@ def generate_static_map_data(client: Client, update_existing: bool) -> None:
         rasterizer = MapRasterizer(world)
 
         # Calculate the static data for the current map
-        rasterizer.load_or_calculate_data_blocks(map_name=map_name, file_name=map_name, update_existing=update_existing)
+        rasterizer.load_or_calculate_data_map(map_name=map_name, file_name=map_name, update_existing=update_existing)
 
 
 if __name__ == '__main__':

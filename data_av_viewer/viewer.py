@@ -12,8 +12,8 @@ import plotly.graph_objects as go
 from dash import Dash, dcc, html, Input, Output, State, Patch, ALL, ctx, no_update
 
 from carla_data_classes.dynamic import DataVehicle
-from carla_data_classes.static.DataBlock import DataBlock
 from carla_data_classes.dynamic.TickData import TickData
+from carla_data_classes.static.DataMap import DataMap
 from dynamic.actor_traces import build_dynamic_templates
 from layers.base_layer import build_all_traces, LAYER_REGISTRY
 from viewer_store import ViewerStore
@@ -31,19 +31,19 @@ def _decode_upload(contents: str) -> bytes:
     return base64.b64decode(contents.split(",", 1)[1])
 
 
-def _load_raw_json(raw: bytes) -> Tuple[List[TickData], List[DataBlock]]:
+def _load_raw_json(raw: bytes) -> Tuple[List[TickData], DataMap]:
     # try TickData(s)
     try:
         return TickData.from_json(raw), []
     except Exception:
         pass
 
-    # try DataBlock(s)
+    # try DataMap
     try:
-        blk = DataBlock.from_json(raw)
+        blk = DataMap.from_json(raw)
         return [], blk
     except Exception:
-        pass
+        print(traceback.format_exc())
 
     raise ValueError("unknown JSON schema")
 
@@ -232,15 +232,15 @@ def parse_upload(contents, fname, prior_store_json, prior_dyn_json):
 
     try:
         raw = _decode_upload(contents)
-        ticks, blocks = _load_raw_json(raw)
+        ticks, data_map = _load_raw_json(raw)
 
         vehicle_locations = [pos.actor.location for tick in ticks for pos in tick.actor_positions if
                              isinstance(pos.actor, DataVehicle)]
 
         # ---- static upload (replace static, keep dynamic) ----
-        if blocks:
-            store = ViewerStore.from_source(blocks, ticks[0] if ticks else None)
-            msg = f"Loaded static '{fname}' | blocks:{len(blocks)}"
+        if data_map:
+            store = ViewerStore.from_source(data_map, ticks[0] if ticks else None)
+            msg = f"Loaded static '{fname}' | Map with {len(data_map.junctions)} junctions and {len(data_map.straights)} roads"
             return store.to_json(), (prior_dyn_json or ""), msg
 
         # ---- dynamic upload (replace dynamic, keep static) ----

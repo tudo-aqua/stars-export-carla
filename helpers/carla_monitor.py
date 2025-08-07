@@ -99,7 +99,7 @@ class CarlaMonitor:
 
             print("Load or calculate Data Blocks")
             # Calculate the static data for the current map
-            blocks = rasterizer.load_or_calculate_data_blocks(log_file_path=result_file_path, map_name=map_name)
+            blocks = rasterizer.load_or_calculate_data_map(log_file_path=result_file_path, map_name=map_name)
 
             traffic_lights = rasterizer.get_all_traffic_lights()
 

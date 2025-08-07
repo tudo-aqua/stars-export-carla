@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import List, Dict, Type, TYPE_CHECKING, Tuple
+from typing import List, Dict, TYPE_CHECKING, Tuple
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -94,7 +94,7 @@ class BaseLayer(ABC):
 
     # ------------- dataframe builder --------------------------------
     @classmethod
-    def build_df(cls, blocks, tick) -> pd.DataFrame:  # default = empty
+    def build_df(cls, data_map, tick) -> pd.DataFrame:  # default = empty
         return pd.DataFrame()
 
     # Allow override

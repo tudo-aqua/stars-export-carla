@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from carla_data_classes.enums.DataLandmarkType import DataLandmarkType
+from carla_data_classes.static.DataMap import DataMap
 from .base_layer import register, BaseLayer
 
 # ----------------------------------------------------------------------
@@ -58,29 +59,28 @@ class LandmarkLayer(BaseLayer):
 
     # ---------------------------------------------------------------- build df
     @classmethod
-    def build_df(cls, blocks, tick):
+    def build_df(cls, data_map: DataMap, tick):
         by_id = {}
-        for block in blocks:
-            for road in block.roads:
-                for lane in road.lanes:
-                    for lm in lane.landmarks or []:
-                        rec = by_id.get(lm.id)
-                        if rec is None:
-                            rec = {
-                                "x": lm.location.x,
-                                "y": lm.location.y,
-                                "id": lm.id,
-                                "type": lm.type.name,
-                                "orientation": lm.orientation.name,
-                                "country": lm.country,
-                                "text": lm.text,
-                                "value": lm.value,
-                                "sub_type": lm.sub_type,
-                                "lane_pairs_set": set(),
-                            }
-                            by_id[lm.id] = rec
-                        rid = getattr(lane, "road_id", getattr(road, "road_id", None))
-                        rec["lane_pairs_set"].add((rid, lane.lane_id))
+        for road in data_map.get_all_roads():
+            for lane in road.lanes:
+                for lm in lane.landmarks or []:
+                    rec = by_id.get(lm.id)
+                    if rec is None:
+                        rec = {
+                            "x": lm.location.x,
+                            "y": lm.location.y,
+                            "id": lm.id,
+                            "type": lm.type.name,
+                            "orientation": lm.orientation.name,
+                            "country": lm.country,
+                            "text": lm.text,
+                            "value": lm.value,
+                            "sub_type": lm.sub_type,
+                            "lane_pairs_set": set(),
+                        }
+                        by_id[lm.id] = rec
+                    rid = getattr(lane, "road_id", getattr(road, "road_id", None))
+                    rec["lane_pairs_set"].add((rid, lane.lane_id))
 
         rows = []
         for rec in by_id.values():

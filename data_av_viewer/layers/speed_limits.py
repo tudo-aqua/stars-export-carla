@@ -5,6 +5,7 @@ from typing import List
 import pandas as pd
 import plotly.graph_objects as go
 
+from carla_data_classes.static.DataMap import DataMap
 from .base_layer import BaseLayer, register
 
 
@@ -39,60 +40,58 @@ class SpeedLimitsLayer(BaseLayer):
         xs           : list[float]
         ys           : list[float]
     """
-    slider_key   = "line_width"   # makes it appear under "Marker sizes" in the GUI
+    slider_key = "line_width"  # makes it appear under "Marker sizes" in the GUI
     default_size = 6
-    df_key       = "speed_limits"
+    df_key = "speed_limits"
 
     # ---------- build the per-layer dataframe from DataBlocks ----------
     @classmethod
-    def build_df(cls, blocks, tick) -> pd.DataFrame:
+    def build_df(cls, data_map: DataMap, tick) -> pd.DataFrame:
         rows: List[dict] = []
 
         # blocks can be a single DataBlock or a list
-        if blocks is None:
+        if data_map is None:
             return pd.DataFrame(rows)
-        block_list = blocks if isinstance(blocks, list) else [blocks]
 
-        for blk in block_list:
-            for road in getattr(blk, "roads", []):
-                for lane in getattr(road, "lanes", []):
-                    speed_sections = getattr(lane, "speed_limits", None)
-                    midpoints      = getattr(lane, "lane_midpoints", None)
-                    if not speed_sections or not midpoints:
-                        continue
+        for road in data_map.get_all_roads():
+            for lane in road.lanes:
+                speed_sections = lane.speed_limits
+                midpoints = lane.lane_midpoints
+                if not speed_sections or not midpoints:
+                    continue
 
-                    # Pre-collect (distance, (x,y)) tuples for fast slicing
-                    mid_items = []
-                    for mp in midpoints:
-                        # DataLaneMidpoint has distance_to_start and DataLocation with .to_tuple()
-                        try:
-                            x, y = mp.location.to_tuple()
-                        except Exception:
-                            # fallback if DataLocation lacks to_tuple(): use attributes
-                            x, y = float(mp.location.x), float(mp.location.y)
-                        mid_items.append((float(mp.distance_to_start), (x, y)))
+                # Pre-collect (distance, (x,y)) tuples for fast slicing
+                mid_items = []
+                for mp in midpoints:
+                    # DataLaneMidpoint has distance_to_start and DataLocation with .to_tuple()
+                    try:
+                        x, y = mp.location.to_tuple()
+                    except Exception:
+                        # fallback if DataLocation lacks to_tuple(): use attributes
+                        x, y = float(mp.location.x), float(mp.location.y)
+                    mid_items.append((float(mp.distance_to_start), (x, y)))
 
-                    # Build a small line for each speed-limit segment on this lane
-                    for seg in speed_sections:
-                        start = float(seg.from_distance)
-                        end   = float(seg.to_distance)
-                        xs, ys = [], []
-                        for d, (x, y) in mid_items:
-                            if start <= d <= end:
-                                xs.append(x)
-                                ys.append(y)
+                # Build a small line for each speed-limit segment on this lane
+                for seg in speed_sections:
+                    start = float(seg.from_distance)
+                    end = float(seg.to_distance)
+                    xs, ys = [], []
+                    for d, (x, y) in mid_items:
+                        if start <= d <= end:
+                            xs.append(x)
+                            ys.append(y)
 
-                        # need at least 2 points to draw a line
-                        if len(xs) >= 2:
-                            rows.append({
-                                "road_id": road.road_id,
-                                "lane_id": lane.lane_id,
-                                "speed": float(seg.speed_limit),
-                                "start": start,
-                                "end": end,
-                                "xs": xs,
-                                "ys": ys,
-                            })
+                    # need at least 2 points to draw a line
+                    if len(xs) >= 2:
+                        rows.append({
+                            "road_id": road.road_id,
+                            "lane_id": lane.lane_id,
+                            "speed": float(seg.speed_limit),
+                            "start": start,
+                            "end": end,
+                            "xs": xs,
+                            "ys": ys,
+                        })
 
         return pd.DataFrame(rows)
 
@@ -107,18 +106,18 @@ class SpeedLimitsLayer(BaseLayer):
 
         # One trace per segment keeps colors discrete and hover simple
         for _, row in df.iterrows():
-            speed_ms = float(row["speed"])              # <-- stored in m/s
-            kmh      = _ms_to_kmh(speed_ms)
-            mph      = _ms_to_mph(speed_ms)
+            speed_ms = float(row["speed"])  # <-- stored in m/s
+            kmh = _ms_to_kmh(speed_ms)
+            mph = _ms_to_mph(speed_ms)
 
             road_id = int(row["road_id"])
             lane_id = int(row["lane_id"])
-            start   = float(row["start"])
-            end     = float(row["end"])
+            start = float(row["start"])
+            end = float(row["end"])
 
             xs = row["xs"]
             ys = row["ys"]
-            n  = len(xs)
+            n = len(xs)
 
             # one customdata row per plotted point:
             # [m/s, km/h, mph, road_id, lane_id, start, end]
@@ -147,8 +146,10 @@ class SpeedLimitsLayer(BaseLayer):
             )
         return traces
 
+
 def _ms_to_kmh(ms: float) -> float:
     return ms * 3.6
+
 
 def _ms_to_mph(ms: float) -> float:
     return ms * 2.2369362921  # exact factor

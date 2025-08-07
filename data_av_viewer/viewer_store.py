@@ -1,9 +1,14 @@
 # viewer_store.py
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Dict
-import pandas as pd, orjson
+
+import orjson
+import pandas as pd
+
 from layers.base_layer import LAYER_REGISTRY
+
 
 @dataclass
 class ViewerStore:
@@ -11,10 +16,10 @@ class ViewerStore:
 
     # ---------- construction from raw data ---------------------------
     @classmethod
-    def from_source(cls, blocks, tick=None):
+    def from_source(cls, data_map, tick=None):
         dfs={}
         for name, layer_cls in LAYER_REGISTRY.items():
-            df = layer_cls.build_df(blocks, tick)
+            df = layer_cls.build_df(data_map, tick)
             dfs[name] = df
         return cls(dfs)
 
