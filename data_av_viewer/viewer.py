@@ -35,7 +35,7 @@ def _load_raw_json(raw: bytes) -> Tuple[List[TickData], List[DataBlock]]:
     try:
         return TickData.from_json(raw), []
     except Exception:
-        print(traceback.format_exc())
+        pass
 
     # try DataBlock(s)
     try:
