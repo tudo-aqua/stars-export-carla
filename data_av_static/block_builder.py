@@ -7,7 +7,7 @@ from carla import Junction, Landmark, Waypoint, LaneType
 from shapely import Point, LineString, STRtree
 from shapely.ops import nearest_points
 
-from carla_data_classes.dynamic import DataBlock
+from carla_data_classes.static.DataBlock import DataBlock
 from carla_data_classes.static import DataRoad, DataLandmark, DataLane, DataLocation, DataContactArea, \
     DataContactLaneInfo
 

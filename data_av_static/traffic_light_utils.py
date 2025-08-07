@@ -2,7 +2,7 @@ from typing import TYPE_CHECKING, List, Optional
 
 from carla import Landmark, TrafficLight
 
-from carla_data_classes.dynamic import DataBlock
+from carla_data_classes.static.DataBlock import DataBlock
 from carla_data_classes.static import DataStaticTrafficLight, DataLandmark, DataLocation
 
 if TYPE_CHECKING:

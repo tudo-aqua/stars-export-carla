@@ -11,7 +11,8 @@ import orjson
 import plotly.graph_objects as go
 from dash import Dash, dcc, html, Input, Output, State, Patch, ALL, ctx, no_update
 
-from carla_data_classes.dynamic import DataBlock, DataVehicle
+from carla_data_classes.dynamic import DataVehicle
+from carla_data_classes.static.DataBlock import DataBlock
 from carla_data_classes.dynamic.TickData import TickData
 from dynamic.actor_traces import build_dynamic_templates
 from layers.base_layer import build_all_traces, LAYER_REGISTRY

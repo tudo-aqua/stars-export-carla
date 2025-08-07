@@ -1,7 +1,7 @@
 from collections import deque
 from typing import List, Optional, TYPE_CHECKING
 
-from carla_data_classes.dynamic import DataBlock
+from carla_data_classes.static.DataBlock import DataBlock
 from carla_data_classes.static import DataLane, DataSpeedLimit
 
 if TYPE_CHECKING:

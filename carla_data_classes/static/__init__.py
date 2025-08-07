@@ -9,3 +9,4 @@ from .DataRotation import DataRotation
 from .DataSpeedLimit import DataSpeedLimit
 from .DataStaticTrafficLight import DataStaticTrafficLight
 from .DataVector3D import DataVector3D
+from .DataBlock import DataBlock

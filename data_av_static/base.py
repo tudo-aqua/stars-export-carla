@@ -2,7 +2,7 @@ from typing import List
 
 from carla import World, Map
 
-from carla_data_classes.dynamic import DataBlock
+from carla_data_classes.static import DataBlock
 
 
 class _Base:

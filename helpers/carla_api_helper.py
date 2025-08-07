@@ -3,8 +3,8 @@ from typing import List, Optional
 
 from carla import *
 
-from carla_data_classes.dynamic import TickData, DataBlock, DataActor, DataVehicle, DataTrafficSign, DataPedestrian
-from carla_data_classes.static import DataLocation
+from carla_data_classes.dynamic import TickData, DataActor, DataVehicle, DataTrafficSign, DataPedestrian
+from carla_data_classes.static import DataLocation, DataBlock
 from data_av_static import MapRasterizer
 from helpers.json_helper import JSONHelper
 

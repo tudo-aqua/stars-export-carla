@@ -1,6 +1,5 @@
 from .DataActor import DataActor
 from .DataActorPosition import DataActorPosition
-from .DataBlock import DataBlock
 from .DataBoundingBox import DataBoundingBox
 from .DataPedestrian import DataPedestrian
 from .DataTrafficLight import DataTrafficLight

@@ -7,7 +7,8 @@ from os.path import dirname
 from pathlib import Path
 from typing import List, Union, IO
 
-from carla_data_classes.dynamic import TickData, DataBlock, DataWeatherParameters
+from carla_data_classes.dynamic import TickData, DataWeatherParameters
+from carla_data_classes.static.DataBlock import DataBlock
 
 
 class JSONHelper:
