@@ -7,7 +7,7 @@ from shapely.ops import nearest_points
 from carla_data_classes.static import DataLocation, DataLane
 
 if TYPE_CHECKING:
-    from .rasterizer import MapRasterizer
+    pass
 
 
 class _GeometryUtils:
@@ -172,9 +172,7 @@ class _GeometryUtils:
         return minimum_distance
 
     def blocks_contain_waypoint(self, lane_id: int, road_id: int) -> bool:
-        for block in self.ctx.blocks:
-            for road in block.roads:
-                for lane in road.lanes:
-                    if lane.lane_id == lane_id and lane.road_id == road_id:
-                        return True
+        for lane in self.ctx.data_map.get_all_lanes():
+            if lane.lane_id == lane_id and lane.road_id == road_id:
+                return True
         return False
