@@ -4,40 +4,19 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
-from carla_data_classes.static.DataMap import DataMap
 from .base_layer import register, BaseLayer
 from .utils import color_for_road, rgba
 
 
 @register("lanes")
 class LaneLayer(BaseLayer):
-    df_key = "lanes"
     slider_key = "lanes"
     default_size = 2
 
-    @classmethod
-    def build_df(cls, data_map: DataMap, tick):
-        rows = []
-        for r in data_map.get_all_roads():
-            for ln in r.lanes:
-                if not ln.lane_midpoints:
-                    continue
-                poly = np.column_stack([[mp.location.x for mp in ln.lane_midpoints],
-                                        [mp.location.y for mp in ln.lane_midpoints]])
-                distance_to_start = np.column_stack([mp.distance_to_start for mp in ln.lane_midpoints])
-                rows.append(dict(poly=poly,
-                                 distance_to_start=distance_to_start,
-                                 lane_type=ln.lane_type.name,
-                                 road_id=ln.road_id,
-                                 lane_id=ln.lane_id,
-                                 width=ln.lane_width,
-                                 length=ln.lane_length))
-        return pd.DataFrame(rows)
-
     def traces(self):
-        df = self.get_df(self.df_key)
-        if df.empty:
-            return []
+        df_junctions = self.get_df("junctions")
+        df_straights = self.get_df("straights")
+        df = pd.concat([df_junctions, df_straights])
 
         max_abs_lane = df.lane_id.abs().max() or 1
         traces = []

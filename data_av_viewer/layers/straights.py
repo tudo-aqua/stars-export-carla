@@ -6,6 +6,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from shapely.geometry import LineString, Polygon, MultiPolygon
 
+from carla_data_classes.static.DataMap import DataMap
 from .base_layer import register, BaseLayer
 from .utils import rgba, color_for_road
 
@@ -47,18 +48,46 @@ def _safe_linestring_from_coords(
     return LineString()  # empty is allowed; caller may skip
 
 
-@register("roads")
-class RoadLayer(BaseLayer):
+@register("straights")
+class StraightLayer(BaseLayer):
     """
     For every lane centre-line, create a polygon corridor with width = lane_width,
     then draw it with fill="toself". Hover works on the filled area.
     Uses the lane DataFrame prepared by LaneLayer (df_key='lanes').
     """
+    df_key = "straights"
+    slider_key = "straights"
+    default_size = 2
+
+    @classmethod
+    def build_df(cls, data_map: DataMap, tick):
+        rows = []
+        every_n = 25
+        for straight in data_map.straights:
+            for ln in straight.lanes:
+                if not ln.lane_midpoints:
+                    continue
+                pts = ln.lane_midpoints[::every_n]
+                # (optional) make sure we keep the very last point too
+                if pts and pts[-1] is not ln.lane_midpoints[-1]:
+                    pts = pts + [ln.lane_midpoints[-1]]
+
+                poly = np.column_stack([[mp.location.x for mp in pts],
+                                        [mp.location.y for mp in pts]])
+                distance_to_start = np.array([mp.distance_to_start for mp in pts], dtype=float)
+                rows.append(dict(poly=poly,
+                                 distance_to_start=distance_to_start,
+                                 lane_type=ln.lane_type.name,
+                                 road_id=ln.road_id,
+                                 lane_id=ln.lane_id,
+                                 width=ln.lane_width,
+                                 length=ln.lane_length))
+        return pd.DataFrame(rows)
 
     def traces(self):
-        df_junctions = self.get_df("junctions")
-        df_straights = self.get_df("straights")
-        df = pd.concat([df_junctions, df_straights])
+        df = self.get_df(self.df_key)
+        if df.empty:
+            return []
 
         max_abs_lane = df.lane_id.abs().max() or 1
         traces: List[go.Scatter] = []
@@ -92,6 +121,7 @@ class RoadLayer(BaseLayer):
                         mode="lines",
                         name=f"Road: {row.road_id} Lane: {row.lane_id}",
                         text=(
+                            f"Junction: {row.junction_id}<br>"
                             f"Road: {row.road_id}<br>"
                             f"Lane: {row.lane_id}<br>"
                             "───────────────<br>"
