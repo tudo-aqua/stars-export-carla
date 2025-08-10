@@ -1,6 +1,7 @@
 import argparse
 import math
 import os
+import re
 from datetime import datetime
 from typing import List
 
@@ -19,7 +20,7 @@ from carla_data_classes.dynamic import (
 from carla_data_classes.enums.DataWeatherParametersType import DataWeatherParametersType
 from data_av_static import MapRasterizer
 from helpers.carla_api_helper import CarlaAPIHelper
-from helpers.collisions import _parse_recorder_info, _IdMapper, _collisions_for_frame
+from helpers.collisions import CollisionCollector  # sensor-based collisions
 from helpers.json_helper import JSONHelper
 from helpers.kinematics import compute_vel_acc_for_ticks
 
@@ -41,30 +42,47 @@ class CarlaMonitor:
     def get_simulation_run_weather(weather_file: str) -> DataWeatherParameters:
         """
         Read Weather data from given json data into DataWeatherParameters data class
-        @return: DataWeatherParameters from given json file, or DataWeatherParameters. Default if file does not exist
+        @return: DataWeatherParameters from given json file, or default if file does not exist
         """
         print(f">> [IO] Evaluating weather data at path: '{weather_file}'")
-        # Check if th weather file exists
         if not os.path.exists(weather_file):
-            # Take default weather as no weather was saved
             print(f">> [IO] There is no weather data for the recording file: '{weather_file}'")
             print(">> [CARLA] Take default weather parameters.")
             return DataWeatherParameters.from_weather(WeatherParameters.Default, DataWeatherParametersType.Default)
-        # Load weather data from file
-        weather_data = JSONHelper.load_weather_from_scenic(weather_file)
-        return weather_data
+        return JSONHelper.load_weather_from_scenic(weather_file)
+
+    # -------- tiny helpers -----------------------------------------------------
+
+    @staticmethod
+    def _parse_map_and_duration(info: str) -> (str, float, int):
+        """
+        Extract map name and duration (seconds) + frames from the info string.
+        """
+        try:
+            map_name = info.split("Map: ")[1].split("\nDate")[0]
+        except Exception:
+            map_name = ""
+
+        m_dur = re.search(r"^Duration:\s+([0-9.]+)\s+seconds", info, re.MULTILINE)
+        duration = float(m_dur.group(1)) if m_dur else 0.0
+
+        m_frames = re.search(r"^Frames:\s+(\d+)", info, re.MULTILINE)
+        frames = int(m_frames.group(1)) if m_frames else 0
+
+        return map_name, duration, frames
+
+    # -------- main entry -------------------------------------------------------
 
     def monitor_simulation_run(self, file_path: str, weather_file_path: str, result_file_path: str) -> None:
         """
-        Monitor the simulation run of the given file
-        @param file_path: The file name of the simulation run to monitor
-        @return: None
+        Replays the given .log and records dynamic data until the replay finishes.
+        Collisions are collected from live collision sensors.
         """
         print(f">> [IO] Evaluate recorder data at path: '{file_path}'")
         log_data_path = file_path
 
         try:
-            # 1) Parse full recorder info (tick-level details incl. collisions per frame)
+            # Get info for map + duration
             info = self.client.show_recorder_file_info(log_data_path, True)
             if info == "File is not a CARLA recorder/n":
                 print(">> [CARLA] The file at path", file_path, "is not a CARLA recorder")
@@ -73,12 +91,10 @@ class CarlaMonitor:
                 print(">> [IO] The file at path", file_path, "cannot be found.")
                 return
 
-            recording_index = _parse_recorder_info(info)
-            recording_frequency = recording_index.delta_seconds
-            replay_tick_count = recording_index.frames
+            map_name, replay_duration, replay_frames = self._parse_map_and_duration(info)
 
-            print(f">> [CARLA] Recording frequency: {recording_frequency:.3f}s")
-            print(f">> [CARLA] Replay Tick Count: {replay_tick_count}")
+            print(f">> [CARLA] Recording duration: {replay_duration:.3f}s")
+            print(f">> [CARLA] Replay Tick Count: {replay_frames}")
 
             print(f">> [Data-AV Transformer] Create dynamic information for the recording file: '{log_data_path}'")
 
@@ -91,153 +107,139 @@ class CarlaMonitor:
 
             # Load map from recording
             self.client.load_world(map_name)
-
-            # Get world for later use
             world: World = self.client.get_world()
 
-            # Initialize necessary helper classes
+            # Initialize helpers
             rasterizer = MapRasterizer(world)
             api_helper = CarlaAPIHelper(self.client, world, rasterizer)
 
             print(">> [Data-AV Transformer] Load or calculate map data.")
-            # Calculate the static data for the current map
             blocks = rasterizer.load_or_calculate_data_map(log_file_path=result_file_path, map_name=map_name)
-
             traffic_lights = rasterizer.get_all_traffic_lights()
 
-            # Set synchronous mode settings
-            new_settings = world.get_settings()
-            new_settings.synchronous_mode = True
-            new_settings.fixed_delta_seconds = recording_frequency
-            world.apply_settings(new_settings)
+            # Synchronous stepping — let the replay drive the sim clock; do not force fixed dt here
+            settings = world.get_settings()
+            settings.synchronous_mode = True
+            settings.fixed_delta_seconds = None
+            world.apply_settings(settings)
 
-            # Start replay of simulation
+            # Start replay of simulation and step once to let actors/sensors spawn
             api_helper.start_replaying(log_data_path)
-            # A tick is necessary for the server to process the replay_file command
             world.tick()
 
-            # Prepare mapping from recorder IDs to runtime IDs
-            recorder_id_mapper = _IdMapper(recording_index)
-
-            # Get the current tick and save it
+            # Establish simulation-clock baseline (in-sim time, not wall clock)
             snapshot: WorldSnapshot = world.get_snapshot()
-            first_tick_timestamp = snapshot.timestamp.elapsed_seconds
-            start_time = datetime.now()
-            ticks = []
+            base_sim_time = snapshot.timestamp.elapsed_seconds
+            # Keep wall clock only for your existing print (we won't use it for logic)
+            start_wall = datetime.now()
+            ticks: List[TickData] = []
 
-            print(">> [Data-AV Transformer] Start with simulation replay")
+            # Hook collision sensors (existing or fallback)
+            coll = CollisionCollector(world)
+            subscribed = coll.attach_existing_collision_sensors()
+            if subscribed == 0:
+                vehicles_now = api_helper.get_vehicles()
+                coll.ensure_vehicle_sensors(vehicles_now)
 
-            # Tick the world for each frame in the replay
-            for step in range(1, replay_tick_count):
-                # Advance simulation by one tick
-                world.tick()
+            print(">> [Data-AV Transformer] Start simulation replay and sensor-based collision capture")
 
-                # Update current time duration
+            tick_count = 0
+            # Precompute the target end time in SIM clock
+            target_end_sim_time = base_sim_time + replay_duration
+
+            while True:
                 snapshot: WorldSnapshot = world.get_snapshot()
-                now = snapshot.timestamp.elapsed_seconds
-                current_time = (now - first_tick_timestamp)
+                sim_t = snapshot.timestamp.elapsed_seconds  # CARLA in-simulation clock
+                sim_dt = snapshot.timestamp.delta_seconds or 0.0  # in-simulation Δt (may be 0 in rare frames)
+                current_time = sim_t - base_sim_time  # time since replay start (in-sim)
 
-                # If ONLY_TRACK_AT_SPECIFIC_INTERVAL flag is set: Monitor only every SPECIFIC_TRACK_INTERVAL seconds
-                if CarlaMonitor.ONLY_TRACK_AT_SPECIFIC_INTERVAL and math.fmod(round(current_time, 2),
-                                                                              CarlaMonitor.SPECIFIC_TRACK_INTERVAL) != 0:
+                # Optional sampling throttle
+                if CarlaMonitor.ONLY_TRACK_AT_SPECIFIC_INTERVAL and math.fmod(
+                        round(current_time, 3), CarlaMonitor.SPECIFIC_TRACK_INTERVAL) != 0:
+                    world.tick()
                     continue
 
-                # Compute absolute frame index from elapsed time to avoid off-by-one
-                # Frame 1 at t=0, Frame 2 at t=dt, ...
-                frame_idx = step
-
-                elapsed_time = (datetime.now() - start_time).total_seconds()
+                elapsed_time = (datetime.now() - start_wall).total_seconds()  # wall clock, print only
+                # --- keep your original print line exactly, do not delete ---
                 print(
-                    f">> [CARLA] Simulation step: {step:05d}/{replay_tick_count:05d}; "
-                    f"Result t={current_time:.3f}s (frame {frame_idx}); Elapsed: {elapsed_time:.3f}s")
+                    f">> [CARLA] Simulation step: {tick_count:05d}; "
+                    f"Result t={current_time:.3f}s (frame {tick_count}); Elapsed: {elapsed_time:.3f}s")
+                # --- add a second line with sim-clock internals for debugging ---
+                print(
+                    f">> [CARLA]   SimClock t_abs={sim_t:.6f}s | t_base={base_sim_time:.6f}s | "
+                    f"t_rel={current_time:.6f}s | sim_frame={snapshot.frame} | dt={sim_dt:.6f}s"
+                )
 
-                # Keep the ID mapping up-to-date for anything created up to this frame
-                recorder_id_mapper.update_until_frame(world, frame_idx)
-                if step <= 3:
-                    recorder_id_mapper.update_until_frame(world, frame_idx)
-                    recorder_id_mapper.update_until_frame(world, frame_idx)
+                # Per-frame collisions from sensors (bucketed by snapshot.frame)
+                per_actor_collisions = coll.consume_frame(snapshot.frame)
 
-                # Get all vehicles, skip if none
-                vehicles = api_helper.get_vehicles()
-                if len(vehicles) == 0:
-                    print(">> [CARLA] There are no vehicles at the current tick. Skip")
-                    continue
-
-                # Dynamic collisions for this *frame*
-                per_actor_collisions = _collisions_for_frame(frame_idx, world, recorder_id_mapper, recording_index)
-
-                # Get all actors that are in the block of the ego vehicle
+                # Build DataActors from live world
                 actors = api_helper.get_actors()
-                # Previous code tried to filter out class object; keep only real actors
                 actors = [a for a in actors if not isinstance(a, TrafficLight)]
-
-                actor_positions: List[DataActorPosition] = []
                 data_actors: List[DataActor] = []
+                actor_positions: List[DataActorPosition] = []
 
-                # Calculate the actor position for each actor (Vehicle, Pedestrian, TrafficSign, TrafficLight)
                 for actor in actors:
-                    if isinstance(actor, Vehicle):
-                        role = actor.attributes.get("role_name", None)
-                        is_ego = (role == "hero")
-                    else:
-                        is_ego = False
-
-                    # Transform the carla.Actor into a DataActor
+                    is_ego = isinstance(actor, Vehicle) and (actor.attributes.get("role_name") == "hero")
                     data_actor = api_helper.get_data_actor_from_actor(actor, is_ego)
                     if data_actor is None:
                         continue
 
-                    # ---- NEW: attach collisions for this runtime actor id (if any for this frame) ----
+                    # Attach collisions for this runtime actor id (if any for this frame)
                     if per_actor_collisions.get(data_actor.id):
-                        # Replace the empty default [] with the collisions for this tick
                         data_actor.collisions = list(per_actor_collisions[data_actor.id])
 
                     data_actors.append(data_actor)
 
-                # Also add traffic lights as DataActors (your original code)
+                # Add traffic lights as DataActors
                 for tl in traffic_lights:
-                    dynamic_tl = self.world.get_traffic_light_from_opendrive_id(str(tl.open_drive_id))
+                    dynamic_tl = world.get_traffic_light_from_opendrive_id(str(tl.open_drive_id))
                     data_tl = DataTrafficLight.from_traffic_light(dynamic_tl, tl)
-
-                    # Attach collisions if we mapped the recorder TL id to this runtime id
                     if per_actor_collisions.get(data_tl.id):
                         data_tl.collisions = list(per_actor_collisions[data_tl.id])
-
                     data_actors.append(data_tl)
 
-                # Enrich with lane position for each actor
+                # Lane positions
                 for data_actor in data_actors:
                     nearest = rasterizer.get_closest_lane_midpoint(data_actor.location)
-                    wp_is_in_blocks = rasterizer.blocks_contain_waypoint(nearest.lane_id, nearest.road_id)
-                    if not wp_is_in_blocks:
-                        print(
-                            ">> [Data-AV Transformer] The waypoint for the current actor is not in the rasterized blocks")
+                    if not rasterizer.blocks_contain_waypoint(nearest.lane_id, nearest.road_id):
+                        print(">> [Data-AV Transformer] Waypoint for current actor not in rasterized blocks")
                         JSONHelper.log_invalid_run(log_data_path)
                         raise KeyboardInterrupt
 
-                    actor_position = DataActorPosition(
+                    actor_positions.append(DataActorPosition(
                         position_on_lane=nearest.distance_to_start,
                         road_id=nearest.road_id,
                         lane_id=nearest.lane_id,
                         actor=data_actor
-                    )
-                    actor_positions.append(actor_position)
+                    ))
 
-                # Collect all ActorPositions and wrap them in a TickData object
-                tick = TickData(
+                # Assemble this tick with SIM clock time
+                ticks.append(TickData(
                     current_tick=current_time,
                     actor_positions=actor_positions,
                     weather_parameters=weather_parameters
-                )
-                ticks.append(tick)
+                ))
+
+                # Stop exactly when the SIM clock reaches the replay duration (with a tiny epsilon)
+                # epsilon guards against last-frame rounding; pick >= half a frame or 10ms (whichever is larger)
+                eps = max(0.5 * (sim_dt if sim_dt > 0 else 0.01), 0.01)
+                if sim_t + eps >= target_end_sim_time:
+                    break
+
+                # Also stop if we’ve reached the advertised frame count (secondary guard)
+                if replay_frames and (tick_count + 1) >= replay_frames:
+                    break
+
+                # Advance to next frame
+                world.tick()
+                tick_count += 1
 
             print(">> [Data-AV Transformer] Calculate velocity and acceleration for actors")
             compute_vel_acc_for_ticks(ticks)
-            # Strip the first ticks so that the velocity and acceleration is correct from the beginning
-            ticks = ticks[3:]
+
             print(">> [Data-AV Transformer] Analysis complete.")
             print(">> [IO] Save data to disk.")
-            # Save Dynamic data to disk
             file_name = os.path.basename(log_data_path).split(".")[0]
             save_file_name = os.path.join(result_file_path, f"{JSONHelper.DYNAMIC_FILE_NAME_PREFIX}_{file_name}.json")
             saved_dynamic_data = api_helper.save_dynamic_data(ticks=ticks, file_path=save_file_name)
@@ -248,12 +250,19 @@ class CarlaMonitor:
             print(f">> [Error] Unexpected {err}, {type(err)}")
             JSONHelper.log_error("failed_run", name=log_data_path, error_message=f"{err}")
         finally:
+            # Clean up sensors
+            try:
+                coll.stop()
+            except Exception:
+                pass
+
+            # Reset world settings
             settings = self.world.get_settings()
-            # Reset world setting to default values
             settings.synchronous_mode = False
             settings.no_rendering_mode = False
             settings.fixed_delta_seconds = None
             self.world.apply_settings(settings)
+
             # Destroy all actors for the current simulation
             actors = self.world.get_actors()
             print(f">> [CARLA] Destroying {len(actors)} actors")
@@ -294,7 +303,7 @@ if __name__ == '__main__':
         monitor = CarlaMonitor(carla_client=client)
         print("Connected to carla")
         print("Analyze recording", log_file)
-        # NOTE: your GUI wrapper passes result_file_path; add it here if you run as script.
+        # Example:
         # monitor.monitor_simulation_run(file_path=log_file, weather_file_path=scenic_file, result_file_path="<out dir>")
         print("Done with monitoring the recording")
     except RuntimeError as err:
