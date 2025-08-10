@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import plotly.graph_objects as go
 
-from carla_data_classes.dynamic import DataActor, DataVehicle
+from carla_data_classes.dynamic import DataActor, DataVehicle, TickData
 from helpers.kinematics import actor_speed_kmh, actor_accel_mps2
 from . import register, BaseRenderer
 
@@ -76,7 +76,7 @@ class VehicleRenderer(BaseRenderer):
         )
 
     @classmethod
-    def frame_payload(cls, actor: DataActor, actor_position=None):
+    def frame_payload(cls, actor: DataActor, actor_position=None, tick: TickData = None):
         """
         Return per-frame payload: polygon (xs, ys), hover text (with road/lane),
         and an empty style dict (always black).
@@ -96,6 +96,7 @@ class VehicleRenderer(BaseRenderer):
 
         # Build hover text
         lines = [
+            f"Tick: {tick.current_tick}",
             f"Vehicle Id: {actor.id}",
             f"{actor.type}: {actor.type_id}",
             f"Road: {road_str}  Lane: {lane_str}",
@@ -105,6 +106,11 @@ class VehicleRenderer(BaseRenderer):
             lines.append("Attributes:")
             for name, val in actor.attributes.items():
                 lines.append(f"&nbsp;&nbsp;{name}: {val!r}")
+
+        if actor.collisions:
+            lines.append("Collisions:")
+            for collision in actor.collisions:
+                lines.append(f"&nbsp;&nbsp;ID: {collision.actor2_id}: {collision.actor2_kind.name!r}")
 
         lines.append(f"Velocity: {actor_speed_kmh(actor):.2f} km/h")
         lines.append(f"Acceleration: {actor_accel_mps2(actor):.2f} m/s²")

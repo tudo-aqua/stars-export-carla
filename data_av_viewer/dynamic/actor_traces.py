@@ -73,7 +73,7 @@ def build_dynamic_templates(
             # Try new multi‐payload API first, else fall back
             try:
                 # renderer_cls.frame_payload(actor, actor_position) → list or tuple
-                fps = rend_cls.frame_payload(actor, ap)
+                fps = rend_cls.frame_payload(actor, ap, tick)
             except TypeError:
                 # legacy single‐payload API
                 fps = rend_cls.frame_payload(actor)
