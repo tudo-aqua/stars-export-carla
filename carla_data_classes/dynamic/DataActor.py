@@ -7,6 +7,7 @@ from carla import Actor
 from dataclass_wizard import JSONWizard
 
 from carla_data_classes.dynamic.DataBoundingBox import DataBoundingBox
+from carla_data_classes.dynamic.DataCollision import DataCollision
 from carla_data_classes.static.DataLocation import DataLocation
 from carla_data_classes.static.DataRotation import DataRotation
 
@@ -27,6 +28,7 @@ class DataActor(JSONWizard):
     bounding_box: Optional[DataBoundingBox]
     location: DataLocation
     rotation: DataRotation
+    collisions: list[DataCollision]
 
     @staticmethod
     def from_actor(actor: Optional[Actor]) -> DataActor:
@@ -56,5 +58,6 @@ class DataActor(JSONWizard):
             semantic_tags=list(actor.semantic_tags),
             bounding_box=DataBoundingBox.from_actor(actor),
             location=DataLocation.from_location(location=actor.get_location()),
-            rotation=DataRotation.from_actor(actor)
+            rotation=DataRotation.from_actor(actor),
+            collisions=[]
         )
