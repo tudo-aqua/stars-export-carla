@@ -64,7 +64,7 @@ class _IOOps:
         if any(p.is_file() for p in matches):
             # Load the collected static data from the json file
             print(f">> [Data-AV Transformer] The map data was already calculated.")
-            print(">> [IO] Load map data from file: '{matches[0]}'")
+            print(f">> [IO] Load map data from file: '{matches[0]}'")
             self.ctx.data_map = self.load_data_map(matches[0])
         else:
             self.ctx.data_map = self.ctx.get_data_map()
