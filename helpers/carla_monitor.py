@@ -92,7 +92,6 @@ class CarlaMonitor:
                 print(">> [IO] The file at path", file_path, "cannot be found.")
                 return
 
-            # Parse recorder timing & collisions
             rec_idx = RecorderIndex.parse(info)
             map_name, replay_duration, replay_frames = self._parse_map_and_duration(info)
 
@@ -117,11 +116,9 @@ class CarlaMonitor:
             api_helper = CarlaAPIHelper(self.client, world, rasterizer)
 
             print(">> [Data-AV Transformer] Load or calculate map data.")
-            # keep your call as you had it
-            blocks = rasterizer.load_or_calculate_data_world(log_file_path=result_file_path, map_name=map_name)
+            rasterizer.load_or_calculate_data_world(log_file_path=result_file_path, map_name=map_name)
             traffic_lights = rasterizer.get_all_traffic_lights()
 
-            # Synchronous stepping with fixed 0.05 s ticks, as requested
             settings = world.get_settings()
             settings.synchronous_mode = True
             settings.fixed_delta_seconds = 0.05
@@ -132,21 +129,18 @@ class CarlaMonitor:
             api_helper.start_replaying(log_data_path)
             world.tick()
 
-            # Establish simulation-clock baseline (in-sim time, not wall clock)
             snapshot: WorldSnapshot = world.get_snapshot()
             base_sim_time = snapshot.timestamp.elapsed_seconds
-            # Keep wall clock only for your existing print (we won't use it for logic)
+
             start_wall = datetime.now()
             ticks: List[TickData] = []
 
-            # Build recorder→runtime mapper; bootstrap statics once
             mapper = IdMapper(rec_idx, debug=False)
             mapper.bootstrap_statics_once(world)
 
             print(">> [Data-AV Transformer] Start simulation replay (log-driven collisions)")
 
             tick_count = 0
-            target_end_sim_time = base_sim_time + replay_duration
             # time window for matching collisions to this tick (± half a tick by default)
             half_window = 0.5 * dt_nominal
 
@@ -154,7 +148,7 @@ class CarlaMonitor:
                 snapshot: WorldSnapshot = world.get_snapshot()
                 sim_t = snapshot.timestamp.elapsed_seconds  # CARLA in-simulation clock
                 sim_dt = snapshot.timestamp.delta_seconds or dt_nominal
-                current_time = sim_t - base_sim_time       # time since replay start (in-sim)
+                current_time = sim_t - base_sim_time  # time since replay start (in-sim)
 
                 # Optional sampling throttle (unchanged)
                 if CarlaMonitor.ONLY_TRACK_AT_SPECIFIC_INTERVAL and math.fmod(
@@ -163,15 +157,8 @@ class CarlaMonitor:
                     continue
 
                 elapsed_time = (datetime.now() - start_wall).total_seconds()  # wall clock (print only)
-                # --- keep your original print line exactly, do not delete ---
                 print(
-                    f">> [CARLA] Simulation step: {tick_count:05d}; "
-                    f"Result t={current_time:.3f}s (frame {tick_count}); Elapsed: {elapsed_time:.3f}s")
-                # --- additive sim-clock internals for debugging ---
-                print(
-                    f">> [CARLA]   SimClock t_abs={sim_t:.6f}s | t_base={base_sim_time:.6f}s | "
-                    f"t_rel={current_time:.6f}s | sim_frame={snapshot.frame} | dt={sim_dt:.6f}s"
-                )
+                    f">> [CARLA] Simulation tick: {current_time:05f} of {tick_count:05f}; Elapsed time: {elapsed_time:3f}s")
 
                 # Collisions for this tick: take all recorder frames within ± half_window around current_time
                 per_actor_collisions = collisions_for_time_window(
@@ -201,18 +188,18 @@ class CarlaMonitor:
                     data_actors.append(data_actor)
 
                 # Add traffic lights as DataActors
-                for tl in traffic_lights:
-                    dynamic_tl = world.get_traffic_light_from_opendrive_id(str(tl.open_drive_id))
-                    data_tl = DataTrafficLight.from_traffic_light(dynamic_tl, tl)
-                    if per_actor_collisions.get(data_tl.id):
-                        data_tl.collisions = list(per_actor_collisions[data_tl.id])
-                    data_actors.append(data_tl)
+                for traffic_light in traffic_lights:
+                    dynamic_traffic_light = world.get_traffic_light_from_opendrive_id(str(traffic_light.open_drive_id))
+                    data_traffic_light = DataTrafficLight.from_traffic_light(dynamic_traffic_light, traffic_light)
+                    if per_actor_collisions.get(data_traffic_light.id):
+                        data_traffic_light.collisions = list(per_actor_collisions[data_traffic_light.id])
+                    data_actors.append(data_traffic_light)
 
                 # Lane positions
                 for data_actor in data_actors:
                     nearest = rasterizer.get_closest_lane_midpoint(data_actor.location)
                     if not rasterizer.blocks_contain_waypoint(nearest.lane_id, nearest.road_id):
-                        print(">> [Data-AV Transformer] Waypoint for current actor not in rasterized blocks")
+                        print(">> [Data-AV Transformer] Waypoint for current actor not in loaded world")
                         JSONHelper.log_invalid_run(log_data_path)
                         raise KeyboardInterrupt
 
@@ -223,19 +210,15 @@ class CarlaMonitor:
                         actor=data_actor
                     ))
 
-                # Assemble this tick with SIM clock time
                 ticks.append(TickData(
                     current_tick=current_time,
                     actor_positions=actor_positions,
                     weather_parameters=weather_parameters
                 ))
 
-                # Stop exactly when the SIM clock reaches the replay duration (with a small epsilon)
-                eps = 0.5 * dt_nominal
-                if (current_time + eps) >= replay_duration:
+                if current_time >= replay_duration:
                     break
 
-                # Advance to next frame
                 world.tick()
                 tick_count += 1
 
