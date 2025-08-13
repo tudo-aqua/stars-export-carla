@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 import tkinter as tk
+from datetime import datetime
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 from typing import Callable
 
@@ -18,7 +19,7 @@ from carla_interaction_gui.workers.TransformRecordingWorker import TransformReco
 # Official CARLA maps from the docs (non-layered + layered "_Opt")
 ALLOWED_NON_LAYERED_MAPS = [
     "Town01", "Town02", "Town03", "Town04", "Town05", "Town06",
-    "Town07", "Town08", "Town09", "Town10", "Town11", "Town12",
+    "Town07", "Town08", "Town09", "Town10HD_Opt", "Town11", "Town12",
 ]
 ALLOWED_CARLA_MAPS = ALLOWED_NON_LAYERED_MAPS
 
@@ -85,6 +86,7 @@ class UnifiedCarlaGUI(tk.Tk):
         # log pane
         self.log = scrolledtext.ScrolledText(self, height=30, state="disabled")
         self.log.pack(fill="both", expand=False, padx=4, pady=4)
+        self._init_log_file()
 
         self._redirect_console()
         self._setup_autosave()
@@ -697,20 +699,52 @@ class UnifiedCarlaGUI(tk.Tk):
 
     def _log(self, txt: str):
         """
-        Logs a given text message to a GUI text widget, maintaining its state.
-
-        Parameters:
-            txt (str): The text message to log.
+        Logs a given text message to the GUI text widget and also appends it to a file.
         """
+        # 1) GUI pane
         self.log.configure(state="normal")
         self.log.insert("end", txt + "\n")
         self.log.see("end")
         self.log.configure(state="disabled")
 
+        # 2) File (append). Open per write to avoid cross-thread handle issues.
+        #    If _init_log_file didn't run yet for some reason, skip quietly.
+        log_path = getattr(self, "_log_file_path", None)
+        if log_path:
+            try:
+                with open(log_path, "a", encoding="utf-8") as f:
+                    f.write(txt + "\n")
+            except Exception:
+                # never let file I/O break the GUI
+                pass
+
     def _clear_log(self):
         self.log.configure(state="normal")
         self.log.delete("1.0", "end")
         self.log.configure(state="disabled")
+
+    def _init_log_file(self):
+        """
+        Decide where to write the session log and create the folder if needed.
+        """
+        # put logs into a 'logs' folder next to this script
+        logs_dir = os.path.join(self.config.transformer_output_path, "logs")
+        try:
+            os.makedirs(logs_dir, exist_ok=True)
+        except Exception:
+            # fallback to current working directory if making 'logs' failed
+            logs_dir = os.getcwd()
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self._log_file_path = os.path.join(logs_dir, f"carla_gui_{timestamp}.log")
+
+        # write a small header
+        try:
+            with open(self._log_file_path, "a", encoding="utf-8") as f:
+                f.write(f"=== CARLA GUI log started {datetime.now().isoformat()} ===\n")
+        except Exception:
+            # don't crash the GUI if file logging can't be set up
+            pass
 
     def _validate_paths(self, specs: list[tuple[str, tk.Variable, str]]) -> bool:
         """
