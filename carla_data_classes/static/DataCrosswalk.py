@@ -10,5 +10,5 @@ class DataCrosswalk:
     Polygonal footprint of a crosswalk as returned by CARLA's Map API.
     `vertices` are in world coordinates, ordered around the polygon.
     """
-    id: int
+    crosswalk_id: int
     vertices: List[DataLocation]
