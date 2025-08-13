@@ -60,10 +60,10 @@ class StraightLayer(BaseLayer):
     default_size = 2
 
     @classmethod
-    def build_df(cls, data_map: DataWorld, tick):
+    def build_df(cls, data_world: DataWorld, tick):
         rows = []
         every_n = 25
-        for straight in data_map.straights:
+        for straight in data_world.straights:
             for ln in straight.lanes:
                 if not ln.lane_midpoints:
                     continue

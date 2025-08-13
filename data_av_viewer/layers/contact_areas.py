@@ -14,9 +14,9 @@ class ContactAreaLayer(BaseLayer):
 
     # -------- build DataFrame -------------------------------------------------
     @classmethod
-    def build_df(cls, data_map: DataWorld, tick):
+    def build_df(cls, data_world: DataWorld, tick):
         rows = []
-        for ln in (l for b in data_map.junctions for r in b.roads for l in r.lanes):
+        for ln in (l for b in data_world.junctions for r in b.roads for l in r.lanes):
             for c in ln.contact_areas or []:
                 rows.append(dict(
                     x=c.contact_location.x,

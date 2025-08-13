@@ -94,7 +94,7 @@ class BaseLayer(ABC):
 
     # ------------- dataframe builder --------------------------------
     @classmethod
-    def build_df(cls, data_map, tick) -> pd.DataFrame:  # default = empty
+    def build_df(cls, data_world, tick) -> pd.DataFrame:  # default = empty
         return pd.DataFrame()
 
     # Allow override

@@ -18,20 +18,20 @@ class _LaneUtils:
     def get_lane_midpoints_array(self) -> List[DataLaneMidpoint]:
         """
         Return a flat list with the mid-points of every lane contained in the
-        already-computed DataMap (``self.ctx.data_map``).
+        already-computed DataMap (``self.ctx.data_world``).
 
         The traversal order is:
             1.  straight-road list  -> lanes
             2.  every junction      -> its roads -> lanes
             3.  every lane          -> lane_midpoints
         """
-        if not getattr(self.ctx, "data_map", None):
+        if not self.ctx.data_world:
             return []
 
         # --- gather all roads ----------------------------------------------------
-        straight_roads = self.ctx.data_map.straights  # List[DataRoad]
+        straight_roads = self.ctx.data_world.straights  # List[DataRoad]
         junction_roads = self.ctx.flatten(
-            [j.roads for j in self.ctx.data_map.junctions]  # List[List[DataRoad]]
+            [j.roads for j in self.ctx.data_world.junctions]  # List[List[DataRoad]]
         )
         all_roads = straight_roads + junction_roads  # flat List[DataRoad]
 

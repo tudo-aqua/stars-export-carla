@@ -41,13 +41,13 @@ class TrafficLightLayer(BaseLayer):
 
     # -------------------------------------------------------------- build df
     @classmethod
-    def build_df(cls, data_map: DataWorld, tick):
+    def build_df(cls, data_world: DataWorld, tick):
         """
         Aggregate by open_drive_id so one marker represents one post, and
         collect all lanes that reference it for hover.
         """
         by_od = {}
-        for r in data_map.get_all_roads():
+        for r in data_world.get_all_roads():
             for l in r.lanes:
                 for tl in (l.traffic_lights or []):
                     od = getattr(tl, "open_drive_id", getattr(tl, "opendrive_id", None))

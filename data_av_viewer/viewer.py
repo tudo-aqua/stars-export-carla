@@ -232,15 +232,15 @@ def parse_upload(contents, fname, prior_store_json, prior_dyn_json):
 
     try:
         raw = _decode_upload(contents)
-        ticks, data_map = _load_raw_json(raw)
+        ticks, data_world = _load_raw_json(raw)
 
         vehicle_locations = [pos.actor.location for tick in ticks for pos in tick.actor_positions if
                              isinstance(pos.actor, DataVehicle)]
 
         # ---- static upload (replace static, keep dynamic) ----
-        if data_map:
-            store = ViewerStore.from_source(data_map, ticks[0] if ticks else None)
-            msg = f"Loaded static '{fname}' | Map with {len(data_map.junctions)} junctions and {len(data_map.straights)} roads"
+        if data_world:
+            store = ViewerStore.from_source(data_world, ticks[0] if ticks else None)
+            msg = f"Loaded static '{fname}' | Map with {len(data_world.junctions)} junctions and {len(data_world.straights)} roads"
             return store.to_json(), (prior_dyn_json or ""), msg
 
         # ---- dynamic upload (replace dynamic, keep static) ----

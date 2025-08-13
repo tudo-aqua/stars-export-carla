@@ -114,7 +114,7 @@ class CarlaMonitor:
             api_helper = CarlaAPIHelper(self.client, world, rasterizer)
 
             print(">> [Data-AV Transformer] Load or calculate map data.")
-            blocks = rasterizer.load_or_calculate_data_map(log_file_path=result_file_path, map_name=map_name)
+            blocks = rasterizer.load_or_calculate_data_world(log_file_path=result_file_path, map_name=map_name)
             traffic_lights = rasterizer.get_all_traffic_lights()
 
             # Synchronous stepping — let the replay drive the sim clock; do not force fixed dt here

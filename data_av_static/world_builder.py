@@ -22,7 +22,7 @@ class _BlockBuilder:
         self.ctx = ctx
 
     @staticmethod
-    def _build_data_map(blocks: List[DataBlock], crosswalks: List[DataCrosswalk]) -> DataWorld:
+    def _build_data_world(blocks: List[DataBlock], crosswalks: List[DataCrosswalk]) -> DataWorld:
         """
         Flatten the DataBlock list into the two collections expected by
         DataMap (straights & junctions).
@@ -44,7 +44,7 @@ class _BlockBuilder:
 
         return DataWorld(straights=straights, junctions=list(junctions_by_id.values()), crosswalks=crosswalks)
 
-    def get_data_map(self, distance: float = 0.1) -> DataWorld:
+    def get_data_world(self, distance: float = 0.1) -> DataWorld:
         """
         Retrieves a list of data blocks based on map waypoints and landmarks.
 
@@ -85,10 +85,10 @@ class _BlockBuilder:
         self.ctx.close_speed_limit_gaps(data_blocks, default_speed_kmh=30.0)
 
         crosswalks = self._collect_crosswalks()
-        data_map = self._build_data_map(blocks=data_blocks, crosswalks=crosswalks)
+        data_world = self._build_data_world(blocks=data_blocks, crosswalks=crosswalks)
 
-        self.ctx.data_map = data_map
-        return data_map
+        self.ctx.data_world = data_world
+        return data_world
 
     def get_data_road_for_waypoints(self, waypoint: Waypoint, landmarks: List[Landmark]) -> DataRoad:
         """
@@ -323,7 +323,7 @@ class _BlockBuilder:
             poly = locs[i:j]
             if len(poly) >= 3:  # at least a triangle
                 vertices = [DataLocation(p.x, p.y, getattr(p, "z", 0.0)) for p in poly]
-                result.append(DataCrosswalk(id=cw_id, vertices=vertices))
+                result.append(DataCrosswalk(crosswalk_id=cw_id, vertices=vertices))
                 cw_id += 1
 
             # continue after the closing repeated point

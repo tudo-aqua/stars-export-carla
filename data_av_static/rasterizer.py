@@ -3,7 +3,7 @@ from .debug_utils import _DebugUtils
 from .geometry_utils import _GeometryUtils
 from .io_ops import _IOOps
 from .lane_utils import _LaneUtils
-from .map_builder import _BlockBuilder
+from .world_builder import _BlockBuilder
 from .speed_limit_utils import _SpeedLimitUtils
 from .traffic_light_utils import _TrafficLightUtils
 

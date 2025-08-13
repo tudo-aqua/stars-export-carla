@@ -60,10 +60,10 @@ class JunctionLayer(BaseLayer):
     default_size = 2
 
     @classmethod
-    def build_df(cls, data_map: DataWorld, tick):
+    def build_df(cls, data_world: DataWorld, tick):
         rows = []
         every_n = 25
-        for junction in data_map.junctions:
+        for junction in data_world.junctions:
             for road in junction.roads:
                 for ln in road.lanes:
                     if not ln.lane_midpoints:

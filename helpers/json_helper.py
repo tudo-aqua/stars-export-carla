@@ -137,12 +137,12 @@ class JSONHelper:
             logfile.write(json_string)
 
     @staticmethod
-    def log_data_map(map: DataWorld, path: os.path) -> None:
+    def log_data_world(data_world: DataWorld, path: os.path) -> None:
         directory = os.path.dirname(path)
         if not os.path.exists(directory):
             os.makedirs(directory)
         with open(path, "w") as logfile:
-            json_string = DataWorld.to_json(map)
+            json_string = DataWorld.to_json(data_world)
             logfile.write(json_string)
 
     @staticmethod
@@ -153,7 +153,7 @@ class JSONHelper:
             logfile.write(json_string)
 
     @staticmethod
-    def load_data_map(source: Union[str, os.PathLike, IO]) -> DataWorld:
+    def load_data_world(source: Union[str, os.PathLike, IO]) -> DataWorld:
         """Load JSON from either a filesystem path or a file-like (e.g. ZipExtFile)."""
 
         # Determine if we need to open it ourselves

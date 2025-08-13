@@ -6,6 +6,7 @@ from typing import Iterable, List, Tuple
 import pandas as pd
 import plotly.graph_objects as go
 
+from carla_data_classes.static.DataWorld import DataWorld
 from .base_layer import register, BaseLayer
 
 
@@ -18,12 +19,12 @@ def _ensure_closed(x, y, eps=1e-8):
     return x, y
 
 
-def _iter_crosswalk_polys(data_map) -> Iterable[Tuple[int, List[Tuple[float, float]]]]:
+def _iter_crosswalk_polys(data_world: DataWorld) -> Iterable[Tuple[int, List[Tuple[float, float]]]]:
     """Yield (id, polygon_xy) for each crosswalk."""
-    if hasattr(data_map, "crosswalks") and data_map.crosswalks is not None:
-        cws = data_map.crosswalks
-    elif hasattr(data_map, "get_crosswalks"):
-        cws = data_map.get_crosswalks()
+    if hasattr(data_world, "crosswalks") and data_world.crosswalks is not None:
+        cws = data_world.crosswalks
+    elif hasattr(data_world, "get_crosswalks"):
+        cws = data_world.get_crosswalks()
     else:
         cws = []
 
@@ -44,9 +45,9 @@ class CrosswalkLayer(BaseLayer):
     df_key = "crosswalks"
 
     @classmethod
-    def build_df(cls, data_map, tick) -> pd.DataFrame:
+    def build_df(cls, data_world, tick) -> pd.DataFrame:
         rows = []
-        for cw_id, poly_xy in _iter_crosswalk_polys(data_map):
+        for cw_id, poly_xy in _iter_crosswalk_polys(data_world):
             rows.append(dict(
                 id=int(cw_id),
                 poly_x=[p[0] for p in poly_xy],

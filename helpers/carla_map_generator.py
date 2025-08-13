@@ -32,7 +32,7 @@ def generate_static_map_data(client: Client, update_existing: bool) -> None:
         rasterizer = MapRasterizer(world)
 
         # Calculate the static data for the current map
-        rasterizer.load_or_calculate_data_map(map_name=map_name, file_name=map_name, update_existing=update_existing)
+        rasterizer.load_or_calculate_data_world(map_name=map_name, file_name=map_name, update_existing=update_existing)
 
 
 if __name__ == '__main__':

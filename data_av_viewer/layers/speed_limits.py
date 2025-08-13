@@ -46,14 +46,14 @@ class SpeedLimitsLayer(BaseLayer):
 
     # ---------- build the per-layer dataframe from DataBlocks ----------
     @classmethod
-    def build_df(cls, data_map: DataWorld, tick) -> pd.DataFrame:
+    def build_df(cls, data_world: DataWorld, tick) -> pd.DataFrame:
         rows: List[dict] = []
 
         # blocks can be a single DataBlock or a list
-        if data_map is None:
+        if data_world is None:
             return pd.DataFrame(rows)
 
-        for road in data_map.get_all_roads():
+        for road in data_world.get_all_roads():
             for lane in road.lanes:
                 speed_sections = lane.speed_limits
                 midpoints = lane.lane_midpoints

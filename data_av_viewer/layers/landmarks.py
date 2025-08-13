@@ -59,9 +59,9 @@ class LandmarkLayer(BaseLayer):
 
     # ---------------------------------------------------------------- build df
     @classmethod
-    def build_df(cls, data_map: DataWorld, tick):
+    def build_df(cls, data_world: DataWorld, tick):
         by_id = {}
-        for road in data_map.get_all_roads():
+        for road in data_world.get_all_roads():
             for lane in road.lanes:
                 for lm in lane.landmarks or []:
                     rec = by_id.get(lm.id)

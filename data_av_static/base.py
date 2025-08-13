@@ -14,7 +14,7 @@ class _Base:
         self.world: World = carla_world
         self.map: Map = carla_world.get_map()
         self.blocks: List[DataBlock] = []
-        self.data_map: DataWorld = None
+        self.data_world: DataWorld = None
         self.debug_helper = self.world.debug
         self.kd_tree = None
         self.lane_midpoints = []

@@ -16,10 +16,10 @@ class ViewerStore:
 
     # ---------- construction from raw data ---------------------------
     @classmethod
-    def from_source(cls, data_map, tick=None):
+    def from_source(cls, data_world, tick=None):
         dfs={}
         for name, layer_cls in LAYER_REGISTRY.items():
-            df = layer_cls.build_df(data_map, tick)
+            df = layer_cls.build_df(data_world, tick)
             dfs[name] = df
         return cls(dfs)
 

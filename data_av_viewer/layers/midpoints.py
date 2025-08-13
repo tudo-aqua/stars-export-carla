@@ -14,9 +14,9 @@ class MidpointLayer(BaseLayer):
     df_key = "midpoints"
 
     @classmethod
-    def build_df(cls, data_map: DataWorld, tick) -> pd.DataFrame:
+    def build_df(cls, data_world: DataWorld, tick) -> pd.DataFrame:
         rows = []
-        for r in data_map.get_all_roads():
+        for r in data_world.get_all_roads():
             for ln in r.lanes:
                 for mp in ln.lane_midpoints or []:
                     rows.append(dict(
