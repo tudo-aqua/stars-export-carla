@@ -20,9 +20,11 @@ from carla_data_classes.dynamic import (
 from carla_data_classes.enums.DataWeatherParametersType import DataWeatherParametersType
 from data_av_static import MapRasterizer
 from helpers.carla_api_helper import CarlaAPIHelper
-from helpers.collisions import CollisionCollector  # sensor-based collisions
 from helpers.json_helper import JSONHelper
 from helpers.kinematics import compute_vel_acc_for_ticks
+
+# NEW: log-driven collisions + ID mapping
+from helpers.collisions import RecorderIndex, IdMapper, collisions_for_time_window
 
 
 class CarlaMonitor:
@@ -76,7 +78,7 @@ class CarlaMonitor:
     def monitor_simulation_run(self, file_path: str, weather_file_path: str, result_file_path: str) -> None:
         """
         Replays the given .log and records dynamic data until the replay finishes.
-        Collisions are collected from live collision sensors.
+        Collisions are taken from the recorder info and aligned by simulation time.
         """
         print(f">> [IO] Evaluate recorder data at path: '{file_path}'")
         log_data_path = file_path
@@ -91,6 +93,8 @@ class CarlaMonitor:
                 print(">> [IO] The file at path", file_path, "cannot be found.")
                 return
 
+            # Parse recorder timing & collisions
+            rec_idx = RecorderIndex.parse(info)
             map_name, replay_duration, replay_frames = self._parse_map_and_duration(info)
 
             print(f">> [CARLA] Recording duration: {replay_duration:.3f}s")
@@ -101,7 +105,7 @@ class CarlaMonitor:
             weather_parameters: DataWeatherParameters = CarlaMonitor.get_simulation_run_weather(
                 weather_file=weather_file_path)
 
-            # Get map name of recording
+            # Map name as in info
             map_name = info.split("Map: ")[1].split("\nDate")[0]
             print(f">> [CARLA] Load map: '{map_name}'")
 
@@ -114,16 +118,18 @@ class CarlaMonitor:
             api_helper = CarlaAPIHelper(self.client, world, rasterizer)
 
             print(">> [Data-AV Transformer] Load or calculate map data.")
+            # keep your call as you had it
             blocks = rasterizer.load_or_calculate_data_world(log_file_path=result_file_path, map_name=map_name)
             traffic_lights = rasterizer.get_all_traffic_lights()
 
-            # Synchronous stepping — let the replay drive the sim clock; do not force fixed dt here
+            # Synchronous stepping with fixed 0.05 s ticks, as requested
             settings = world.get_settings()
             settings.synchronous_mode = True
-            settings.fixed_delta_seconds = None
+            settings.fixed_delta_seconds = 0.05
             world.apply_settings(settings)
+            dt_nominal = settings.fixed_delta_seconds or 0.05
 
-            # Start replay of simulation and step once to let actors/sensors spawn
+            # Start replay of simulation and step once to let actors spawn
             api_helper.start_replaying(log_data_path)
             world.tick()
 
@@ -134,44 +140,48 @@ class CarlaMonitor:
             start_wall = datetime.now()
             ticks: List[TickData] = []
 
-            # Hook collision sensors (existing or fallback)
-            coll = CollisionCollector(world)
-            subscribed = coll.attach_existing_collision_sensors()
-            if subscribed == 0:
-                vehicles_now = api_helper.get_vehicles()
-                coll.ensure_vehicle_sensors(vehicles_now)
+            # Build recorder→runtime mapper; bootstrap statics once
+            mapper = IdMapper(rec_idx, debug=False)
+            mapper.bootstrap_statics_once(world)
 
-            print(">> [Data-AV Transformer] Start simulation replay and sensor-based collision capture")
+            print(">> [Data-AV Transformer] Start simulation replay (log-driven collisions)")
 
             tick_count = 0
-            # Precompute the target end time in SIM clock
             target_end_sim_time = base_sim_time + replay_duration
+            # time window for matching collisions to this tick (± half a tick by default)
+            half_window = 0.5 * dt_nominal
 
             while True:
                 snapshot: WorldSnapshot = world.get_snapshot()
                 sim_t = snapshot.timestamp.elapsed_seconds  # CARLA in-simulation clock
-                sim_dt = snapshot.timestamp.delta_seconds or 0.0  # in-simulation Δt (may be 0 in rare frames)
-                current_time = sim_t - base_sim_time  # time since replay start (in-sim)
+                sim_dt = snapshot.timestamp.delta_seconds or dt_nominal
+                current_time = sim_t - base_sim_time       # time since replay start (in-sim)
 
-                # Optional sampling throttle
+                # Optional sampling throttle (unchanged)
                 if CarlaMonitor.ONLY_TRACK_AT_SPECIFIC_INTERVAL and math.fmod(
                         round(current_time, 3), CarlaMonitor.SPECIFIC_TRACK_INTERVAL) != 0:
                     world.tick()
                     continue
 
-                elapsed_time = (datetime.now() - start_wall).total_seconds()  # wall clock, print only
+                elapsed_time = (datetime.now() - start_wall).total_seconds()  # wall clock (print only)
                 # --- keep your original print line exactly, do not delete ---
                 print(
                     f">> [CARLA] Simulation step: {tick_count:05d}; "
                     f"Result t={current_time:.3f}s (frame {tick_count}); Elapsed: {elapsed_time:.3f}s")
-                # --- add a second line with sim-clock internals for debugging ---
+                # --- additive sim-clock internals for debugging ---
                 print(
                     f">> [CARLA]   SimClock t_abs={sim_t:.6f}s | t_base={base_sim_time:.6f}s | "
                     f"t_rel={current_time:.6f}s | sim_frame={snapshot.frame} | dt={sim_dt:.6f}s"
                 )
 
-                # Per-frame collisions from sensors (bucketed by snapshot.frame)
-                per_actor_collisions = coll.consume_frame(snapshot.frame)
+                # Collisions for this tick: take all recorder frames within ± half_window around current_time
+                per_actor_collisions = collisions_for_time_window(
+                    rec_idx=rec_idx,
+                    mapper=mapper,
+                    world=world,
+                    sim_time_rel=current_time,
+                    half_window=half_window
+                )
 
                 # Build DataActors from live world
                 actors = api_helper.get_actors()
@@ -221,13 +231,12 @@ class CarlaMonitor:
                     weather_parameters=weather_parameters
                 ))
 
-                # Stop exactly when the SIM clock reaches the replay duration (with a tiny epsilon)
-                # epsilon guards against last-frame rounding; pick >= half a frame or 10ms (whichever is larger)
-                eps = max(0.5 * (sim_dt if sim_dt > 0 else 0.01), 0.01)
-                if sim_t + eps >= target_end_sim_time:
+                # Stop exactly when the SIM clock reaches the replay duration (with a small epsilon)
+                eps = 0.5 * dt_nominal
+                if (sim_t + eps) >= target_end_sim_time:
                     break
 
-                # Also stop if we’ve reached the advertised frame count (secondary guard)
+                # As a secondary guard, stop if we’ve hit the advertised frames (if present)
                 if replay_frames and (tick_count + 1) >= replay_frames:
                     break
 
@@ -250,12 +259,6 @@ class CarlaMonitor:
             print(f">> [Error] Unexpected {err}, {type(err)}")
             JSONHelper.log_error("failed_run", name=log_data_path, error_message=f"{err}")
         finally:
-            # Clean up sensors
-            try:
-                coll.stop()
-            except Exception:
-                pass
-
             # Reset world settings
             settings = self.world.get_settings()
             settings.synchronous_mode = False

@@ -11,6 +11,7 @@ from helpers.json_helper import JSONHelper
 ACTOR_BLOCK_FILTERING_SWITCH = True
 USABLE_MAPS = ["Town01", "Town02", "Town10"]
 
+
 class CarlaAPIHelper:
     """
     This class provides methods that return information of dynamic objects of the Carla simulation
@@ -103,10 +104,11 @@ class CarlaAPIHelper:
             duration = 0.0
         if not camera_id:
             camera_id = 0
-        self.client.replay_file(name=file, time_start=start_time, duration=duration, follow_id=camera_id, replay_sensors=True)
+        self.client.replay_file(name=file, time_start=start_time, duration=duration, follow_id=camera_id,
+                                replay_sensors=True)
         self.client.set_replayer_time_factor(time_factor)
         if show_file_info:
-            self.client.show_recorder_file_info(file, False)
+            self.client.show_recorder_file_info(file, True)
 
     # region Static methods
     ########################################

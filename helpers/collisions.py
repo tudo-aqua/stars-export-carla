@@ -1,11 +1,14 @@
 from collections import defaultdict
-from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
+import bisect
+import re
 
 import carla
-
 from carla_data_classes.dynamic.DataCollision import DataCollision
 from carla_data_classes.enums.DataCollisionKind import DataCollisionKind
+
+
+WORLD_REC_ID = 0xFFFFFFFF  # 4294967295
 
 
 def _kind_from_type_id(type_id: Optional[str]) -> DataCollisionKind:
@@ -23,137 +26,235 @@ def _kind_from_type_id(type_id: Optional[str]) -> DataCollisionKind:
     return DataCollisionKind.OTHER
 
 
-@dataclass
-class _ParentInfo:
-    parent_id: int
-    parent_type: str
-
-
-class CollisionCollector:
+class RecorderIndex:
     """
-    Subscribes to all existing `sensor.other.collision` sensors.
-    Buffers events per frame; exposes `consume_frame(frame)` which returns:
-        { runtime_actor_id : [DataCollision, ...] }  for that exact frame.
+    Minimal index built from show_recorder_file_info(..., True):
+      - frames, duration
+      - frame_times[i] = time (s) of recorder Frame (i+1)
+      - creates_by_recid[rec_id] = (type_id, create_loc, role_name, created_frame)
+      - collisions_by_frame[frame] = [(rec_id_a, rec_id_b), ...]
     """
+    def __init__(self):
+        self.frames: int = 0
+        self.duration: float = 0.0
+        self.frame_times: List[float] = []
+        self.creates_by_recid: Dict[int, Tuple[str, carla.Location, Optional[str], int]] = {}
+        self.collisions_by_frame: Dict[int, List[Tuple[int, int]]] = defaultdict(list)
 
-    def __init__(self, world: carla.World, debug: bool = False):
-        self.world = world
-        self.debug = debug
-        self._sensors: List[carla.Sensor] = []
-        self._parent_info: Dict[int, _ParentInfo] = {}  # sensor_id -> _ParentInfo
-        self._parent_type: Dict[int, str] = {}  # parent_actor_id -> type_id
-        self._events_by_frame: Dict[int, List[DataCollision]] = defaultdict(list)
+    @staticmethod
+    def parse(info: str) -> "RecorderIndex":
+        idx = RecorderIndex()
 
-    # ---------- setup / teardown ----------
+        # Frames / Duration
+        m_frames = re.search(r"^Frames:\s+(\d+)", info, re.MULTILINE)
+        idx.frames = int(m_frames.group(1)) if m_frames else 0
+        m_dur = re.search(r"^Duration:\s+([0-9.]+)\s+seconds", info, re.MULTILINE)
+        idx.duration = float(m_dur.group(1)) if m_dur else 0.0
 
-    def attach_existing_collision_sensors(self) -> int:
-        """
-        Find all `sensor.other.collision` sensors already in the world and listen to them.
-        Returns the number of sensors subscribed.
-        """
-        sensors = self.world.get_actors().filter("sensor.other.collision")
-        count = 0
-        print(f">> [CARLA] Attaching '{len(sensors)}' existing collision sensors.")
-        for s in sensors:
-            try:
-                parent = s.get_parent()
-            except Exception:
-                parent = getattr(s, "parent", None)
-
-            if parent is None:
-                # orphan sensor (shouldn't happen with recorder), skip
-                continue
-
-            pid = parent.id
-            ptype = (parent.type_id or "unknown")
-            self._parent_info[s.id] = _ParentInfo(parent_id=pid, parent_type=ptype)
-            self._parent_type[pid] = ptype
-
-            # Bind callback with defaults so we don't capture 's' late
-            s.listen(lambda ev, _pid=pid, _ptype=ptype: self._on_event(ev, _pid, _ptype))
-            self._sensors.append(s)
-            count += 1
-
-        if self.debug:
-            print(f"[collision] subscribed to {count} collision sensors")
-        return count
-
-    def ensure_vehicle_sensors(self, vehicles: List[carla.Actor]) -> int:
-        """
-        Optional safety net: if the replay didn’t spawn collision sensors,
-        attach one to each provided vehicle.
-        Returns the number of sensors created.
-        """
-        bp_lib = self.world.get_blueprint_library()
-        coll_bp = bp_lib.find("sensor.other.collision")
-        made = 0
-        for v in vehicles:
-            # skip if we already see some sensor parented to this vehicle
-            if v.id in self._parent_type:
-                continue
-            try:
-                sensor = self.world.spawn_actor(coll_bp, carla.Transform(), attach_to=v)
-            except RuntimeError:
-                # sometimes spawn can fail during replay start-up, skip
-                continue
-            ptype = (v.type_id or "unknown")
-            self._parent_info[sensor.id] = _ParentInfo(parent_id=v.id, parent_type=ptype)
-            self._parent_type[v.id] = ptype
-            sensor.listen(lambda ev, _pid=v.id, _ptype=ptype: self._on_event(ev, _pid, _ptype))
-            self._sensors.append(sensor)
-            made += 1
-        if self.debug:
-            print(f"[collision] created {made} fallback sensors for vehicles")
-        return made
-
-    def stop(self):
-        """Stop all listeners (do not destroy; your cleanup will kill actors at the end)."""
-        for s in self._sensors:
-            try:
-                s.stop()
-            except Exception:
-                pass
-
-    # ---------- consumption API ----------
-
-    def consume_frame(self, frame: int) -> Dict[int, List[DataCollision]]:
-        """
-        Return collisions bucketed by ACTOR for this exact simulation frame,
-        and remove them from the internal buffer.
-        """
-        events = self._events_by_frame.pop(frame, [])
-        per_actor: Dict[int, List[DataCollision]] = defaultdict(list)
-        for dc in events:
-            # attach to both sides (so “other” actor also gets the event even if it had no sensor)
-            if dc.actor1_id != -1:
-                per_actor[dc.actor1_id].append(dc)
-            if dc.actor2_id != -1:
-                per_actor[dc.actor2_id].append(dc)
-        return per_actor
-
-    # ---------- internal: callback ----------
-
-    def _on_event(self, ev: carla.CollisionEvent, parent_id: int, parent_type: str):
-        """
-        Build a DataCollision from a CollisionEvent. Add it to that frame's buffer.
-        """
-        # Other actor may be static “world” or a real actor
-        other = getattr(ev, "other_actor", None)
-        if other is not None:
-            other_id = other.id
-            other_type = other.type_id or "unknown"
-            other_kind = _kind_from_type_id(other_type)
-        else:
-            other_id = -1
-            other_type = "WORLD"
-            other_kind = DataCollisionKind.STATIC
-
-        coll = DataCollision(
-            actor1_kind=_kind_from_type_id(parent_type),
-            actor2_kind=other_kind,
-            actor1_id=parent_id,
-            actor1_type_id=parent_type,
-            actor2_id=other_id,
-            actor2_type_id=other_type,
+        # Patterns
+        frame_hdr = re.compile(r"^Frame\s+(\d+)\s+at\s+([0-9.]+)\s+seconds$")
+        create_re = re.compile(
+            r"^\s*Create\s+(\d+):\s+([A-Za-z0-9_.]+)\s+\(\d+\)\s+at\s+\((-?[0-9.]+),\s*(-?[0-9.]+),\s*(-?[0-9.]+)\)\s*$"
         )
-        self._events_by_frame[ev.frame].append(coll)
+        role_re = re.compile(r"^\s*role_name\s*=\s*(.+)$")
+        # allow optional "(hero)" (or similar) after both IDs
+        coll_re = re.compile(
+            r"^\s*Collision\s+id\s+(?:\d+)\s+between\s+(\d+)(?:\s+\([^)]*\))?\s+with\s+(\d+)(?:\s+\([^)]*\))?\s*$"
+        )
+
+        lines = info.splitlines()
+        curr_frame: Optional[int] = None
+        last_create_id: Optional[int] = None
+        times_tmp: Dict[int, float] = {}
+
+        for line in lines:
+            s = line.strip()
+
+            m = frame_hdr.match(s)
+            if m:
+                curr_frame = int(m.group(1))
+                times_tmp[curr_frame] = float(m.group(2))
+                last_create_id = None
+                continue
+
+            m = create_re.match(line)
+            if m and curr_frame is not None:
+                rec_id = int(m.group(1))
+                type_id = m.group(2)
+                x, y, z = float(m.group(3)), float(m.group(4)), float(m.group(5))
+                idx.creates_by_recid[rec_id] = (type_id, carla.Location(x=x, y=y, z=z), None, curr_frame)
+                last_create_id = rec_id
+                continue
+
+            if last_create_id is not None and line.startswith("  "):
+                rr = role_re.match(s)
+                if rr:
+                    t, loc, _, cf = idx.creates_by_recid[last_create_id]
+                    idx.creates_by_recid[last_create_id] = (t, loc, rr.group(1).strip(), cf)
+                continue
+            else:
+                last_create_id = None
+
+            m = coll_re.match(line)
+            if m and curr_frame is not None:
+                a, b = int(m.group(1)), int(m.group(2))
+                idx.collisions_by_frame[curr_frame].append((a, b))
+                continue
+
+        # Build frame_times[0..frames-1]
+        n = max(idx.frames, (max(times_tmp) if times_tmp else 0))
+        idx.frame_times = [0.0] * n
+        for k, v in times_tmp.items():
+            if 1 <= k <= n:
+                idx.frame_times[k - 1] = v
+        return idx
+
+
+class IdMapper:
+    """
+    Recorder-ID → runtime Actor.id via (type_id, optional role_name, nearest creation location).
+    Includes a one-time bootstrap for static traffic.* actors.
+    """
+    def __init__(self, rec_idx: RecorderIndex, debug: bool = False):
+        self.rec_idx = rec_idx
+        self.debug = debug
+        self.rec_to_run: Dict[int, int] = {}
+        self.run_to_rec: Dict[int, int] = {}
+        self._bootstrapped = False
+
+    def _eligible(self, a: carla.Actor) -> bool:
+        tid = (a.type_id or "").lower()
+        return not (tid.startswith("sensor.") or tid == "spectator")
+
+    @staticmethod
+    def _dist(a: carla.Actor, loc: carla.Location) -> float:
+        al = a.get_location()
+        dx, dy, dz = al.x - loc.x, al.y - loc.y, al.z - loc.z
+        return (dx * dx + dy * dy + dz * dz) ** 0.5
+
+    @staticmethod
+    def _tol(tid: str) -> float:
+        t = tid.lower()
+        if t.startswith(("vehicle.", "walker.")):
+            return 30.0
+        if t.startswith("traffic."):
+            return 15.0
+        return 25.0
+
+    def bootstrap_statics_once(self, world: carla.World):
+        if self._bootstrapped:
+            return
+        actors = [a for a in world.get_actors() if self._eligible(a)]
+        traffic_rt = [a for a in actors if (a.type_id or "").lower().startswith("traffic.")]
+        for rec_id, (t, loc, rn, _) in self.rec_idx.creates_by_recid.items():
+            if rec_id in self.rec_to_run or not t.lower().startswith("traffic."):
+                continue
+            cands = [a for a in traffic_rt if (a.type_id or "").lower() == t.lower() and a.id not in self.run_to_rec]
+            if not cands:
+                continue
+            best = min(cands, key=lambda a: self._dist(a, loc))
+            self.rec_to_run[rec_id] = best.id
+            self.run_to_rec[best.id] = rec_id
+        self._bootstrapped = True
+
+    def get_runtime_id(self, world: carla.World, rec_id: int) -> Optional[int]:
+        if rec_id in self.rec_to_run:
+            return self.rec_to_run[rec_id]
+        rec = self.rec_idx.creates_by_recid.get(rec_id)
+        if not rec:
+            return None
+        t, loc, rn, _ = rec
+        actors = [a for a in world.get_actors() if self._eligible(a)]
+        actors = [a for a in actors if a.id not in self.run_to_rec and (a.type_id or "").lower() == t.lower()]
+        if rn:
+            rn_l = rn.strip().lower()
+            by_rn = [a for a in actors if a.attributes.get("role_name", "").strip().lower() == rn_l]
+            if by_rn:
+                actors = by_rn
+        if not actors:
+            return None
+        if len(actors) == 1:
+            best = actors[0]
+        else:
+            best = min(actors, key=lambda a: self._dist(a, loc))
+            if self._dist(best, loc) > self._tol(t) and not t.lower().startswith("traffic."):
+                return None
+        self.rec_to_run[rec_id] = best.id
+        self.run_to_rec[best.id] = rec_id
+        return best.id
+
+
+def collisions_for_time_window(
+    rec_idx: RecorderIndex,
+    mapper: IdMapper,
+    world: carla.World,
+    sim_time_rel: float,
+    half_window: float
+) -> Dict[int, List[DataCollision]]:
+    """
+    Return {runtime_actor_id: [DataCollision,...]} for ALL recorder frames whose
+    timestamps fall within [sim_time_rel - half_window, sim_time_rel + half_window].
+    This is robust to tiny drift between recorded times and your fixed 0.05s ticks.
+    """
+    ft = rec_idx.frame_times
+    if not ft:
+        return {}
+
+    lo = sim_time_rel - half_window
+    hi = sim_time_rel + half_window
+
+    i0 = max(0, bisect.bisect_left(ft, lo) - 1)   # expand one left as safety
+    i1 = min(len(ft), bisect.bisect_right(ft, hi) + 1)
+
+    out: Dict[int, List[DataCollision]] = defaultdict(list)
+
+    for k in range(i0, i1):
+        t = ft[k]
+        if not (lo <= t <= hi):
+            continue
+        frame_idx = k + 1  # recorder frames are 1-based
+        pairs = rec_idx.collisions_by_frame.get(frame_idx, [])
+        if not pairs:
+            continue
+
+        for rec_a, rec_b in pairs:
+            # WORLD side
+            if rec_a == WORLD_REC_ID or rec_b == WORLD_REC_ID:
+                other = rec_b if rec_a == WORLD_REC_ID else rec_a
+                rec_other = rec_idx.creates_by_recid.get(other)
+                run_other = mapper.get_runtime_id(world, other) if rec_other else None
+                t_other = rec_other[0] if rec_other else "unknown"
+                dc = DataCollision(
+                    actor1_kind=_kind_from_type_id(t_other),
+                    actor2_kind=DataCollisionKind.STATIC,
+                    actor1_id=(run_other if run_other is not None else -1),
+                    actor1_type_id=t_other,
+                    actor2_id=-1,
+                    actor2_type_id="WORLD",
+                )
+                if run_other is not None:
+                    out[run_other].append(dc)
+                continue
+
+            # actor ↔ actor
+            recA = rec_idx.creates_by_recid.get(rec_a)
+            recB = rec_idx.creates_by_recid.get(rec_b)
+            run_a = mapper.get_runtime_id(world, rec_a) if recA else None
+            run_b = mapper.get_runtime_id(world, rec_b) if recB else None
+            type_a = recA[0] if recA else "unknown"
+            type_b = recB[0] if recB else "unknown"
+
+            dc = DataCollision(
+                actor1_kind=_kind_from_type_id(type_a),
+                actor2_kind=_kind_from_type_id(type_b),
+                actor1_id=(run_a if run_a is not None else -1),
+                actor1_type_id=type_a,
+                actor2_id=(run_b if run_b is not None else -1),
+                actor2_type_id=type_b,
+            )
+            if run_a is not None:
+                out[run_a].append(dc)
+            if run_b is not None:
+                out[run_b].append(dc)
+
+    return out
