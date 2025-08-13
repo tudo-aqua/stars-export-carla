@@ -6,7 +6,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from shapely.geometry import LineString, Polygon, MultiPolygon
 
-from carla_data_classes.static.DataMap import DataMap
+from carla_data_classes.static.DataWorld import DataWorld
 from .base_layer import register, BaseLayer
 from .utils import rgba, color_for_road
 
@@ -60,7 +60,7 @@ class StraightLayer(BaseLayer):
     default_size = 2
 
     @classmethod
-    def build_df(cls, data_map: DataMap, tick):
+    def build_df(cls, data_map: DataWorld, tick):
         rows = []
         every_n = 25
         for straight in data_map.straights:

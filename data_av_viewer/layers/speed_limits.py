@@ -5,7 +5,7 @@ from typing import List
 import pandas as pd
 import plotly.graph_objects as go
 
-from carla_data_classes.static.DataMap import DataMap
+from carla_data_classes.static.DataWorld import DataWorld
 from .base_layer import BaseLayer, register
 
 
@@ -46,7 +46,7 @@ class SpeedLimitsLayer(BaseLayer):
 
     # ---------- build the per-layer dataframe from DataBlocks ----------
     @classmethod
-    def build_df(cls, data_map: DataMap, tick) -> pd.DataFrame:
+    def build_df(cls, data_map: DataWorld, tick) -> pd.DataFrame:
         rows: List[dict] = []
 
         # blocks can be a single DataBlock or a list

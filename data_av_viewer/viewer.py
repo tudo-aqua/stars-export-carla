@@ -13,7 +13,7 @@ from dash import Dash, dcc, html, Input, Output, State, Patch, ALL, ctx, no_upda
 
 from carla_data_classes.dynamic import DataVehicle
 from carla_data_classes.dynamic.TickData import TickData
-from carla_data_classes.static.DataMap import DataMap
+from carla_data_classes.static.DataWorld import DataWorld
 from dynamic.actor_traces import build_dynamic_templates
 from layers.base_layer import build_all_traces, LAYER_REGISTRY
 from viewer_store import ViewerStore
@@ -31,7 +31,7 @@ def _decode_upload(contents: str) -> bytes:
     return base64.b64decode(contents.split(",", 1)[1])
 
 
-def _load_raw_json(raw: bytes) -> Tuple[List[TickData], DataMap]:
+def _load_raw_json(raw: bytes) -> Tuple[List[TickData], DataWorld]:
     # try TickData(s)
     try:
         return TickData.from_json(raw), []
@@ -40,7 +40,7 @@ def _load_raw_json(raw: bytes) -> Tuple[List[TickData], DataMap]:
 
     # try DataMap
     try:
-        blk = DataMap.from_json(raw)
+        blk = DataWorld.from_json(raw)
         return [], blk
     except Exception:
         print(traceback.format_exc())

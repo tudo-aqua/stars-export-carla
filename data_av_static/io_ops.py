@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 from scipy.spatial import KDTree
 
-from carla_data_classes.static.DataMap import DataMap
+from carla_data_classes.static.DataWorld import DataWorld
 from helpers.json_helper import JSONHelper
 
 if TYPE_CHECKING:
@@ -24,7 +24,7 @@ class _IOOps:
             raise RuntimeError("The map has not yet been calculated. Use method 'get_data_map'")
         JSONHelper.log_data_map(self.ctx.data_map, file_path)
 
-    def load_data_map(self, file_path: Path) -> DataMap:
+    def load_data_map(self, file_path: Path) -> DataWorld:
         """
         — Checks that exactly one static_data_*.zip exists in `log_file_path`.
         — Extracts and loads all JSON files inside into a dict.
@@ -49,7 +49,7 @@ class _IOOps:
 
         return data_map
 
-    def load_or_calculate_data_map(self, log_file_path: str, map_name: str) -> DataMap:
+    def load_or_calculate_data_map(self, log_file_path: str, map_name: str) -> DataWorld:
         """
         Loads the DataMap for the current map if existing. Otherwise, they are calculated and
         saved to disk.

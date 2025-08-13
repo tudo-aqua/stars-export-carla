@@ -9,7 +9,7 @@ from carla_data_classes.static.DataJunction import DataJunction
 
 
 @dataclass
-class DataMap(JSONWizard):
+class DataWorld(JSONWizard):
     class _(JSONWizard.Meta):
         key_transform_with_dump = 'SNAKE'
         recursive_classes = True

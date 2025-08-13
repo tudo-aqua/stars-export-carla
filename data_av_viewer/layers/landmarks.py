@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from carla_data_classes.enums.DataLandmarkType import DataLandmarkType
-from carla_data_classes.static.DataMap import DataMap
+from carla_data_classes.static.DataWorld import DataWorld
 from .base_layer import register, BaseLayer
 
 # ----------------------------------------------------------------------
@@ -59,7 +59,7 @@ class LandmarkLayer(BaseLayer):
 
     # ---------------------------------------------------------------- build df
     @classmethod
-    def build_df(cls, data_map: DataMap, tick):
+    def build_df(cls, data_map: DataWorld, tick):
         by_id = {}
         for road in data_map.get_all_roads():
             for lane in road.lanes:

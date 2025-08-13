@@ -3,7 +3,7 @@ from typing import List
 from carla import World, Map
 
 from carla_data_classes.static import DataBlock
-from carla_data_classes.static.DataMap import DataMap
+from carla_data_classes.static.DataWorld import DataWorld
 
 
 class _Base:
@@ -14,7 +14,7 @@ class _Base:
         self.world: World = carla_world
         self.map: Map = carla_world.get_map()
         self.blocks: List[DataBlock] = []
-        self.data_map: DataMap = None
+        self.data_map: DataWorld = None
         self.debug_helper = self.world.debug
         self.kd_tree = None
         self.lane_midpoints = []

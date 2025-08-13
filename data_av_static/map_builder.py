@@ -11,7 +11,7 @@ from carla_data_classes.static import DataRoad, DataLandmark, DataLane, DataLoca
 from carla_data_classes.static.DataBlock import DataBlock
 from carla_data_classes.static.DataCrosswalk import DataCrosswalk
 from carla_data_classes.static.DataJunction import DataJunction
-from carla_data_classes.static.DataMap import DataMap
+from carla_data_classes.static.DataWorld import DataWorld
 
 if TYPE_CHECKING:
     pass
@@ -22,7 +22,7 @@ class _BlockBuilder:
         self.ctx = ctx
 
     @staticmethod
-    def _build_data_map(blocks: List[DataBlock], crosswalks: List[DataCrosswalk]) -> DataMap:
+    def _build_data_map(blocks: List[DataBlock], crosswalks: List[DataCrosswalk]) -> DataWorld:
         """
         Flatten the DataBlock list into the two collections expected by
         DataMap (straights & junctions).
@@ -42,9 +42,9 @@ class _BlockBuilder:
                 else:
                     straights.append(rd)
 
-        return DataMap(straights=straights, junctions=list(junctions_by_id.values()), crosswalks=crosswalks)
+        return DataWorld(straights=straights, junctions=list(junctions_by_id.values()), crosswalks=crosswalks)
 
-    def get_data_map(self, distance: float = 0.1) -> DataMap:
+    def get_data_map(self, distance: float = 0.1) -> DataWorld:
         """
         Retrieves a list of data blocks based on map waypoints and landmarks.
 

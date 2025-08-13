@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
-from carla_data_classes.static.DataMap import DataMap
+from carla_data_classes.static.DataWorld import DataWorld
 from .base_layer import register, BaseLayer
 from .utils import color_for_road  # pick up the same road colors as lanes :contentReference[oaicite:3]{index=3}
 
@@ -14,7 +14,7 @@ class MidpointLayer(BaseLayer):
     df_key = "midpoints"
 
     @classmethod
-    def build_df(cls, data_map: DataMap, tick) -> pd.DataFrame:
+    def build_df(cls, data_map: DataWorld, tick) -> pd.DataFrame:
         rows = []
         for r in data_map.get_all_roads():
             for ln in r.lanes:

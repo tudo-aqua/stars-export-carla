@@ -2,7 +2,7 @@
 import pandas as pd
 import plotly.graph_objects as go
 
-from carla_data_classes.static.DataMap import DataMap
+from carla_data_classes.static.DataWorld import DataWorld
 from .base_layer import register, BaseLayer
 from .utils import color_for_road
 
@@ -14,7 +14,7 @@ class ContactAreaLayer(BaseLayer):
 
     # -------- build DataFrame -------------------------------------------------
     @classmethod
-    def build_df(cls, data_map: DataMap, tick):
+    def build_df(cls, data_map: DataWorld, tick):
         rows = []
         for ln in (l for b in data_map.junctions for r in b.roads for l in r.lanes):
             for c in ln.contact_areas or []:

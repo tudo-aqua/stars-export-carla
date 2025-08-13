@@ -4,7 +4,7 @@ from __future__ import annotations
 import pandas as pd
 import plotly.graph_objects as go
 
-from carla_data_classes.static.DataMap import DataMap
+from carla_data_classes.static.DataWorld import DataWorld
 from .base_layer import register, BaseLayer
 
 
@@ -41,7 +41,7 @@ class TrafficLightLayer(BaseLayer):
 
     # -------------------------------------------------------------- build df
     @classmethod
-    def build_df(cls, data_map: DataMap, tick):
+    def build_df(cls, data_map: DataWorld, tick):
         """
         Aggregate by open_drive_id so one marker represents one post, and
         collect all lanes that reference it for hover.
