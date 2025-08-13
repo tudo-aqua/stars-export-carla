@@ -2,11 +2,11 @@ from typing import TYPE_CHECKING, List, Optional
 
 from carla import Landmark, TrafficLight
 
-from carla_data_classes.static.DataBlock import DataBlock
 from carla_data_classes.static import DataStaticTrafficLight, DataLandmark, DataLocation
+from carla_data_classes.static.DataBlock import DataBlock
 
 if TYPE_CHECKING:
-    from .rasterizer import MapRasterizer
+    pass
 
 
 class _TrafficLightUtils:
@@ -14,7 +14,7 @@ class _TrafficLightUtils:
         self.ctx = ctx
 
     def get_all_traffic_lights(self) -> List[DataStaticTrafficLight]:
-        roads = self.ctx.flatten(list(map(lambda b: b.roads, self.ctx.blocks)))
+        roads = self.ctx.data_world.get_all_roads()
         lanes = self.ctx.flatten(list(map(lambda r: r.lanes, roads)))
         return self.ctx.flatten(list(map(lambda l: l.traffic_lights, lanes)))
 
