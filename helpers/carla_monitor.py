@@ -20,11 +20,10 @@ from carla_data_classes.dynamic import (
 from carla_data_classes.enums.DataWeatherParametersType import DataWeatherParametersType
 from data_av_static import MapRasterizer
 from helpers.carla_api_helper import CarlaAPIHelper
-from helpers.json_helper import JSONHelper
-from helpers.kinematics import compute_vel_acc_for_ticks
-
 # NEW: log-driven collisions + ID mapping
 from helpers.collisions import RecorderIndex, IdMapper, collisions_for_time_window
+from helpers.json_helper import JSONHelper
+from helpers.kinematics import compute_vel_acc_for_ticks
 
 
 class CarlaMonitor:
@@ -233,11 +232,7 @@ class CarlaMonitor:
 
                 # Stop exactly when the SIM clock reaches the replay duration (with a small epsilon)
                 eps = 0.5 * dt_nominal
-                if (sim_t + eps) >= target_end_sim_time:
-                    break
-
-                # As a secondary guard, stop if we’ve hit the advertised frames (if present)
-                if replay_frames and (tick_count + 1) >= replay_frames:
+                if (current_time + eps) >= replay_duration:
                     break
 
                 # Advance to next frame
