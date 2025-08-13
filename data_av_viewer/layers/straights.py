@@ -45,7 +45,7 @@ def _safe_linestring_from_coords(
     if fallback_xy is not None:
         x, y = float(fallback_xy[0]), float(fallback_xy[1])
         return LineString([(x, y), (x + eps, y + eps)])
-    return LineString()  # empty is allowed; caller may skip
+    return LineString()
 
 
 @register("straights")
@@ -67,21 +67,35 @@ class StraightLayer(BaseLayer):
             for ln in straight.lanes:
                 if not ln.lane_midpoints:
                     continue
+
+                # downsample midpoints
                 pts = ln.lane_midpoints[::every_n]
-                # (optional) make sure we keep the very last point too
                 if pts and pts[-1] is not ln.lane_midpoints[-1]:
                     pts = pts + [ln.lane_midpoints[-1]]
 
                 poly = np.column_stack([[mp.location.x for mp in pts],
                                         [mp.location.y for mp in pts]])
                 distance_to_start = np.array([mp.distance_to_start for mp in pts], dtype=float)
-                rows.append(dict(poly=poly,
-                                 distance_to_start=distance_to_start,
-                                 lane_type=ln.lane_type.name,
-                                 road_id=ln.road_id,
-                                 lane_id=ln.lane_id,
-                                 width=ln.lane_width,
-                                 length=ln.lane_length))
+
+                # ---- NEW: build intersections list (HTML + count), using DataLane.intersecting_lanes
+                pairs = sorted({(ili.road_id, ili.lane_id) for ili in (ln.intersecting_lanes or [])})
+                if pairs:
+                    lines = [f"&nbsp;&nbsp;&nbsp;&nbsp;(Road {rd}, Lane {lid})" for rd, lid in pairs]
+                    intersections_html = "<br>" + "<br>".join(lines)
+                else:
+                    intersections_html = "<br>&nbsp;&nbsp;&nbsp;&nbsp;—"
+
+                rows.append(dict(
+                    poly=poly,
+                    distance_to_start=distance_to_start,
+                    lane_type=ln.lane_type.name,
+                    road_id=ln.road_id,
+                    lane_id=ln.lane_id,
+                    width=ln.lane_width,
+                    length=ln.lane_length,
+                    intersection_lanes_html=intersections_html,
+                    intersection_lanes_count=len(pairs),
+                ))
         return pd.DataFrame(rows)
 
     def traces(self):
@@ -97,12 +111,10 @@ class StraightLayer(BaseLayer):
             opacity = max(0.15, 1 - abs(row.lane_id) / max_abs_lane)
             fill_color = rgba(base_color, opacity)
 
-            # row.poly -> robust centerline
             poly = np.asarray(row.poly)  # (N,2)
             fallback = (float(poly[0, 0]), float(poly[0, 1])) if poly.size >= 2 else None
             line = _safe_linestring_from_coords((tuple(p) for p in poly), fallback_xy=fallback)
 
-            # Skip if we still have nothing useful
             if line.is_empty or line.length == 0.0:
                 continue
 
@@ -126,8 +138,9 @@ class StraightLayer(BaseLayer):
                             f"Lane: {row.lane_id}<br>"
                             "───────────────<br>"
                             f"Type: {row.lane_type}<br>"
-                            f"Width: {width:.2f} m<br>"
+                            f"Width: {row.width:.2f} m<br>"
                             f"Length: {row.length:.2f} m<br>"
+                            f"Intersections:{row.intersection_lanes_html}<br>"
                         ),
                         line=dict(width=1.5, color=base_color),
                         hoverinfo="text",
@@ -135,7 +148,8 @@ class StraightLayer(BaseLayer):
                 )
                 continue
 
-            # Corridor can be Polygon or MultiPolygon
+            # buffer to corridor and draw
+            corridor = line.buffer(max(float(row.width) / 2.0, 1e-3), cap_style=2, join_style=2)
             polys: List[Polygon] = []
             if isinstance(corridor, Polygon):
                 polys = [corridor]
@@ -160,7 +174,7 @@ class StraightLayer(BaseLayer):
                             f"Lane: {row.lane_id}<br>"
                             "───────────────<br>"
                             f"Type: {row.lane_type}<br>"
-                            f"Width: {width:.2f} m<br>"
+                            f"Width: {row.width:.2f} m<br>"
                             f"Length: {row.length:.2f} m<br>"
                         ),
                         line=dict(width=1.5, color=base_color),
