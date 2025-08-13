@@ -227,10 +227,10 @@ class _BlockBuilder:
                 lane_a.contact_areas.append(area)
                 lane_b.contact_areas.append(area)
                 lane_a.intersecting_lanes.append(
-                    DataContactLaneInfo(lane_b.lane_id, lane_b.road_id)
+                    DataContactLaneInfo(road_id=lane_b.road_id, lane_id=lane_b.lane_id)
                 )
                 lane_b.intersecting_lanes.append(
-                    DataContactLaneInfo(lane_a.lane_id, lane_a.road_id)
+                    DataContactLaneInfo(road_id=lane_a.road_id, lane_id=lane_a.lane_id)
                 )
 
                 processed[key] = area
