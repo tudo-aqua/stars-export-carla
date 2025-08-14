@@ -6,6 +6,7 @@ from carla import Junction, Landmark, Waypoint, LaneType
 from shapely import Point, LineString, STRtree
 from shapely.ops import nearest_points
 
+from carla_data_classes.enums.DataLandmarkType import DataLandmarkType
 from carla_data_classes.static import DataRoad, DataLandmark, DataLane, DataLocation, DataContactArea, \
     DataContactLaneInfo
 from carla_data_classes.static.DataBlock import DataBlock
@@ -238,38 +239,82 @@ class _BlockBuilder:
 
         return roads_list
 
-    def add_landmarks_to_lanes(self, data_blocks: List[DataBlock]) -> None:
-        """
-        Adds landmarks to appropriate lanes in non-junction roads or maps them to
-        specific approach/exit lanes in junction roads. This method processes a list
-        of landmarks obtained from the map, identifies the corresponding road and
-        lanes in the given data blocks, and attaches the landmarks to compatible lanes.
+    def _is_speed_limit_landmark(self, landmark) -> bool:
+        """True for (end of) maximum/minimum speed signs; never map these to predecessors."""
+        t = getattr(landmark, "type", None)
+        # Prefer enum equality when available
+        try:
+            if t in (
+                    DataLandmarkType.MaximumSpeed,
+                    getattr(DataLandmarkType, "EndMaximumSpeed", None),
+                    getattr(DataLandmarkType, "MinimumSpeed", None),
+                    getattr(DataLandmarkType, "EndMinimumSpeed", None),
+            ):
+                return True
+        except Exception:
+            pass
+        # Fallbacks: OpenDRIVE numeric codes + name contains “speed”
+        code = getattr(t, "value", None)
+        if isinstance(code, (int, float)) and int(code) in (274, 278, 275,
+                                                            279):  # 274 max, 278 end max, 275 min, 279 end min
+            return True
+        name = (str(t) if t is not None else "").lower()
+        if "maximumspeed" in name or "endspeed" in name or "speedlimit" in name:
+            # avoid false positives like "speedbump"
+            return not ("bump" in name or "hump" in name)
+        return False
 
-        Parameters:
-            data_blocks (List[DataBlock]): A list of DataBlock objects containing road
-            and lane information.
-        """
+    def _is_control_landmark(self, landmark) -> bool:
+        """True for TL/Stop/Yield/etc.—these get mapped to predecessor approach lanes."""
+        t = getattr(landmark, "type", None)
+        name = (str(t) if t is not None else "").lower()
+        # Common control types; extend as needed for your enum set
+        keywords = ("trafficlight", "traffic_light", "stop", "allwaystop", "yield", "giveway", "priority")
+        return any(k in name for k in keywords)
+
+    def add_landmarks_to_lanes(self, data_blocks: List[DataBlock]) -> None:
         landmarks: List[Landmark] = self.ctx.map.get_all_landmarks()
 
         for landmark in landmarks:
             print(f">> [Data-AV Transformer] Converting Landmark {landmark.id}")
-            data_landmark = DataLandmark.from_landmark(landmark)  # builds DataLandmark from CARLA Landmark
             road = self.get_specific_road_from_blocks(data_blocks, landmark.road_id)
             if not road:
                 continue
 
-            # --- non-junction roads: unchanged ------------------------------------
+            # -- Non-junction roads: attach directly to valid lanes (unchanged) ----
             if not road.is_junction:
                 for lane in road.lanes:
                     if self.is_lane_valid_for_landmark(landmark, lane):
+                        dl = DataLandmark.from_landmark(landmark)  # clone per lane
                         if lane.lane_id > 0:
-                            data_landmark.s = lane.lane_length - landmark.s
-                        lane.landmarks.append(data_landmark)
+                            dl.s = lane.lane_length - landmark.s  # your positive-lane fix
+                        lane.landmarks.append(dl)
                 continue
 
-            # --- junction roads: map to approaches (predecessors) / exits (successors)
-            junction_lanes = [lane for lane in road.lanes if self.is_lane_valid_for_landmark(landmark, lane)]
+            # -- Junction roads: split by type -------------------------------------
+            if self._is_speed_limit_landmark(landmark):
+                # SPEED LIMITS: keep on the specified (junction) road’s valid lanes
+                for lane in road.lanes:
+                    if self.is_lane_valid_for_landmark(landmark, lane):
+                        dl = DataLandmark.from_landmark(landmark)
+                        if lane.lane_id > 0:
+                            dl.s = lane.lane_length - landmark.s
+                        lane.landmarks.append(dl)
+                continue  # IMPORTANT: do not fall through to predecessor mapping
 
+            if not self._is_control_landmark(landmark):
+                # Other landmark types on junction roads: do NOT attach to predecessors
+                # (optional) keep them on junction lanes if valid:
+                for lane in road.lanes:
+                    if self.is_lane_valid_for_landmark(landmark, lane):
+                        dl = DataLandmark.from_landmark(landmark)
+                        if lane.lane_id > 0:
+                            dl.s = lane.lane_length - landmark.s
+                        lane.landmarks.append(dl)
+                continue
+
+            # CONTROL LANDMARKS: map to approach lanes outside the junction
+            junction_lanes = [lane for lane in road.lanes if self.is_lane_valid_for_landmark(landmark, lane)]
             seen = set()
 
             def attach(road_id: int, lane_id: int):
@@ -282,10 +327,13 @@ class _BlockBuilder:
                     return  # only attach to approach/exit lanes outside the junction
                 target = next((x for x in src_road.lanes if x.lane_id == lane_id), None)
                 if target is not None:
-                    target.landmarks.append(data_landmark)
+                    dl = DataLandmark.from_landmark(landmark)
+                    if target.lane_id > 0:
+                        dl.s = target.lane_length - landmark.s
+                    target.landmarks.append(dl)
 
-            for junction_lane in junction_lanes:
-                for pred in junction_lane.predecessor_lanes:
+            for jl in junction_lanes:
+                for pred in jl.predecessor_lanes:
                     attach(pred.road_id, pred.lane_id)
 
     def _collect_crosswalks(self) -> List[DataCrosswalk]:
