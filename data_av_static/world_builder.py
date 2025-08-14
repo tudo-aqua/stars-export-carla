@@ -263,7 +263,7 @@ class _BlockBuilder:
                 for lane in road.lanes:
                     if self.is_lane_valid_for_landmark(landmark, lane):
                         if lane.lane_id > 0:
-                            data_landmark.s = lane.lane_length - data_landmark.s
+                            data_landmark.s = lane.lane_length - landmark.s
                         lane.landmarks.append(data_landmark)
                 continue
 

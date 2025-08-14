@@ -57,11 +57,12 @@ class _SpeedLimitUtils:
 
     def find_upstream_speed_mps(self, lane: "DataLane", lane_index, visited=None) -> Optional[float]:
         """
-        Walk predecessor graph to find a speed to inherit.
-        Only propagates over connected straights (no junction lanes).
-        Returns m/s or None.
+        Find a speed to inherit from upstream *straight* lanes only.
+        - Do NOT consider the current lane’s own speed limits.
+        - Never traverse through junction lanes.
+        Returns m/s or None (caller will use default).
         """
-        # Do not propagate into or across junction lanes
+        # If the target lane itself is in a junction, we don't inherit through it
         if self._is_junction_lane(lane):
             return None
 
@@ -69,7 +70,12 @@ class _SpeedLimitUtils:
         if visited is None:
             visited = set()
 
-        q = deque([(lane.road_id, lane.lane_id)])
+        q = deque()
+
+        # Seed search with direct predecessors (skip the current lane)
+        for pre in (getattr(lane, "predecessor_lanes", []) or []):
+            q.append((pre.road_id, pre.lane_id))
+
         while q:
             key = q.popleft()
             if key in visited:
@@ -92,14 +98,10 @@ class _SpeedLimitUtils:
             # Otherwise, keep walking strictly through straight predecessors
             for pre in (getattr(ln, "predecessor_lanes", []) or []):
                 pre_key = (pre.road_id, pre.lane_id)
-                pre_ln = lane_index.get(pre_key)
-                if pre_ln is None:
-                    continue
-                if self._is_junction_lane(pre_ln):
-                    # do not cross into junctions
-                    continue
-                q.append(pre_key)
+                if pre_key not in visited:
+                    q.append(pre_key)
 
+        # No upstream limit found → caller should use default
         return None
 
     def compute_speed_limits(self, blocks: List[DataBlock]) -> None:
