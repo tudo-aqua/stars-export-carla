@@ -1,29 +1,12 @@
-from collections import defaultdict
-from typing import Dict, List, Optional, Tuple
 import bisect
 import re
+from collections import defaultdict
+from typing import Dict, List, Optional, Tuple, Set
 
 import carla
-from carla_data_classes.dynamic.DataCollision import DataCollision
-from carla_data_classes.enums.DataCollisionKind import DataCollisionKind
 
-
+# Recorder "world" sentinel
 WORLD_REC_ID = 0xFFFFFFFF  # 4294967295
-
-
-def _kind_from_type_id(type_id: Optional[str]) -> DataCollisionKind:
-    if not type_id:
-        return DataCollisionKind.OTHER
-    t = type_id.lower()
-    if t.startswith("vehicle."):
-        return DataCollisionKind.VEHICLE
-    if t.startswith("walker."):
-        return DataCollisionKind.WALKER
-    if t.startswith("traffic."):
-        return DataCollisionKind.TRAFFIC
-    if t == "world":
-        return DataCollisionKind.STATIC
-    return DataCollisionKind.OTHER
 
 
 class RecorderIndex:
@@ -34,6 +17,7 @@ class RecorderIndex:
       - creates_by_recid[rec_id] = (type_id, create_loc, role_name, created_frame)
       - collisions_by_frame[frame] = [(rec_id_a, rec_id_b), ...]
     """
+
     def __init__(self):
         self.frames: int = 0
         self.duration: float = 0.0
@@ -190,11 +174,14 @@ def collisions_for_time_window(
     world: carla.World,
     sim_time_rel: float,
     half_window: float
-) -> Dict[int, List[DataCollision]]:
+) -> Dict[int, List[int]]:
     """
-    Return {runtime_actor_id: [DataCollision,...]} for ALL recorder frames whose
+    Return {runtime_actor_id: [other_runtime_actor_ids]} for ALL recorder frames whose
     timestamps fall within [sim_time_rel - half_window, sim_time_rel + half_window].
-    This is robust to tiny drift between recorded times and your fixed 0.05s ticks.
+
+    - WORLD collisions (4294967295) are ignored here because they have no runtime actor id.
+      If you want to surface them, handle separately in the caller (e.g., add -1).
+    - Duplicate pairs inside the window are de-duplicated.
     """
     ft = rec_idx.frame_times
     if not ft:
@@ -203,10 +190,10 @@ def collisions_for_time_window(
     lo = sim_time_rel - half_window
     hi = sim_time_rel + half_window
 
-    i0 = max(0, bisect.bisect_left(ft, lo) - 1)   # expand one left as safety
+    i0 = max(0, bisect.bisect_left(ft, lo) - 1)  # expand one left as safety
     i1 = min(len(ft), bisect.bisect_right(ft, hi) + 1)
 
-    out: Dict[int, List[DataCollision]] = defaultdict(list)
+    out_sets: Dict[int, Set[int]] = defaultdict(set)
 
     for k in range(i0, i1):
         t = ft[k]
@@ -218,43 +205,18 @@ def collisions_for_time_window(
             continue
 
         for rec_a, rec_b in pairs:
-            # WORLD side
+            # Skip WORLD collisions here (no runtime id to attach)
             if rec_a == WORLD_REC_ID or rec_b == WORLD_REC_ID:
-                other = rec_b if rec_a == WORLD_REC_ID else rec_a
-                rec_other = rec_idx.creates_by_recid.get(other)
-                run_other = mapper.get_runtime_id(world, other) if rec_other else None
-                t_other = rec_other[0] if rec_other else "unknown"
-                dc = DataCollision(
-                    actor1_kind=_kind_from_type_id(t_other),
-                    actor2_kind=DataCollisionKind.STATIC,
-                    actor1_id=(run_other if run_other is not None else -1),
-                    actor1_type_id=t_other,
-                    actor2_id=-1,
-                    actor2_type_id="WORLD",
-                )
-                if run_other is not None:
-                    out[run_other].append(dc)
                 continue
 
-            # actor ↔ actor
-            recA = rec_idx.creates_by_recid.get(rec_a)
-            recB = rec_idx.creates_by_recid.get(rec_b)
-            run_a = mapper.get_runtime_id(world, rec_a) if recA else None
-            run_b = mapper.get_runtime_id(world, rec_b) if recB else None
-            type_a = recA[0] if recA else "unknown"
-            type_b = recB[0] if recB else "unknown"
+            run_a = mapper.get_runtime_id(world, rec_a) if rec_idx.creates_by_recid.get(rec_a) else None
+            run_b = mapper.get_runtime_id(world, rec_b) if rec_idx.creates_by_recid.get(rec_b) else None
 
-            dc = DataCollision(
-                actor1_kind=_kind_from_type_id(type_a),
-                actor2_kind=_kind_from_type_id(type_b),
-                actor1_id=(run_a if run_a is not None else -1),
-                actor1_type_id=type_a,
-                actor2_id=(run_b if run_b is not None else -1),
-                actor2_type_id=type_b,
-            )
-            if run_a is not None:
-                out[run_a].append(dc)
-            if run_b is not None:
-                out[run_b].append(dc)
+            if run_a is None or run_b is None or run_a == run_b:
+                continue
 
-    return out
+            out_sets[run_a].add(run_b)
+            out_sets[run_b].add(run_a)
+
+    # Convert to sorted lists for stable output
+    return {aid: sorted(list(others)) for aid, others in out_sets.items()}

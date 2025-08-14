@@ -182,8 +182,7 @@ class CarlaMonitor:
                         continue
 
                     # Attach collisions for this runtime actor id (if any for this frame)
-                    if per_actor_collisions.get(data_actor.id):
-                        data_actor.collisions = list(per_actor_collisions[data_actor.id])
+                    data_actor.collisions = per_actor_collisions.get(data_actor.id, [])
 
                     data_actors.append(data_actor)
 

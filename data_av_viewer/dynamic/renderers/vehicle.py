@@ -110,7 +110,7 @@ class VehicleRenderer(BaseRenderer):
         if actor.collisions:
             lines.append("Collisions:")
             for collision in actor.collisions:
-                lines.append(f"&nbsp;&nbsp;ID: {collision.actor2_id}: {collision.actor2_kind.name!r}")
+                lines.append(f"&nbsp;&nbsp;ID: {collision}")
 
         lines.append(f"Velocity: {actor_speed_kmh(actor):.2f} km/h")
         lines.append(f"Acceleration: {actor_accel_mps2(actor):.2f} m/s²")
