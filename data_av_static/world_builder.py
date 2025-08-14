@@ -82,6 +82,7 @@ class _BlockBuilder:
         self.ctx.blocks = data_blocks
         self.add_landmarks_to_lanes(data_blocks)
         self.ctx.update_static_traffic_lights_from_landmarks(data_blocks)
+        self.ctx.compute_speed_limits(data_blocks)
         self.ctx.close_speed_limit_gaps(data_blocks, default_speed_kmh=30.0)
 
         crosswalks = self._collect_crosswalks()
@@ -261,6 +262,8 @@ class _BlockBuilder:
             if not road.is_junction:
                 for lane in road.lanes:
                     if self.is_lane_valid_for_landmark(landmark, lane):
+                        if lane.lane_id > 0:
+                            data_landmark.s = lane.lane_length - data_landmark.s
                         lane.landmarks.append(data_landmark)
                 continue
 

@@ -1,11 +1,10 @@
 from typing import List, Tuple, TYPE_CHECKING, Iterable, Optional
 
 from carla import Waypoint, Actor, Location, Landmark
-from shapely import LineString, Point
+from shapely import LineString
 
 from carla_data_classes.enums.DataLaneType import DataLaneType
-from carla_data_classes.static import DataLaneMidpoint, DataLocation, DataLane, DataContactLaneInfo, DataRotation, \
-    DataSpeedLimit
+from carla_data_classes.static import DataLaneMidpoint, DataLocation, DataLane, DataContactLaneInfo, DataRotation
 
 if TYPE_CHECKING:
     pass
@@ -96,13 +95,13 @@ class _LaneUtils:
         fallback_xy = (waypoint.transform.location.x, waypoint.transform.location.y)
         geom = self._safe_linestring_from_coords(coords, fallback_xy=fallback_xy)
         data_lane._geom = geom
-        data_lane.speed_limits = self._compute_speed_limits_for_lane(
-            geom=geom,
-            lane_id=waypoint.lane_id,
-            road_id=waypoint.road_id,
-            landmarks=landmarks,
-            lane_length=lane_length
-        )
+        # data_lane.speed_limits = self._compute_speed_limits_for_lane(
+        #     geom=geom,
+        #     lane_id=waypoint.lane_id,
+        #     road_id=waypoint.road_id,
+        #     landmarks=landmarks,
+        #     lane_length=lane_length
+        # )
         return data_lane
 
     def get_length_of_lane(self, lane: Waypoint, precision: float = 2.0) -> float:
@@ -240,74 +239,6 @@ class _LaneUtils:
         """
         first_waypoint = self.get_first_waypoint_of_lane(lane, precision)
         return first_waypoint.previous(float(precision))
-
-    def _compute_speed_limits_for_lane(self, geom: LineString, lane_id: int, road_id: int,
-                                       landmarks: List[Landmark], lane_length: float) -> List[DataSpeedLimit]:
-        """
-        Build [start_s, end_s) speed-limit segments for this lane.
-        """
-        # OpenDRIVE/German codes commonly used by CARLA maps
-        begin_codes = {"274", "274.1", "275"}  # max speed, zone begin, min speed begin
-        end_codes = {"278", "274.2", "279"}  # end of max speed, zone end, min speed end
-
-        # Filter landmarks affecting this road and lane
-        def affects_lane(landmark):
-            if landmark.road_id != road_id:
-                return False
-            for a, b in landmark.get_lane_validities():
-                if a <= lane_id <= b:
-                    return True
-            return False
-
-        speed_events = []
-        for lm in landmarks:
-            t = str(lm.type)
-            if t not in begin_codes and t not in end_codes:
-                continue
-            if not affects_lane(lm):
-                continue
-
-            # project landmark XY onto lane center-line to get s
-            loc = lm.transform.location
-            s = geom.project(Point(loc.x, loc.y))
-            s = max(0.0, min(float(s), float(lane_length)))
-
-            if t in begin_codes:
-                # lm.value is km/h in CARLA’s Landmark; convert to m/s
-                val_mps = self._kmh_to_mps(float(lm.value)) if getattr(lm, "value", None) is not None else None
-                speed_events.append(("begin", s, val_mps))
-            else:
-                speed_events.append(("end", s, None))
-
-        # No signs → leave empty
-        if not speed_events:
-            return []
-
-        # sort by distance along lane
-        speed_events.sort(key=lambda e: (e[1], 0 if e[0] == "end" else 1))
-        segments = []
-        curr_v = None
-        seg_start = 0.0
-
-        for kind, s, v in speed_events:
-            s = float(s)
-            if kind == "begin":
-                # close a previous segment if any
-                if curr_v is not None and s > seg_start:
-                    segments.append(DataSpeedLimit(from_distance=seg_start, to_distance=s, speed_limit=curr_v))
-                curr_v = v
-                seg_start = s
-            else:  # "end"
-                if curr_v is not None and s > seg_start:
-                    segments.append(DataSpeedLimit(from_distance=seg_start, to_distance=s, speed_limit=curr_v))
-                curr_v = None
-                seg_start = s
-
-        # tail segment to the lane end if a limit is still active
-        if curr_v is not None and lane_length > seg_start:
-            segments.append(DataSpeedLimit(from_distance=seg_start, to_distance=lane_length, speed_limit=curr_v))
-
-        return segments
 
     def _safe_linestring_from_coords(self, coords: Iterable[Tuple[float, float]],
                                      fallback_xy: Optional[Tuple[float, float]] = None,
