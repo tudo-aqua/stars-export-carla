@@ -41,7 +41,7 @@ class SpeedLimitsLayer(BaseLayer):
         ys           : list[float]
     """
     slider_key = "line_width"  # makes it appear under "Marker sizes" in the GUI
-    default_size = 6
+    default_size = 2
     df_key = "speed_limits"
 
     # ---------- build the per-layer dataframe from DataBlocks ----------
