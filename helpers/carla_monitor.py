@@ -158,7 +158,7 @@ class CarlaMonitor:
 
                 elapsed_time = (datetime.now() - start_wall).total_seconds()  # wall clock (print only)
                 print(
-                    f">> [CARLA] Simulation tick: {current_time:05f} of {tick_count:05f}; Elapsed time: {elapsed_time:3f}s")
+                    f">> [CARLA] Simulation tick {tick_count} at {current_time:05f}s of {replay_duration}s; Elapsed time: {elapsed_time:3f}s")
 
                 # Collisions for this tick: take all recorder frames within ± half_window around current_time
                 per_actor_collisions = collisions_for_time_window(
