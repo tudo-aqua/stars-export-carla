@@ -55,7 +55,7 @@ DEFAULT_LANDMARK_COLOR = "#888888"
 class LandmarkLayer(BaseLayer):
     slider_key = "landmarks"
     df_key = "landmarks"
-    default_size = 6
+    default_size = 13
 
     # ---------------------------------------------------------------- build df
     @classmethod
@@ -69,6 +69,7 @@ class LandmarkLayer(BaseLayer):
                         rec = {
                             "x": lm.location.x,
                             "y": lm.location.y,
+                            "s": lm.s,
                             "id": lm.id,
                             "type": lm.type.name,
                             "orientation": lm.orientation.name,
@@ -110,6 +111,7 @@ class LandmarkLayer(BaseLayer):
                 f"Text: {row.text}<br>"
                 f"Value: {row.value}<br>"
                 f"Sub-type: {row.sub_type}<br>"
+                f"S: {row.s:.2f} m<br>"
                 f"Lanes: {row.lane_pairs_html}<br>"
                 f"X: {row.x:.2f} Y: {row.y:.2f}<extra></extra>"
             )
