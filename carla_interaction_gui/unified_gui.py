@@ -76,6 +76,9 @@ class UnifiedCarlaGUI(tk.Tk):
         self._active_worker = None
         self._carla_worker = None
 
+        self._manual_workers: list[ManualControlWorker] = []
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
         notebook = ttk.Notebook(self)
         notebook.pack(fill="both", expand=True)
         self._tab_server(notebook)
@@ -202,6 +205,25 @@ class UnifiedCarlaGUI(tk.Tk):
         self.start_btn = tk.Button(frame, text="Start manual driving",
                                    width=25, command=self._start_manual)
         self.start_btn.pack(pady=8)
+
+        row2 = tk.Frame(frame)
+        row2.pack(fill="x", pady=4)
+
+        tk.Label(row2, text="Add controlled actor:", width=26, anchor="w").pack(side="left")
+
+        tk.Button(row2, text="Cyclist",
+                  command=lambda: self._spawn_manual_extra(filter_str="vehicle.bh.crossbike")).pack(side="left", padx=2)
+
+        tk.Button(row2, text="Walker",
+                  command=lambda: self._spawn_manual_extra(filter_str="walker.pedestrian.*")).pack(side="left", padx=2)
+
+        tk.Button(row2, text="Small car",
+                  command=lambda: self._spawn_manual_extra(filter_str="vehicle.mini.cooper_s_2021")).pack(side="left",
+                                                                                                          padx=2)
+
+        tk.Button(row2, text="Truck",
+                  command=lambda: self._spawn_manual_extra(filter_str="vehicle.carlamotors.carlacola")).pack(
+            side="left", padx=2)
 
         self.move_btn = tk.Button(frame, text="Move 'manual_recording'",
                                   command=self._move_latest, state="active")
@@ -402,8 +424,7 @@ class UnifiedCarlaGUI(tk.Tk):
 
     def _start_manual(self):
         """
-        Starts the manual recording process by validating input parameters, collecting configuration data,
-        and attaching the ManualControlWorker for the task.
+        Start the primary manual driving (exclusive) as Lincoln MKZ 2020.
         """
         if not self._validate_paths([
             ("CARLA executable", self.carla_executable_variable, "file"),
@@ -411,11 +432,41 @@ class UnifiedCarlaGUI(tk.Tk):
         ]):
             return
         self._clear_log()
-        self._attach_worker(
-            ManualControlWorker(self._collect_cfg(), self._log),
-            stop_button=self.stop_btn_manual,
-            enable_move=True
+
+        w = ManualControlWorker(
+            self._collect_cfg(),
+            self._log,
+            vehicle_filter="vehicle.lincoln.mkz_2020",  # requested default
+            role_name=None,  # manual_control.py default -> "hero"
+            restart_before=True,
+            kill_server_after=True,
+            exclusive=True,
         )
+        self._manual_workers.append(w)
+        self._attach_worker(w, stop_button=self.stop_btn_manual, enable_move=True)
+
+    def _spawn_manual_extra(self, *, filter_str: str):
+        """
+        Launch another manual_control.py instance with --rolename=manual_control and
+        the provided --filter, without rebooting/killing the CARLA server.
+        """
+        if not self._validate_paths([
+            ("CARLA executable", self.carla_executable_variable, "file"),
+        ]):
+            return
+
+        w = ManualControlWorker(
+            self._collect_cfg(),
+            self._log,
+            vehicle_filter=filter_str,
+            role_name="manual_control",
+            restart_before=False,  # do NOT reboot the server
+            kill_server_after=False,  # do NOT kill the server when this instance ends
+            exclusive=False,
+        )
+        self._manual_workers.append(w)
+        # non-exclusive: do not pass a stop_button tied to exclusivity
+        self._attach_worker(w, stop_button=None, enable_move=False)
 
     def _move_latest(self):
         """
@@ -493,9 +544,19 @@ class UnifiedCarlaGUI(tk.Tk):
 
     def _stop_worker(self):
         """
-        Stops the active worker and the CARLA worker, if they are running, and resets the relevant
-        GUI components. Also terminates the CARLA server processes.
+        Stops any active exclusive worker, stops all manual_control workers,
+        and stops the CARLA server worker as before.
         """
+        # stop ALL manual_control workers
+        for w in list(self._manual_workers):
+            try:
+                if w.is_alive():
+                    w.cancel()
+            except Exception:
+                pass
+        self._manual_workers.clear()
+
+        # existing exclusive worker stop (kept)
         w = getattr(self, "_active_worker", None)
         if w:
             try:
@@ -503,18 +564,27 @@ class UnifiedCarlaGUI(tk.Tk):
             except Exception:
                 pass
             try:
-                # wait a bit so the thread can actually exit and not leave the flag set
                 w.join(timeout=5.0)
             except Exception:
                 pass
-            # Regardless, clear the flag so we don’t block subsequent starts
             self._active_worker = None
-            # Disable the common stop button if you have one
             try:
-                self.stop_btn.config(state="disabled")
+                if self._current_stop_button is not None:
+                    self._current_stop_button.config(state="disabled")
+                    self._current_stop_button = None
             except Exception:
                 pass
 
+            # Defensive: also disable any per-tab stop buttons if they exist
+            for btn_name in ("stop_btn_manual", "stop_btn_server", "stop_btn_transform", "stop_btn_video"):
+                btn = getattr(self, btn_name, None)
+                if isinstance(btn, tk.Button):
+                    try:
+                        btn.config(state="disabled")
+                    except Exception:
+                        pass
+
+        # stop CARLA server worker if running
         if getattr(self, "_carla_worker", None) and self._carla_worker.is_alive():
             try:
                 self._carla_worker.cancel()
@@ -573,6 +643,15 @@ class UnifiedCarlaGUI(tk.Tk):
         except Exception:
             # Ignore transient parsing glitches while editing
             pass
+
+    def _on_close(self):
+        try:
+            self._stop_worker()
+        finally:
+            try:
+                self.destroy()
+            except Exception:
+                pass
 
     def _collect_cfg(self) -> Config:
         """

@@ -1,3 +1,5 @@
+# ManualControlWorker.py  (full diff-style patch)
+
 from __future__ import annotations
 
 import os
@@ -15,18 +17,43 @@ from carla_interaction_gui.workers.ThreadWorker import ThreadWorker
 class ManualControlWorker(ThreadWorker):
     """
     Represents a worker responsible for manually driving in the CARLA simulator.
+    Can be used to launch multiple manual_control.py instances concurrently.
     """
 
-    def __init__(self, cfg: Config, log_cb):
+    def __init__(
+        self,
+        cfg: Config,
+        log_cb,
+        *,
+        vehicle_filter: str | None = None,
+        role_name: str | None = None,
+        restart_before: bool = True,
+        kill_server_after: bool = True,
+        exclusive: bool = False,
+    ):
         super().__init__(cfg, log_cb)
         self._proc: subprocess.Popen | None = None
 
+        # params for this instance
+        self.vehicle_filter = vehicle_filter          # e.g. "vehicle.lincoln.mkz_2020"
+        self.role_name = role_name                    # e.g. "manual_control"
+        self.restart_before = restart_before          # reboot CARLA before launching?
+        self.kill_server_after = kill_server_after    # kill CARLA server after exit?
+        self.exclusive = exclusive                    # let GUI gate this instance
+
     def run(self):
-        self.log(">> [CARLA] Rebooting CARLA")
-        restart_carla(self.cfg.carla_executable, log=self.log, render_quality_low=self.cfg.render_quality_low,
-                      render_off_screen=self.cfg.render_off_screen, map_name=self.cfg.selected_map)
-        if self.cancelled:  # stop pressed during boot wait
-            return
+        # optional reboot (only for the primary/manual one)
+        if self.restart_before:
+            self.log(">> [CARLA] Rebooting CARLA")
+            restart_carla(
+                self.cfg.carla_executable,
+                log=self.log,
+                render_quality_low=self.cfg.render_quality_low,
+                render_off_screen=self.cfg.render_off_screen,
+                map_name=self.cfg.selected_map,
+            )
+            if self.cancelled:
+                return
 
         # locate script
         mc_py = (Path(self.cfg.carla_executable).parent /
@@ -35,8 +62,15 @@ class ManualControlWorker(ThreadWorker):
             self.log(f"!! manual_control.py missing @ {mc_py}")
             return
 
+        # build command
+        cmd = [sys.executable, str(mc_py)]
+        if self.role_name:
+            cmd += ["--rolename", self.role_name]
+        if self.vehicle_filter:
+            cmd += ["--filter", self.vehicle_filter]
+
         # launch in separate process group so we can later kill the group
-        self.log(">> [CARLA] Launching manual_control.py")
+        self.log(">> [CARLA] Launching manual_control.py  " + " ".join(cmd[2:]))
         creation: dict[str, int | None] = {}
         if sys.platform.startswith("win"):
             creation["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
@@ -44,7 +78,7 @@ class ManualControlWorker(ThreadWorker):
             creation["preexec_fn"] = os.setsid
 
         self._proc = subprocess.Popen(
-            [sys.executable, str(mc_py)],
+            cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -59,19 +93,20 @@ class ManualControlWorker(ThreadWorker):
                 self.log(line.rstrip())
         finally:
             self._terminate_manual_control()
-            kill_carla()
-            self.log(">> [CARLA] manual_control.py and CARLA are now shut down")
+            if self.kill_server_after:
+                kill_carla()
+            self.log(">> [CARLA] manual_control.py is shut down")
 
     def cancel(self):
-        """Called by the GUI when the user presses *Stop*."""
+        """Called by the GUI when the user presses *Stop* or on app close."""
         super().cancel()
         self._terminate_manual_control()
-        kill_carla()
+        if self.kill_server_after:
+            kill_carla()
 
     def _terminate_manual_control(self):
         """
         Force-kill *manual_control.py* **and every child process**.
-
         Uses psutil so it works the same on Windows, macOS, and Linux.
         """
         if not self._proc:
@@ -83,22 +118,13 @@ class ManualControlWorker(ThreadWorker):
             self._proc = None
             return
 
-        # Gather full tree: parent + recursive children
         procs = [parent] + parent.children(recursive=True)
 
-        # Hard-kill everything
         for p in procs:
             try:
-                p.kill()  # unconditional SIGKILL / TerminateProcess
+                p.kill()
             except psutil.NoSuchProcess:
                 pass
 
-        # Wait a moment; if anything survives, kill again
-        gone, alive = psutil.wait_procs(procs, timeout=3)
-        for p in alive:
-            try:
-                p.kill()
-            except Exception:
-                pass
-
+        psutil.wait_procs(procs, timeout=3)
         self._proc = None
