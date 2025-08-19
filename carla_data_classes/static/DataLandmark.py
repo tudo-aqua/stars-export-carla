@@ -46,7 +46,7 @@ class DataLandmark:
         landmark_type = DataLandmarkType(int(landmark.type))
         location = DataLocation.from_location(landmark.transform.location)
         rotation = DataRotation.from_rotation(landmark.transform.rotation)
-        return DataLandmark(id=landmark.id, road_id=landmark.road_id, name=landmark.name, distance=landmark.distance,
+        return DataLandmark(id=int(landmark.id), road_id=landmark.road_id, name=landmark.name, distance=landmark.distance,
                             s=landmark.s, is_dynamic=landmark.is_dynamic, orientation=orientation,
                             z_offset=landmark.z_offset, country=landmark.country, type=landmark_type,
                             sub_type=landmark.sub_type, value=landmark.value, unit=landmark.unit,
