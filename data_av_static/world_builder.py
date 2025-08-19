@@ -267,11 +267,11 @@ class _BlockBuilder:
 
     def _is_control_landmark(self, landmark) -> bool:
         """True for TL/Stop/Yield/etc.—these get mapped to predecessor approach lanes."""
-        t = getattr(landmark, "type", None)
-        name = (str(t) if t is not None else "").lower()
+        type = getattr(landmark, "type", None)
+        name = getattr(landmark, "name", "").lower()
         # Common control types; extend as needed for your enum set
-        keywords = ("stop", "allwaystop", "yield", "giveway", "priority")
-        return _TrafficLightUtils.is_light_landmark(landmark) or any(k in name for k in keywords)
+        keywords = ("206", "stop", "allwaystop", "205", "yield", "giveway", "priority")
+        return _TrafficLightUtils.is_light_landmark(landmark) or any(k in name or type for k in keywords)
 
     def add_landmarks_to_lanes(self, data_blocks: List[DataBlock]) -> None:
         landmarks: List[Landmark] = self.ctx.map.get_all_landmarks()
