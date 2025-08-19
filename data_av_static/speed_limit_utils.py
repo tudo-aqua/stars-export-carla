@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 class _SpeedLimitUtils:
     def __init__(self, ctx: "MapRasterizer"):
         self.ctx = ctx
-        # road_id -> DataRoad (populated in close_speed_limit_gaps)
+        # road_id -> DataRoad (populated in close_speed_limit_gaps / compute indices)
         self._road_index: Dict[int, DataRoad] = {}
 
     # -------------------------------------------------------------------------
@@ -34,45 +34,51 @@ class _SpeedLimitUtils:
         return out
 
     # -------------------------------------------------------------------------
-    # Junction detection (by parent road)
+    # Junction awareness
     # -------------------------------------------------------------------------
 
-    def _is_junction_lane(self, lane: "DataLane") -> bool:
-        """
-        True iff the lane's parent road is a junction road.
-        Uses DataRoad.is_junction and (optionally) junction_id.
-        """
+    def _is_lane_in_junction(self, lane: "DataLane") -> bool:
+        """True iff the lane's parent road is a junction road."""
         r: Optional[DataRoad] = self._road_index.get(lane.road_id)
         if r is None:
             return False
         if getattr(r, "is_junction", False):
             return True
         jn = getattr(r, "junction_id", None)
-        # treat any non-None/non-zero junction_id as junction
         return jn not in (None, 0, -1)
 
+    def _blocks_propagation(self, lane: "DataLane") -> bool:
+        """
+        Returns True if propagation should STOP at this lane:
+        - lane is in a junction AND
+        - there is evidence of *joining* traffic: intersecting lanes or contact areas.
+        Otherwise (not in junction, or isolated connector inside junction), allow crossing.
+        """
+        if not self._is_lane_in_junction(lane):
+            return False
+        # If our data model has per-lane intersections/contact areas (world_builder populates these)
+        inter = getattr(lane, "intersecting_lanes", None) or []
+        contacts = getattr(lane, "contact_areas", None) or []
+        return len(inter) > 0 or len(contacts) > 0
+
     # -------------------------------------------------------------------------
-    # Upstream inheritance (blocked by junction roads)
+    # Upstream inheritance (junctions allowed only when *no* road joins)
     # -------------------------------------------------------------------------
 
     def find_upstream_speed_mps(self, lane: "DataLane", lane_index, visited=None) -> Optional[float]:
         """
-        Find a speed to inherit from upstream *straight* lanes only.
-        - Do NOT consider the current lane’s own speed limits.
-        - Never traverse through junction lanes.
+        Find a speed to inherit from upstream lanes only (for head-gap filling).
+        - Does NOT consider the current lane’s own limits.
+        - May traverse through junctions *only when no road joins into the lane path*,
+          i.e. across junction lanes that have no intersecting lanes/contact areas.
         Returns m/s or None (caller will use default).
         """
-        # If the target lane itself is in a junction, we don't inherit through it
-        if self._is_junction_lane(lane):
-            return None
-
         from collections import deque
         if visited is None:
             visited = set()
 
+        # Seed with direct predecessors (skip current lane)
         q = deque()
-
-        # Seed search with direct predecessors (skip the current lane)
         for pre in (getattr(lane, "predecessor_lanes", []) or []):
             q.append((pre.road_id, pre.lane_id))
 
@@ -83,19 +89,19 @@ class _SpeedLimitUtils:
             visited.add(key)
 
             ln = lane_index.get(key)
-            if not ln:
+            if ln is None:
                 continue
 
-            # Stop traversing when encountering a junction lane
-            if self._is_junction_lane(ln):
+            # If this lane blocks propagation (junction with joining roads), stop this branch
+            if self._blocks_propagation(ln):
                 continue
 
-            # If this straight lane has explicit limits, use its latest segment
+            # If this upstream lane has explicit limits, inherit its latest segment
             if ln.speed_limits:
                 last = max(ln.speed_limits, key=lambda s: s.to_distance)
                 return float(last.speed_limit)
 
-            # Otherwise, keep walking strictly through straight predecessors
+            # Otherwise, continue walking upstream
             for pre in (getattr(ln, "predecessor_lanes", []) or []):
                 pre_key = (pre.road_id, pre.lane_id)
                 if pre_key not in visited:
@@ -104,6 +110,10 @@ class _SpeedLimitUtils:
         # No upstream limit found → caller should use default
         return None
 
+    # -------------------------------------------------------------------------
+    # Build segments from per-lane landmarks (run BEFORE closing gaps)
+    # -------------------------------------------------------------------------
+
     def compute_speed_limits(self, blocks: List[DataBlock]) -> None:
         """
         For every lane in DataBlocks, read lane.landmarks (already filtered to that lane)
@@ -111,6 +121,8 @@ class _SpeedLimitUtils:
         Run this BEFORE close_speed_limit_gaps(...).
         """
         EPS = 1e-6
+        # index roads for later checks if needed
+        self._road_index = self.build_road_index(blocks)
 
         for block in blocks:
             for road in block.roads:
@@ -131,24 +143,18 @@ class _SpeedLimitUtils:
                         tstr = self._landmark_type_str(lm)
                         is_begin = self._is_begin_type(tstr)
                         is_end = self._is_end_type(tstr)
-
-                        # Only accept speed-related landmarks
                         if not (is_begin or is_end):
                             continue
 
-                        # Prefer explicit s on the landmark if present, else project from XY
                         s_attr = getattr(lm, "s", None)
                         if isinstance(s_attr, (int, float)):
-                            s = float(s_attr)
-                            # clamp
-                            s = max(0.0, min(s, L))
+                            s = max(0.0, min(float(s_attr), L))
                         else:
-                            # project its (x,y) onto this lane
+                            # project its (x,y) onto this lane if needed
                             loc = getattr(lm, "location", None)
                             if loc is not None:
                                 s = self._project_s_on_lane(lane, float(loc.x), float(loc.y))
                             else:
-                                # try CARLA transform.location
                                 tr = getattr(lm, "transform", None)
                                 if tr is not None and getattr(tr, "location", None) is not None:
                                     s = self._project_s_on_lane(lane, float(tr.location.x), float(tr.location.y))
@@ -158,7 +164,7 @@ class _SpeedLimitUtils:
                         if is_begin:
                             v_mps = self._value_to_mps(lm)
                             events.append(("begin", s, v_mps))
-                        elif is_end:
+                        else:
                             events.append(("end", s, None))
 
                     if not events:
@@ -189,13 +195,16 @@ class _SpeedLimitUtils:
                             curr_v = None
                             seg_start = s
 
-                    # Tail segment if still active
                     if curr_v is not None and L > seg_start + EPS:
                         segments.append(DataSpeedLimit(
                             speed_limit=curr_v, from_distance=seg_start, to_distance=L
                         ))
 
                     lane.speed_limits = segments
+
+    # -------------------------------------------------------------------------
+    # Gap closing (head/tail) – propagation per new rule
+    # -------------------------------------------------------------------------
 
     def close_speed_limit_gaps(self, blocks, default_speed_kmh: float = 30.0) -> None:
         """
@@ -206,9 +215,10 @@ class _SpeedLimitUtils:
           • Interval mode: proper segments [from, to] with explicit speeds.
 
         Behavior:
-          • Marker mode → build piecewise-constant segments between markers; head uses default/upstream; tail uses last marker.
+          • Marker mode → build piecewise-constant segments between markers; head uses default or
+            upstream (via find_upstream_speed_mps) which *may* cross junctions only through lanes
+            that have no joining roads.
           • Interval mode → honor intervals; fill only gaps with default/upstream.
-        In both modes, upstream inheritance NEVER crosses junction roads.
         """
         default_mps = float(default_speed_kmh) / 3.6
         # Precompute indices once
@@ -227,7 +237,6 @@ class _SpeedLimitUtils:
 
                     sl = list(lane.speed_limits or [])
                     if not sl:
-                        # No info at all → inherit (no junction) or default
                         inherit = self.find_upstream_speed_mps(lane, lane_index)
                         spd = inherit if inherit is not None else default_mps
                         lane.speed_limits = [
@@ -235,22 +244,16 @@ class _SpeedLimitUtils:
                         ]
                         continue
 
-                    # Determine mode: marker vs interval
                     any_marker = any(abs(float(s.to_distance) - float(s.from_distance)) < EPS for s in sl)
-
                     out: List[DataSpeedLimit] = []
 
                     if any_marker:
                         # ---- MARKER MODE ------------------------------------------------------
-                        # Build sorted unique markers (d -> speed)
                         markers: Dict[float, float] = {}
                         for s in sl:
                             d = float(s.from_distance)
-                            if d < 0.0:
-                                d = 0.0
-                            if d > lane_length:
-                                d = lane_length
-                            # if multiple markers at the same 'd', keep the last one in input order
+                            if d < 0.0: d = 0.0
+                            if d > lane_length: d = lane_length
                             markers[d] = float(s.speed_limit)
 
                         if not markers:
@@ -287,14 +290,12 @@ class _SpeedLimitUtils:
                                 speed_limit=markers[last], from_distance=last, to_distance=lane_length
                             ))
                         elif lane_length > last:
-                            # tiny sliver
                             out.append(DataSpeedLimit(
                                 speed_limit=markers[last], from_distance=last, to_distance=lane_length
                             ))
 
                     else:
                         # ---- INTERVAL MODE ----------------------------------------------------
-                        # Clip, sort, and coalesce exact duplicates
                         norm: List[DataSpeedLimit] = []
                         for s in sl:
                             s0 = max(0.0, min(float(s.from_distance), lane_length))
@@ -305,7 +306,6 @@ class _SpeedLimitUtils:
                                 ))
                         norm.sort(key=lambda seg: (seg.from_distance, seg.to_distance))
 
-                        # Now fill gaps without crossing junctions
                         out = []
                         cursor = 0.0
                         carried = None  # last known m/s
@@ -345,21 +345,21 @@ class _SpeedLimitUtils:
                             out.append(
                                 DataSpeedLimit(speed_limit=tail_spd, from_distance=cursor, to_distance=lane_length))
 
-                    # Final tidy-up
                     lane.speed_limits = self.merge_adjacent_equal(out)
+
+    # -------------------------------------------------------------------------
+    # Landmark parsing helpers
+    # -------------------------------------------------------------------------
 
     @staticmethod
     def _landmark_type_str(lm) -> str:
         """Return a normalized type string/code for begin/end detection."""
         t = getattr(lm, "type", None)
-        # Enum with .value code (e.g., 274, 278)
         v = getattr(t, "value", None)
         if isinstance(v, (int, float)):
             return str(int(v))
-        # Direct numeric
         if isinstance(t, (int, float)):
             return str(int(t))
-        # Enum/name path → last token, lowercased
         return str(t).split(".")[-1].strip().lower() if t is not None else ""
 
     @staticmethod
@@ -384,7 +384,6 @@ class _SpeedLimitUtils:
     def _value_to_mps(lm) -> Optional[float]:
         """
         Interpret landmark.value as km/h by default; accept m/s explicitly.
-        (Your data says km/h is the correct interpretation.)
         """
         val = getattr(lm, "value", None)
         if val is None:
@@ -408,7 +407,6 @@ class _SpeedLimitUtils:
         mps = getattr(lane, "lane_midpoints", None) or []
         if not mps:
             return 0.0
-        # Find closest segment and compute projected s
         best_d2 = float("inf")
         best_s = 0.0
         for i in range(len(mps) - 1):
@@ -420,7 +418,6 @@ class _SpeedLimitUtils:
             wx, wy = (x - p0.x), (y - p0.y)
             seg_len2 = vx * vx + vy * vy
             if seg_len2 <= 1e-9:
-                # degenerate segment; just use s0
                 t = 0.0
             else:
                 t = (vx * wx + vy * wy) / seg_len2
@@ -432,9 +429,7 @@ class _SpeedLimitUtils:
             d2 = dx * dx + dy * dy
             if d2 < best_d2:
                 best_d2 = d2
-                # interpolate s along this segment
                 best_s = s0 + t * (s1 - s0)
-        # clamp to lane length
         L = float(getattr(lane, "lane_length", 0.0) or 0.0)
         if L <= 0.0:
             return max(0.0, best_s)
