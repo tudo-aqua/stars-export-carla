@@ -18,7 +18,12 @@ from carla_interaction_gui.workers.TransformRecordingWorker import TransformReco
 
 # Official CARLA maps from the docs (non-layered + layered "_Opt")
 ALLOWED_NON_LAYERED_MAPS = [
-    "Town01", "Town02", "Town03", "Town04", "Town05", "Town10HD_Opt",
+    "Town01",
+    "Town02",
+    "Town03",
+    # "Town04",
+    "Town05",
+    "Town10HD_Opt",
 ]
 ALLOWED_CARLA_MAPS = ALLOWED_NON_LAYERED_MAPS
 
