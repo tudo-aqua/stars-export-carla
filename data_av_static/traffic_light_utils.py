@@ -32,7 +32,7 @@ class _TrafficLightUtils:
                     # (Re)build the static list from the attached landmarks
                     new_statics: List[DataStaticTrafficLight] = []
                     for lm in (lane.landmarks or []):
-                        if not self._is_light_landmark(lm):
+                        if not self.is_light_landmark(lm):
                             continue
                         tl_actor = self._try_get_tl_actor(world, lm) if world else None
                         # Use a converter that accepts your DataLandmark
@@ -41,7 +41,7 @@ class _TrafficLightUtils:
                     lane.traffic_lights = new_statics
 
     @staticmethod
-    def _is_light_landmark(lm: DataLandmark) -> bool:
+    def is_light_landmark(lm: DataLandmark) -> bool:
         # robust test; accepts numeric or enum-like values
         t = str(getattr(lm, "type", ""))
         return t == "1000001" or "TrafficLight" in t or "Light" in t
