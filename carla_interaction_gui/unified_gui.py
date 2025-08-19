@@ -84,6 +84,7 @@ class UnifiedCarlaGUI(tk.Tk):
         self._tab_manual(notebook)
         self._tab_transform(notebook)
         self._tab_video(notebook)
+        self._tab_generate_maps(notebook)
 
         # log pane
         self.log = scrolledtext.ScrolledText(self, height=30, state="disabled")
@@ -347,6 +348,30 @@ class UnifiedCarlaGUI(tk.Tk):
                                         command=self._stop_worker, state="disabled")
         self.stop_btn_video.pack(pady=8)
 
+    def _tab_generate_maps(self, notebook: ttk.Notebook):
+        frame = ttk.Frame(notebook)
+        notebook.add(frame, text="Generate Maps")
+        tk.Label(frame, text="Generate map data for all allowed maps.").pack(pady=5)
+
+        # Reuse CARLA exe and output folder
+        self._entry_row(frame, "CARLA executable:", self.carla_executable_variable,
+                        lambda: self._open_file_dialog(self.carla_executable_variable))
+        self._entry_row(frame, "Maps output folder:", self.transformer_output_path_variable,
+                        lambda: self._open_directory_dialog(self.transformer_output_path_variable))
+
+        # Rendering options (same as other tabs)
+        rendering_options = ttk.LabelFrame(frame, text="Rendering options")
+        rendering_options.pack(fill="x", padx=4, pady=6)
+        tk.Checkbutton(rendering_options, text="Render off screen",
+                       variable=self.render_off_screen_variable, anchor="w").pack(fill="x", padx=6, pady=2)
+        tk.Checkbutton(rendering_options, text="Render quality low",
+                       variable=self.render_quality_low_variable, anchor="w").pack(fill="x", padx=6, pady=2)
+
+        tk.Button(frame, text="Generate all maps", command=self._start_generate_maps).pack(pady=10)
+        self.stop_btn_generate = tk.Button(frame, text="Stop",
+                                           command=self._stop_worker, state="disabled")
+        self.stop_btn_generate.pack(pady=8)
+
     def _validate_number(self, proposed: str) -> bool:
         """
         Entry validator: allow empty, integers, or floats (with optional leading '-').
@@ -540,6 +565,26 @@ class UnifiedCarlaGUI(tk.Tk):
 
         self._attach_worker(RecordVideoWorker(config, self._log),
                             stop_button=self.stop_btn_video)
+
+    def _start_generate_maps(self):
+        if not self._validate_paths([
+            ("CARLA executable", self.carla_executable_variable, "file"),
+            ("Maps output folder", self.transformer_output_path_variable, "dir"),
+        ]):
+            return
+
+        self._clear_log()
+        cfg = self._collect_cfg()
+        cfg.maps_output_path = self.transformer_output_path_variable.get().strip()
+
+        # Only use the allowed maps constant here (as requested)
+        allowed_maps = list(ALLOWED_NON_LAYERED_MAPS)
+
+        from carla_interaction_gui.workers.GenerateMapsWorker import GenerateMapsWorker
+        self._attach_worker(
+            GenerateMapsWorker(cfg, self._log, allowed_maps),
+            stop_button=self.stop_btn_generate
+        )
 
     def _stop_worker(self):
         """

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import traceback
+from typing import List
 
 from carla_interaction_gui.carla_launcher import restart_and_connect, kill_carla
+from data_av_static import MapRasterizer
 
 
 def run_transform(args):
@@ -86,6 +89,55 @@ def run_record_video(args):
             pass
 
 
+def run_gen_maps(args):
+    """
+    Start CARLA, then for each provided map:
+      - client.load_world(map_name)
+      - world = client.get_world()
+      - MapRasterizer(world).load_or_calculate_data_world(log_file_path=args.output, map_name=map_name)
+    """
+    client = None
+    try:
+        # Start CARLA once; we’ll swap maps via load_world per your snippet
+        client = restart_and_connect(
+            exe=args.carla_exe,
+            render_off_screen=args.offscreen,
+            render_quality_low=args.quality_low,
+            # initial map doesn’t matter; we will load per-map below
+            map_name=None,
+            log=print,
+        )
+
+        maps: List[str] = args.map or []
+        if not maps:
+            print("!! No maps provided to gen_maps; nothing to do.")
+            return
+
+        # Ensure output folder exists
+        os.makedirs(args.output, exist_ok=True)
+
+        for map_name in maps:
+            print(f">> [GenerateMaps] Loading map: {map_name}")
+            client.load_world(map_name)
+            world = client.get_world()
+
+            rasterizer = MapRasterizer(world)
+            print(">> [Data-AV Transformer] Load or calculate map data.")
+            rasterizer.load_or_calculate_data_world(
+                log_file_path=args.output,
+                map_name=map_name
+            )
+            print(f">> [GenerateMaps] Finished map: {map_name}")
+
+        print(">> [GenerateMaps] All maps done.")
+
+    finally:
+        try:
+            kill_carla(log=print)
+        except Exception:
+            pass
+
+
 def main():
     p = argparse.ArgumentParser("carla_task_runner")
     sub = p.add_subparsers(dest="task", required=True)
@@ -116,6 +168,13 @@ def main():
     pv.add_argument("--end-at", dest="end_at", type=float, default=None)
     pv.add_argument("--with-bboxes", action="store_true", default=False)
     pv.set_defaults(_fn=run_record_video)
+
+    # generate maps
+    pg = sub.add_parser("gen_maps", help="Generate map files for a list of maps")
+    add_common(pg)
+    pg.add_argument("--output", required=True, help="Output folder for generated map data")
+    pg.add_argument("--map", action="append", help="Map name to generate (repeatable)")
+    pg.set_defaults(_fn=run_gen_maps)
 
     args = p.parse_args()
     args._fn(args)
