@@ -70,7 +70,7 @@ def start_carla(
         time.sleep(boot)
     if map_name:
         _log(f">> [CARLA] Loading map: '{map_name}'")
-        ok = _set_map_via_config_py(exe, map_name, log=_log)
+        ok = set_map_via_config_py(exe, map_name, log=_log)
         if not ok:
             _log(f">> [CARLA] Warning: failed to set map '{map_name}' via config.py")
 
@@ -203,7 +203,7 @@ def _find_carla_config_py(exe: str) -> str | None:
     return None
 
 
-def _set_map_via_config_py(
+def set_map_via_config_py(
         exe: str,
         map_name: str,
         *,

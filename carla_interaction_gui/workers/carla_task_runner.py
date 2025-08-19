@@ -6,6 +6,7 @@ import sys
 import traceback
 from typing import List
 
+from carla_interaction_gui import carla_launcher
 from carla_interaction_gui.carla_launcher import restart_and_connect, kill_carla
 from data_av_static import MapRasterizer
 
@@ -118,7 +119,7 @@ def run_gen_maps(args):
 
         for map_name in maps:
             print(f">> [GenerateMaps] Loading map: {map_name}")
-            client.load_world(map_name)
+            carla_launcher.set_map_via_config_py(exe=args.carla_exe, map_name=map_name)
             world = client.get_world()
 
             rasterizer = MapRasterizer(world)
