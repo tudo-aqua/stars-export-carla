@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import base64
 import importlib
+import io
 import pathlib
 import pkgutil
 import traceback
+import zipfile
 from typing import List, Tuple
 
 import orjson
 import plotly.graph_objects as go
 from dash import Dash, dcc, html, Input, Output, State, Patch, ALL, ctx, no_update
 
-from carla_data_classes.dynamic import DataVehicle
 from carla_data_classes.dynamic.TickData import TickData
 from carla_data_classes.static.DataWorld import DataWorld
 from dynamic.actor_traces import build_dynamic_templates
@@ -131,7 +132,8 @@ app.layout = html.Div([
     html.Div([
         html.H3("CARLA Viewer"),
         dcc.Upload(
-            id="upload", children=html.Div(["Drag & Drop or ", html.A("Select JSON")]),
+            id="upload",
+            children=html.Div(["Drag & Drop or ", html.A("Select JSON/ZIP")]),
             className="upload-area"
         ),
         html.Div(id="msg", style={"fontSize": "12px", "color": "#555"}),
@@ -232,18 +234,40 @@ def parse_upload(contents, fname, prior_store_json, prior_dyn_json):
 
     try:
         raw = _decode_upload(contents)
+
+        # --- NEW: allow .zip uploads (single static or dynamic JSON inside) ---
+        if fname and str(fname).lower().endswith(".zip"):
+            ticks, data_world, inner_name = _load_from_zip(raw)
+            # proceed like the non-zip branch below, but use inner_name in messages
+            if data_world:
+                store = ViewerStore.from_source(data_world, ticks[0] if ticks else None)
+                msg = (f"Loaded static ZIP '{fname}' → '{inner_name}' | "
+                       f"Map with {len(data_world.junctions)} junctions and "
+                       f"{len(data_world.straights)} roads")
+                return store.to_json(), (prior_dyn_json or ""), msg
+
+            if ticks:
+                dyn_json = orjson.dumps([t.to_dict() for t in ticks]).decode()
+                msg = f"Loaded dynamic ZIP '{fname}' → '{inner_name}' | ticks:{len(ticks)}"
+                return prior_store_json, dyn_json, msg
+
+            # nothing recognized inside ZIP
+            return prior_store_json, prior_dyn_json, (
+                f"'{fname}': ZIP did not contain static or dynamic content."
+            )
+
+        # --- Original JSON path (unchanged) ---
         ticks, data_world = _load_raw_json(raw)
 
-        vehicle_locations = [pos.actor.location for tick in ticks for pos in tick.actor_positions if
-                             isinstance(pos.actor, DataVehicle)]
-
-        # ---- static upload (replace static, keep dynamic) ----
+        # static upload (replace static, keep dynamic)
         if data_world:
             store = ViewerStore.from_source(data_world, ticks[0] if ticks else None)
-            msg = f"Loaded static '{fname}' | Map with {len(data_world.junctions)} junctions and {len(data_world.straights)} roads"
+            msg = (f"Loaded static '{fname}' | "
+                   f"Map with {len(data_world.junctions)} junctions and "
+                   f"{len(data_world.straights)} roads")
             return store.to_json(), (prior_dyn_json or ""), msg
 
-        # ---- dynamic upload (replace dynamic, keep static) ----
+        # dynamic upload (replace dynamic, keep static)
         if ticks:
             dyn_json = orjson.dumps([t.to_dict() for t in ticks]).decode()
             msg = f"Loaded dynamic '{fname}' | ticks:{len(ticks)}"
@@ -256,6 +280,27 @@ def parse_upload(contents, fname, prior_store_json, prior_dyn_json):
         # On error, keep everything as-is
         return prior_store_json, prior_dyn_json, f"Error while loading '{fname}': {e}"
 
+
+def _load_from_zip(raw_zip: bytes) -> tuple[list[TickData], DataWorld, str]:
+    """
+    Try each file in the ZIP (in-memory), return (ticks, data_world, inner_name)
+    for the first member that parses as known JSON.
+    Raises ValueError if none parse.
+    """
+    with zipfile.ZipFile(io.BytesIO(raw_zip)) as zf:
+        # Be permissive: check all regular files (ignore folders)
+        for info in zf.infolist():
+            if info.is_dir():
+                continue
+            with zf.open(info, "r") as f:
+                member_bytes = f.read()
+            try:
+                ticks, data_world = _load_raw_json(member_bytes)
+                return ticks, data_world, info.filename
+            except Exception:
+                # try next member
+                continue
+    raise ValueError("ZIP did not contain a recognized static or dynamic JSON.")
 
 # ----------------------------------------------------------------------
 # 2)  Build base figure + dynamic templates ---------------------------
