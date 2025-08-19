@@ -235,18 +235,6 @@ class CarlaMonitor:
             print(">> [Error] Logged failed Carla run")
             print(f">> [Error] Unexpected {err}, {type(err)}")
             JSONHelper.log_error("failed_run", name=log_data_path, error_message=f"{err}")
-        finally:
-            # Reset world settings
-            settings = self.world.get_settings()
-            settings.synchronous_mode = False
-            settings.no_rendering_mode = False
-            settings.fixed_delta_seconds = None
-            self.world.apply_settings(settings)
-
-            # Destroy all actors for the current simulation
-            actors = self.world.get_actors()
-            print(f">> [CARLA] Destroying {len(actors)} actors")
-            self.client.apply_batch([carla.command.DestroyActor(x) for x in actors])
 
 
 if __name__ == '__main__':

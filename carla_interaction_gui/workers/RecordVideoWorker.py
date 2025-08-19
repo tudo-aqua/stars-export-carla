@@ -1,56 +1,56 @@
+import subprocess
 import sys
-from pathlib import Path
 
-from carla_interaction_gui.carla_launcher import restart_and_connect, kill_carla
+from carla_interaction_gui.config_data import Config
 from carla_interaction_gui.workers.ThreadWorker import ThreadWorker
-from helpers.carla_camera_recorder import CarlaCameraRecorder as RawRec
-from helpers.carla_camera_recorder_with_bboxes import CarlaCameraRecorder as BoxRec
 
 
 class RecordVideoWorker(ThreadWorker):
     """
-    Handles video recording tasks using CARLA simulation and exports the video.
+    Launches an isolated process that performs the replay + camera render to mp4,
+    then kills the entire process tree on cancel/finish.
     """
 
+    def __init__(self, cfg: Config, log_cb):
+        super().__init__(cfg, log_cb)
+        self._proc: subprocess.Popen | None = None
+
     def run(self):
-        """
-        Executes the video recording process with optional bounding box annotations, connects to the CARLA simulator, and
-        handles the exporting of the final encoded video.
-        """
-        RecCls = BoxRec if self.cfg.with_bboxes else RawRec
+        runner = self._resolve_runner()
+        if not runner:
+            return self.log(f"!! Could not locate {self.RUNNER}")
 
-        self.log(">> [CARLA] Rebooting CARLA & connecting")
-        client = restart_and_connect(self.cfg.carla_executable, log=self.log)
-        if self.cancelled:
-            return
-
-        rec = RecCls(client)
-        args = dict(
-            recording_folder=self.cfg.video_output_path or ".",
-            path=self.cfg.video_input_file,
-            vehicle_id=self.cfg.vehicle_id,
-            width=self.cfg.video_width,
-            height=self.cfg.video_height,
-            begin_at=self.cfg.begin_at,
-            end_at=self.cfg.end_at if self.cfg.end_at != float("inf") else sys.maxsize
-        )
-        self.log(f">> [Recorder] Recording video (bboxes={self.cfg.with_bboxes})")
-        rec.record_camera_in_simulation_run(**args)
-
-        self.log(">> [Recorder] Encoding mp4")
-        stem = Path(self.cfg.video_input_file).stem
-        if self.cfg.with_bboxes:
-            rec.save_video(self.cfg.video_output_path, stem, self.cfg.vehicle_id, self.cfg.begin_at, rec.END_AT,
-                           self.cfg.with_bboxes)
+        # derive end_at: float('inf') in GUI => file end in runner (pass negative)
+        end_at = self.cfg.end_at
+        if end_at == float("inf"):
+            end_arg = "-1"
         else:
-            rec.save_video(self.cfg.video_output_path, stem, self.cfg.vehicle_id, self.cfg.begin_at, rec.END_AT)
+            end_arg = str(end_at)
 
+        cmd = [
+            sys.executable, runner, "record_video",
+            "--carla-exe", self.cfg.carla_executable,
+            "--input", self.cfg.video_input_file,
+            "--output", self.cfg.video_output_path,
+            "--width", str(self.cfg.video_width),
+            "--height", str(self.cfg.video_height),
+            "--vehicle-id", str(self.cfg.vehicle_id),
+            "--begin-at", str(max(0.0, float(self.cfg.begin_at)) if self.cfg.begin_at is not None else 0.0),
+            "--end-at", end_arg,
+        ]
+        if self.cfg.with_bboxes:
+            cmd.append("--with-bboxes")
+        if getattr(self.cfg, "render_quality_low", False):
+            cmd.append("--quality-low")
+        if getattr(self.cfg, "render_off_screen", False):
+            cmd.append("--offscreen")
+        if getattr(self.cfg, "selected_map", ""):
+            cmd += ["--map-name", self.cfg.selected_map]
+
+        self._start_and_stream(cmd)
         self.log(">> [Recorder] Finished video export")
-        kill_carla(log=self.log)
+        return None
 
     def cancel(self):
-        """
-        Cancels the operation or process and ensures the appropriate shutdown logic for Carla software.
-        """
         super().cancel()
-        kill_carla(log=self.log)
+        self._kill_tree()

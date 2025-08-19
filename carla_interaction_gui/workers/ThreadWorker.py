@@ -1,4 +1,10 @@
+import os
+import subprocess
+import sys
 import threading
+from pathlib import Path
+
+import psutil
 
 from carla_interaction_gui.config_data import Config
 
@@ -8,6 +14,7 @@ class ThreadWorker(threading.Thread):
     Represents a thread worker used to execute tasks on a separate thread.
     """
     exclusive = True
+    RUNNER = "carla_task_runner.py"
 
     def __init__(self, cfg: Config, log_cb):
         super().__init__(daemon=True)
@@ -36,3 +43,62 @@ class ThreadWorker(threading.Thread):
             txt (str): The text message that needs to be logged.
         """
         self._log(txt)
+
+    def _resolve_runner(self) -> str | None:
+        here = Path(__file__).resolve().parent
+        candidates = [
+            here / self.RUNNER,
+            Path(os.getcwd()) / self.RUNNER,
+        ]
+        for c in candidates:
+            if c.exists():
+                return str(c)
+        return None
+
+    def _start_and_stream(self, cmd: list[str]):
+        creation = {}
+        if sys.platform.startswith("win"):
+            creation["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            creation["preexec_fn"] = os.setsid
+
+        self.log(">> [Runner] " + " ".join(cmd))
+        self._proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            **creation
+        )
+        try:
+            assert self._proc.stdout is not None
+            for line in self._proc.stdout:
+                if self.cancelled:
+                    break
+                clean = line.rstrip()
+
+                # --- FILTER unwanted lines ---
+                # if "streaming client: connection failed" in clean:
+                #     continue
+                # (add more filters if needed)
+
+                self.log(clean)
+        finally:
+            self._kill_tree()
+
+    def _kill_tree(self):
+        if not self._proc:
+            return
+        try:
+            parent = psutil.Process(self._proc.pid)
+        except psutil.NoSuchProcess:
+            self._proc = None
+            return
+        procs = [parent] + parent.children(recursive=True)
+        for p in procs:
+            try:
+                p.kill()
+            except psutil.NoSuchProcess:
+                pass
+        psutil.wait_procs(procs, timeout=5)
+        self._proc = None

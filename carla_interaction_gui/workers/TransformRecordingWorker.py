@@ -1,44 +1,39 @@
-import traceback
+import subprocess
+import sys
 
-from carla_interaction_gui.carla_launcher import restart_and_connect, kill_carla
+from carla_interaction_gui.config_data import Config
 from carla_interaction_gui.workers.ThreadWorker import ThreadWorker
 
 
 class TransformRecordingWorker(ThreadWorker):
     """
-    Handles transformation of recording data in CARLA simulation.
+    Launches a separate Python process that runs CarlaMonitor.monitor_simulation_run
+    and kills the entire process tree on cancel/finish.
     """
 
-    def run(self):
-        """
-        Executes the main process involving connecting to CARLA Simulator, monitoring its
-        simulation run, and handling transformation tasks.
-        """
-        try:
-            from helpers.carla_monitor import CarlaMonitor  # type: ignore
-            self.log(">> [CARLA] Rebooting CARLA & connecting")
-            client = restart_and_connect(self.cfg.carla_executable, log=self.log,
-                                         render_off_screen=self.cfg.render_off_screen,
-                                         render_quality_low=self.cfg.render_quality_low)
-            if self.cancelled: return
+    def __init__(self, cfg: Config, log_cb):
+        super().__init__(cfg, log_cb)
+        self._proc: subprocess.Popen | None = None
 
-            monitor = CarlaMonitor(carla_client=client)
-            self.log(f">> [Data-AV Transformer] Transforming {self.cfg.transform_input_file}")
-            monitor.monitor_simulation_run(
-                file_path=self.cfg.transform_input_file,
-                weather_file_path="",
-                result_file_path=self.cfg.transformer_output_path
-            )
-        except Exception:
-            self.log(traceback.format_exc())
-        finally:
-            kill_carla(log=self.log)
-            self.log(">> [Data-AV Transformer] Done.")
+    def run(self):
+        exe = self.cfg.carla_executable
+        runner = self._resolve_runner()
+        if not runner:
+            return self.log(f"!! Could not locate {self.RUNNER}")
+
+        cmd = [
+            sys.executable, runner, "transform",
+            "--carla-exe", exe,
+            "--input", self.cfg.transform_input_file,
+            "--output", self.cfg.transformer_output_path,
+        ]
+        if getattr(self.cfg, "render_off_screen", False): cmd.append("--offscreen")
+        if getattr(self.cfg, "render_quality_low", False): cmd.append("--quality-low")
+
+        self._start_and_stream(cmd)
+        self.log(">> [Data-AV Transformer] Done.")
+        return None
 
     def cancel(self):
-        """
-        Cancels the current operation and terminates the Carla simulation environment
-        associated with it.
-        """
         super().cancel()
-        kill_carla(log=self.log)
+        self._kill_tree()
