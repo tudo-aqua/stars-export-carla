@@ -63,6 +63,11 @@ class UnifiedCarlaGUI(tk.Tk):
         end_at_default = -1 if self.config.end_at == float("inf") else self.config.end_at
         self.end_at_variable = tk.StringVar(value=str(end_at_default))
 
+        self.agent_vehicle_filter_variable = tk.StringVar(
+            value=getattr(self.config, "agent_vehicle_filter", "vehicle.tesla.model3"))
+        self.agent_target_speed_variable = tk.DoubleVar(
+            value=getattr(self.config, "agent_target_speed_kph", 35.0))
+
         self.render_off_screen_variable = tk.BooleanVar(
             value=getattr(self.config, "render_off_screen", False)
         )
@@ -90,6 +95,7 @@ class UnifiedCarlaGUI(tk.Tk):
         self._tab_transform(notebook)
         self._tab_video(notebook)
         self._tab_generate_maps(notebook)
+        self._tab_agent(notebook)
 
         # log pane
         self.log = scrolledtext.ScrolledText(self, height=30, state="disabled")
@@ -377,6 +383,71 @@ class UnifiedCarlaGUI(tk.Tk):
                                            command=self._stop_worker, state="disabled")
         self.stop_btn_generate.pack(pady=8)
 
+    def _tab_agent(self, notebook: ttk.Notebook):
+        frame = ttk.Frame(notebook)
+        notebook.add(frame, text="Agent Drive")
+        tk.Label(frame, text="Start a Python Agent controlling a single ego car.").pack(pady=5)
+
+        self._entry_row(frame, "CARLA executable:", self.carla_executable_variable,
+                        lambda: self._open_file_dialog(self.carla_executable_variable))
+        # Map select
+        row = tk.Frame(frame);
+        row.pack(fill="x", pady=2)
+        tk.Label(row, text="Map:", width=26, anchor="w").pack(side="left")
+        ttk.Combobox(row, textvariable=self.selected_map_variable,
+                     state="readonly", values=ALLOWED_CARLA_MAPS, width=42).pack(side="left", fill="x", expand=True)
+
+        # Agent settings
+        agent_opts = ttk.LabelFrame(frame, text="Agent parameters")
+        agent_opts.pack(fill="x", padx=4, pady=6)
+        self._entry_row(agent_opts, "Vehicle filter:", self.agent_vehicle_filter_variable)
+        self._entry_row(agent_opts, "Target speed (kph):", self.agent_target_speed_variable, width=10)
+
+        # Rendering options
+        rendering_options = ttk.LabelFrame(frame, text="Rendering options")
+        rendering_options.pack(fill="x", padx=4, pady=6)
+        tk.Checkbutton(rendering_options, text="Render off screen",
+                       variable=self.render_off_screen_variable, anchor="w").pack(fill="x", padx=6, pady=2)
+        tk.Checkbutton(rendering_options, text="Render quality low",
+                       variable=self.render_quality_low_variable, anchor="w").pack(fill="x", padx=6, pady=2)
+
+        # Controls
+        row_btns = tk.Frame(frame);
+        row_btns.pack(fill="x", pady=6)
+        tk.Button(row_btns, text="Start Agent", width=20, command=self._start_manual_agent).pack(side="left", padx=2)
+
+        self.stop_btn_agent = tk.Button(frame, text="Stop",
+                                        command=self._stop_worker, state="disabled")
+        self.stop_btn_agent.pack(pady=8)
+
+    def _start_manual_agent(self):
+        if not self._validate_paths([("CARLA executable", self.carla_executable_variable, "file")]):
+            return
+        self._clear_log()
+        cfg = self._collect_cfg()
+
+        class _Runner(ThreadWorker):
+            RUNNER = "carla_task_runner.py"
+
+            def run(self_inner):
+                runner = self_inner._resolve_runner()
+                if not runner:
+                    self_inner.log("!! Could not locate carla_task_runner.py")
+                    return
+                cmd = [sys.executable or "python", runner, "manual_agent",
+                       "--carla-exe", cfg.carla_executable]
+                m = (getattr(cfg, "selected_map", "") or "").strip()
+                if m:
+                    cmd += ["--map-name", m]
+                if getattr(cfg, "render_quality_low", False):
+                    cmd.append("--quality-low")
+                # viewer needs a window; do NOT pass --offscreen
+                cmd += ["--res", "1280x720", "--sync"]
+                self_inner._start_and_stream(cmd)
+
+        w = _Runner(cfg, self._log)
+        self._attach_worker(w, stop_button=self.stop_btn_agent)
+
     def _validate_number(self, proposed: str) -> bool:
         """
         Entry validator: allow empty, integers, or floats (with optional leading '-').
@@ -625,7 +696,8 @@ class UnifiedCarlaGUI(tk.Tk):
                 pass
 
             # Defensive: also disable any per-tab stop buttons if they exist
-            for btn_name in ("stop_btn_manual", "stop_btn_server", "stop_btn_transform", "stop_btn_video"):
+            for btn_name in ("stop_btn_manual", "stop_btn_server", "stop_btn_transform", "stop_btn_video",
+                             "stop_btn_agent", "btn_agent_toggle_ap", "btn_agent_toggle_rec"):
                 btn = getattr(self, btn_name, None)
                 if isinstance(btn, tk.Button):
                     try:
@@ -670,10 +742,10 @@ class UnifiedCarlaGUI(tk.Tk):
                 self.with_bboxes_variable,
                 self.begin_at_variable,
                 self.end_at_variable,
-                # ── NEW: autosave for the two CARLA rendering checkboxes ───────────────
                 self.render_off_screen_variable,
                 self.render_quality_low_variable,
-                # ──────────────────────────────────────────────────────────────────────
+                self.agent_vehicle_filter_variable,
+                self.agent_target_speed_variable
         ):
             variable.trace_add("write", self._auto_save)
 
@@ -721,6 +793,11 @@ class UnifiedCarlaGUI(tk.Tk):
         config.video_width = self.video_width_variable.get()
         config.video_height = self.video_height_variable.get()
         config.vehicle_id = self.vehicle_id_variable.get()
+        config.agent_vehicle_filter = self.agent_vehicle_filter_variable.get().strip()
+        try:
+            config.agent_target_speed_kph = float(self.agent_target_speed_variable.get())
+        except Exception:
+            config.agent_target_speed_kph = 35.0
 
         # ---- tolerant numeric parsing (works with StringVar or DoubleVar) ----
         def _parse_var_as_float(var, default: float) -> float:

@@ -1,7 +1,8 @@
 from __future__ import annotations
+
 import json
-from pathlib import Path
 from dataclasses import dataclass, asdict, fields
+from pathlib import Path
 
 _CONFIG_PATH = Path.home() / ".carla_gui_config.json"
 
@@ -29,6 +30,9 @@ class Config:
     begin_at: float = 0.0
     end_at: float = float("inf")
     with_bboxes: bool = False
+
+    agent_vehicle_filter: str = "vehicle.tesla.model3"
+    agent_target_speed_kph: float = 35.0
 
 
 def load() -> Config:

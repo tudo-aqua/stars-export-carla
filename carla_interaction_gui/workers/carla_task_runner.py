@@ -8,11 +8,12 @@ from typing import List
 
 from carla_interaction_gui import carla_launcher
 from carla_interaction_gui.carla_launcher import restart_and_connect, kill_carla
-from data_av_static import MapRasterizer
+from carla_interaction_gui.workers import manual_agent_control
+from data_av_static import MapRasterizer  # existing import for other subcommands
+from helpers.carla_monitor import CarlaMonitor
 
 
 def run_transform(args):
-    from helpers.carla_monitor import CarlaMonitor  # lazy import inside child
     client = None
     try:
         client = restart_and_connect(
@@ -139,11 +140,41 @@ def run_gen_maps(args):
             pass
 
 
+def run_manual_agent(args):
+    """
+    Start CARLA (if needed), then launch a pygame viewer that behaves like manual_control.py,
+    except that pressing 'P' toggles our Python Agent instead of Traffic Manager.
+    """
+    client = None
+    try:
+        client = restart_and_connect(
+            exe=args.carla_exe,
+            render_off_screen=args.offscreen,
+            render_quality_low=args.quality_low,
+            map_name=args.map_name or None,
+            log=print,
+        )
+        manual_agent_control.launch_from_runner(
+            host="127.0.0.1",
+            port=2000,
+            res=args.res,
+            sync=args.sync,
+            carla_exe=args.carla_exe
+        )
+    except Exception:
+        traceback.print_exc()
+        raise
+    finally:
+        try:
+            kill_carla(log=print)
+        except Exception:
+            pass
+
+
 def main():
     p = argparse.ArgumentParser("carla_task_runner")
     sub = p.add_subparsers(dest="task", required=True)
 
-    # Shared base options
     def add_common(sp):
         sp.add_argument("--carla-exe", required=True, help="Path to CARLA executable")
         sp.add_argument("--offscreen", action="store_true", default=False)
@@ -177,9 +208,16 @@ def main():
     pg.add_argument("--map", action="append", help="Map name to generate (repeatable)")
     pg.set_defaults(_fn=run_gen_maps)
 
+    # agent drive
+    pm = sub.add_parser("manual_agent", help="Manual drive viewer where 'P' toggles Python Agent")
+    add_common(pm)
+    pm.add_argument("--res", default="1280x720", help="Window resolution, e.g. 1280x720")
+    pm.add_argument("--sync", action="store_true", help="Run viewer in synchronous mode")
+    pm.set_defaults(_fn=run_manual_agent)
+
     args = p.parse_args()
-    args._fn(args)
+    return args._fn(args)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main() or 0)

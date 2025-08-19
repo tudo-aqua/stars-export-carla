@@ -21,6 +21,7 @@ class ThreadWorker(threading.Thread):
         self.cfg = cfg
         self._log = log_cb
         self._cancel = threading.Event()
+        self._proc: subprocess.Popen | None = None
 
     def cancel(self):
         """
@@ -65,6 +66,7 @@ class ThreadWorker(threading.Thread):
         self.log(">> [Runner] " + " ".join(cmd))
         self._proc = subprocess.Popen(
             cmd,
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -76,12 +78,6 @@ class ThreadWorker(threading.Thread):
                 if self.cancelled:
                     break
                 clean = line.rstrip()
-
-                # --- FILTER unwanted lines ---
-                # if "streaming client: connection failed" in clean:
-                #     continue
-                # (add more filters if needed)
-
                 self.log(clean)
         finally:
             self._kill_tree()
@@ -102,3 +98,15 @@ class ThreadWorker(threading.Thread):
                 pass
         psutil.wait_procs(procs, timeout=5)
         self._proc = None
+
+    def send_command(self, text: str):
+        """
+        Send a single-line command to the child runner. No-op if process ended.
+        """
+        try:
+            if self._proc and self._proc.stdin:
+                self._proc.stdin.write(text.strip() + "\n")
+                self._proc.stdin.flush()
+        except Exception:
+            # don't crash UI if sending fails
+            pass
