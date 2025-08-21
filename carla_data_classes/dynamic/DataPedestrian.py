@@ -10,7 +10,6 @@ from carla_data_classes.dynamic.DataActor import DataActor
 _ensure_core_types(globals())
 
 
-
 @dataclass
 class DataPedestrian(DataActor):
     """
@@ -24,9 +23,4 @@ class DataPedestrian(DataActor):
     def from_walker(actor: Walker) -> "DataPedestrian":
         base = DataActor.from_actor(actor).__dict__.copy()
         base["type"] = "Pedestrian"
-        return DataPedestrian(
-            **base,
-            type_id=actor.type_id,
-        )
-
-    type_id: str
+        return DataPedestrian(**base)
