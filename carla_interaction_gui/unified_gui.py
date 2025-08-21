@@ -386,12 +386,15 @@ class UnifiedCarlaGUI(tk.Tk):
     def _tab_agent(self, notebook: ttk.Notebook):
         frame = ttk.Frame(notebook)
         notebook.add(frame, text="Agent Drive")
-        tk.Label(frame, text="Start a Python Agent controlling a single ego car.").pack(pady=5)
+        tk.Label(frame,
+                 text="Start a Python Agent controlling a single ego car (press 'P' in the viewer to toggle).").pack(
+            pady=5)
 
         self._entry_row(frame, "CARLA executable:", self.carla_executable_variable,
                         lambda: self._open_file_dialog(self.carla_executable_variable))
+
         # Map select
-        row = tk.Frame(frame);
+        row = tk.Frame(frame)
         row.pack(fill="x", pady=2)
         tk.Label(row, text="Map:", width=26, anchor="w").pack(side="left")
         ttk.Combobox(row, textvariable=self.selected_map_variable,
@@ -412,12 +415,11 @@ class UnifiedCarlaGUI(tk.Tk):
                        variable=self.render_quality_low_variable, anchor="w").pack(fill="x", padx=6, pady=2)
 
         # Controls
-        row_btns = tk.Frame(frame);
+        row_btns = tk.Frame(frame)
         row_btns.pack(fill="x", pady=6)
         tk.Button(row_btns, text="Start Agent", width=20, command=self._start_manual_agent).pack(side="left", padx=2)
 
-        self.stop_btn_agent = tk.Button(frame, text="Stop",
-                                        command=self._stop_worker, state="disabled")
+        self.stop_btn_agent = tk.Button(frame, text="Stop", command=self._stop_worker, state="disabled")
         self.stop_btn_agent.pack(pady=8)
 
     def _start_manual_agent(self):
@@ -434,18 +436,35 @@ class UnifiedCarlaGUI(tk.Tk):
                 if not runner:
                     self_inner.log("!! Could not locate carla_task_runner.py")
                     return
+
+                # Build command
                 cmd = [sys.executable or "python", runner, "manual_agent",
                        "--carla-exe", cfg.carla_executable]
+
                 m = (getattr(cfg, "selected_map", "") or "").strip()
                 if m:
                     cmd += ["--map-name", m]
                 if getattr(cfg, "render_quality_low", False):
                     cmd.append("--quality-low")
+
                 # viewer needs a window; do NOT pass --offscreen
                 cmd += ["--res", "1280x720", "--sync"]
+
+                # === Pass Agent settings to the subprocess via environment =========
+                # SimpleAgent reads these if present (kept generic on purpose).
+                os.environ["AGENT_TARGET_KPH"] = str(getattr(cfg, "agent_target_speed_kph", 35.0))
+                os.environ["AGENT_VEHICLE_FILTER"] = getattr(cfg, "agent_vehicle_filter", "vehicle.*")
+
+                # (Optional) TM-style knobs you might add later:
+                # os.environ["TM_PERCENT_RUN_LIGHT"] = "0.0"
+                # os.environ["TM_PERCENT_RUN_SIGN"] = "0.0"
+                # os.environ["TM_LANE_OFFSET"] = "0.0"
+                # ==================================================================
+
                 self_inner._start_and_stream(cmd)
 
         w = _Runner(cfg, self._log)
+        # IMPORTANT: attach the Agent tab's Stop button (not the Manual tab)
         self._attach_worker(w, stop_button=self.stop_btn_agent)
 
     def _validate_number(self, proposed: str) -> bool:

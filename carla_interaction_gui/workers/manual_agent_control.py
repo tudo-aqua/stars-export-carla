@@ -2,15 +2,14 @@
 """
 manual_agent_control.py
 
-Self-contained viewer that behaves like CARLA's manual_control.py, but when you press 'P'
-it toggles a Python Agent (not Traffic Manager). This module dynamically loads CARLA's
-original manual_control.py from the CARLA install, using the path to CarlaUE4.exe.
+Run CARLA's original PythonAPI 'manual_control.py' verbatim, but replace the
+built-in autopilot with your Python SimpleAgent when autopilot is toggled ON
+(key 'P' in the viewer). Everything else in manual_control behaves the same.
 
-Public entry point for runners:
+Public entry (used by carla_task_runner):
     launch_from_runner(host="127.0.0.1", port=2000, res="1280x720", sync=True, carla_exe=None)
-
-If you run this file directly, pass --carla-exe to point at your CARLA binary.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -20,14 +19,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from carla_interaction_gui.Agent.SimpleAgent import _patch_keyboard_for_agent
 
-
+# --------------------- dynamic loader for CARLA manual_control ----------------
 def _load_manual_control_from_carla(carla_exe: str | os.PathLike) -> Any:
-    """
-    Import CARLA's manual_control.py by absolute path derived from the CARLA executable.
-    Returns the imported module object (aliased as 'mc' elsewhere).
-    """
     exe = Path(carla_exe).resolve()
     mc_path = exe.parent / "PythonAPI" / "examples" / "manual_control.py"
     if not mc_path.exists():
@@ -41,16 +35,99 @@ def _load_manual_control_from_carla(carla_exe: str | os.PathLike) -> Any:
     return mc
 
 
+# ------------------------------ SimpleAgent import ----------------------------
+def _import_simple_agent():
+    """
+    Try several stable import paths so this file works inside your package
+    or when run as a standalone module.
+    """
+    try:
+        # Preferred: project package path
+        from carla_interaction_gui.agent.agent import SimpleAgent  # type: ignore
+        return SimpleAgent
+    except Exception:
+        pass
+    try:
+        # Same folder
+        from SimpleAgent import SimpleAgent  # type: ignore
+        return SimpleAgent
+    except Exception:
+        pass
+    raise ImportError(
+        "Could not import SimpleAgent. Ensure 'SimpleAgent.py' is available and importable "
+        "(e.g., carla_interaction_gui/workers/SimpleAgent.py)."
+    )
+
+
+# -------------------------- patch manual_control behavior ---------------------
+def _install_agent_patch(mc):
+    """
+    Patch KeyboardControl.parse_events so that when '_autopilot_enabled' is ON,
+    we disable TM autopilot and instead run SimpleAgent each tick. This keeps
+    the rest of manual_control.py untouched.
+    """
+    SimpleAgent = _import_simple_agent()
+    orig_parse = mc.KeyboardControl.parse_events
+
+    def parse_events_with_agent(self, client, world, clock, sync_mode):
+        # Let the original handler process keys, HUD updates, recording toggles, etc.
+        ret = orig_parse(self, client, world, clock, sync_mode)
+
+        # When the viewer's autopilot is ON, run our Python agent instead of TM
+        try:
+            import carla  # available after CARLA egg is loaded by manual_control
+            if isinstance(world.player, carla.Vehicle) and getattr(self, "_autopilot_enabled", False):
+                # Make sure Traffic Manager isn't touching the car
+                world.player.set_autopilot(False)
+
+                # (Re)bind agent if the ego changed or agent not present
+                agent = getattr(self, "_agent", None)
+                if not agent or getattr(agent, "vehicle", None) is None or agent.vehicle.id != world.player.id:
+                    # Optional: read some knobs from environment if you like
+                    lane_offset = float(os.getenv("TM_LANE_OFFSET", "0.0"))
+                    agent = SimpleAgent(world.player, params=None if lane_offset == 0.0 else None)
+                    # If your SimpleAgent accepts lane_offset directly:
+                    try:
+                        agent.set_parameters(lane_offset=lane_offset)  # no-op if method not present
+                    except Exception:
+                        pass
+                    self._agent = agent
+
+                # Compute dt: use fixed_delta_seconds in sync mode, otherwise clock time
+                dt = 0.0
+                try:
+                    settings = world.world.get_settings() if hasattr(world, "world") else None
+                    if settings and settings.fixed_delta_seconds:
+                        dt = settings.fixed_delta_seconds
+                except Exception:
+                    pass
+                if not dt or dt <= 0:
+                    dt = max(clock.get_time() / 1000.0, 1.0 / 60.0)
+
+                control = self._agent.run_step(dt=dt)
+                world.player.apply_control(control)
+        except Exception as e:
+            # Soft-fail: show in HUD, keep the viewer alive
+            try:
+                world.hud.notification(f"Agent error: {e}")
+            except Exception:
+                pass
+
+        return ret
+
+    mc.KeyboardControl.parse_events = parse_events_with_agent
+
+
+# --------------------------------- public entry --------------------------------
 def launch_from_runner(host="127.0.0.1", port=2000, res="1280x720", sync=True, carla_exe=None):
     """
-    Used by carla_task_runner.py.
-    Dynamically imports CARLA's manual_control from the CARLA install derived from carla_exe.
+    Used by carla_task_runner.py. Loads CARLA's manual_control.py and installs the agent patch.
     """
     if not carla_exe:
         raise ValueError("launch_from_runner requires 'carla_exe' to locate manual_control.py")
 
     mc = _load_manual_control_from_carla(carla_exe)
-    _patch_keyboard_for_agent(mc)
+    _install_agent_patch(mc)
 
     # Build args namespace expected by manual_control.game_loop
     args = argparse.Namespace()
@@ -59,11 +136,11 @@ def launch_from_runner(host="127.0.0.1", port=2000, res="1280x720", sync=True, c
     args.port = port
     args.autopilot = False
     args.res = res
-    args.width, args.height = [int(x) for x in args.res.split('x')]
+    args.width, args.height = [int(x) for x in args.res.split("x")]
     args.sync = bool(sync)
-    args.filter = 'vehicle.*'
-    args.generation = '2'
-    args.rolename = 'hero'
+    args.filter = os.getenv("AGENT_VEHICLE_FILTER", "vehicle.*")
+    args.generation = "2"
+    args.rolename = "hero"
     args.gamma = 2.2
 
     return mc.game_loop(args)
@@ -79,7 +156,7 @@ def main():
     args = parser.parse_args()
 
     mc = _load_manual_control_from_carla(args.carla_exe)
-    _patch_keyboard_for_agent(mc)
+    _install_agent_patch(mc)
     return mc.main()
 
 

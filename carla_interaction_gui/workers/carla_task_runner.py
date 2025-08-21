@@ -143,7 +143,7 @@ def run_gen_maps(args):
 def run_manual_agent(args):
     """
     Start CARLA (if needed), then launch a pygame viewer that behaves like manual_control.py,
-    except that pressing 'P' toggles our Python Agent instead of Traffic Manager.
+    except that pressing 'P' toggles our Python agent instead of Traffic Manager.
     """
     client = None
     try:
@@ -209,7 +209,7 @@ def main():
     pg.set_defaults(_fn=run_gen_maps)
 
     # agent drive
-    pm = sub.add_parser("manual_agent", help="Manual drive viewer where 'P' toggles Python Agent")
+    pm = sub.add_parser("manual_agent", help="Manual drive viewer where 'P' toggles Python agent")
     add_common(pm)
     pm.add_argument("--res", default="1280x720", help="Window resolution, e.g. 1280x720")
     pm.add_argument("--sync", action="store_true", help="Run viewer in synchronous mode")
