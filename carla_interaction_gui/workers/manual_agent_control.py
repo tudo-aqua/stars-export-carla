@@ -59,6 +59,30 @@ def _import_simple_agent():
     )
 
 
+def _import_rule_based_agent():
+    """
+    Try several stable import paths so this file works inside your package
+    or when run as a standalone module.
+    """
+    try:
+        # Preferred: project package path
+        from carla_interaction_gui.adjustable_agent.rule_based_agent import RuleBasedAgent  # type: ignore
+        return RuleBasedAgent
+    except Exception:
+        pass
+    try:
+        # Same folder
+        from RuleBasedAgent import RuleBasedAgent  # type: ignore
+        return RuleBasedAgent
+    except Exception:
+        pass
+    raise ImportError(
+        "Could not import SimpleAgent. Ensure 'SimpleAgent.py' is available and importable "
+        "(e.g., carla_interaction_gui/workers/SimpleAgent.py)."
+    )
+
+
+
 # -------------------------- patch manual_control behavior ---------------------
 def _install_agent_patch(mc):
     """
@@ -66,7 +90,7 @@ def _install_agent_patch(mc):
     we disable TM autopilot and instead run SimpleAgent each tick. This keeps
     the rest of manual_control.py untouched.
     """
-    SimpleAgent = _import_simple_agent()
+    Agent = _import_rule_based_agent()
     orig_parse = mc.KeyboardControl.parse_events
 
     def parse_events_with_agent(self, client, world, clock, sync_mode):
@@ -82,11 +106,11 @@ def _install_agent_patch(mc):
 
                 # (Re)bind carla_agent if the ego changed or carla_agent not present
                 agent = getattr(self, "_agent", None)
-                if not agent or getattr(agent, "vehicle", None) is None or agent.vehicle.id != world.player.id:
+                if not agent or getattr(agent, "ego", None) is None or agent.ego.id != world.player.id:
                     # Optional: read some knobs from environment if you like
                     lane_offset = float(os.getenv("TM_LANE_OFFSET", "0.0"))
-                    agent = SimpleAgent(world.player, params=None if lane_offset == 0.0 else None)
-                    # If your SimpleAgent accepts lane_offset directly:
+                    agent = Agent(world.player, client)
+                    # If your Agent accepts lane_offset directly:
                     try:
                         agent.set_parameters(lane_offset=lane_offset)  # no-op if method not present
                     except Exception:
@@ -104,7 +128,8 @@ def _install_agent_patch(mc):
                 if not dt or dt <= 0:
                     dt = max(clock.get_time() / 1000.0, 1.0 / 60.0)
 
-                control = self._agent.run_step(dt=dt)
+                self._agent.cfg.dt = dt
+                control, debug = self._agent.run_step()
                 world.player.apply_control(control)
         except Exception as e:
             # Soft-fail: show in HUD, keep the viewer alive
