@@ -43,7 +43,7 @@ def _import_simple_agent():
     """
     try:
         # Preferred: project package path
-        from carla_interaction_gui.agent.carla_agent import SimpleAgent  # type: ignore
+        from carla_interaction_gui.carla_agent.carla_agent import SimpleAgent  # type: ignore
         return SimpleAgent
     except Exception:
         pass
@@ -73,14 +73,14 @@ def _install_agent_patch(mc):
         # Let the original handler process keys, HUD updates, recording toggles, etc.
         ret = orig_parse(self, client, world, clock, sync_mode)
 
-        # When the viewer's autopilot is ON, run our Python agent instead of TM
+        # When the viewer's autopilot is ON, run our Python carla_agent instead of TM
         try:
             import carla  # available after CARLA egg is loaded by manual_control
             if isinstance(world.player, carla.Vehicle) and getattr(self, "_autopilot_enabled", False):
                 # Make sure Traffic Manager isn't touching the car
                 world.player.set_autopilot(False)
 
-                # (Re)bind agent if the ego changed or agent not present
+                # (Re)bind carla_agent if the ego changed or carla_agent not present
                 agent = getattr(self, "_agent", None)
                 if not agent or getattr(agent, "vehicle", None) is None or agent.vehicle.id != world.player.id:
                     # Optional: read some knobs from environment if you like
@@ -121,7 +121,7 @@ def _install_agent_patch(mc):
 # --------------------------------- public entry --------------------------------
 def launch_from_runner(host="127.0.0.1", port=2000, res="1280x720", sync=True, carla_exe=None):
     """
-    Used by carla_task_runner.py. Loads CARLA's manual_control.py and installs the agent patch.
+    Used by carla_task_runner.py. Loads CARLA's manual_control.py and installs the carla_agent patch.
     """
     if not carla_exe:
         raise ValueError("launch_from_runner requires 'carla_exe' to locate manual_control.py")

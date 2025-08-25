@@ -15,8 +15,8 @@ from .agent_traffic_lights import TrafficLightLogic
 class SimpleAgent:
     """
     Usage:
-        agent = SimpleAgent(vehicle)
-        ctrl = agent.run_step(dt=0.05)
+        carla_agent = SimpleAgent(vehicle)
+        ctrl = carla_agent.run_step(dt=0.05)
         vehicle.apply_control(ctrl)
 
     This mirrors CARLA TM behavior at a high level while keeping the logic
@@ -49,7 +49,7 @@ class SimpleAgent:
     def set_parameters(self, **kwargs) -> None:
         """
         Update TMParameters on the fly, e.g.:
-            agent.set_parameters(lane_offset=0.2, percentage_running_light=0.1)
+            carla_agent.set_parameters(lane_offset=0.2, percentage_running_light=0.1)
         """
         for k, v in kwargs.items():
             if hasattr(self.params, k):
