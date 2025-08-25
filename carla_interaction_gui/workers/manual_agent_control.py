@@ -43,7 +43,7 @@ def _import_simple_agent():
     """
     try:
         # Preferred: project package path
-        from carla_interaction_gui.agent.agent import SimpleAgent  # type: ignore
+        from carla_interaction_gui.agent.carla_agent import SimpleAgent  # type: ignore
         return SimpleAgent
     except Exception:
         pass
