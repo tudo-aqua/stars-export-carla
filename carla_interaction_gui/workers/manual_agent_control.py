@@ -82,9 +82,8 @@ def _import_rule_based_agent():
     )
 
 
-
 # -------------------------- patch manual_control behavior ---------------------
-def _install_agent_patch(mc):
+def _install_rule_bases_agent_patch(mc):
     """
     Patch KeyboardControl.parse_events so that when '_autopilot_enabled' is ON,
     we disable TM autopilot and instead run SimpleAgent each tick. This keeps
@@ -143,6 +142,64 @@ def _install_agent_patch(mc):
     mc.KeyboardControl.parse_events = parse_events_with_agent
 
 
+def _install_simple_agent_patch(mc):
+    """
+    Patch KeyboardControl.parse_events so that when '_autopilot_enabled' is ON,
+    we disable TM autopilot and instead run SimpleAgent each tick. This keeps
+    the rest of manual_control.py untouched.
+    """
+    SimpleAgent = _import_simple_agent()
+    orig_parse = mc.KeyboardControl.parse_events
+
+    def parse_events_with_agent(self, client, world, clock, sync_mode):
+        # Let the original handler process keys, HUD updates, recording toggles, etc.
+        ret = orig_parse(self, client, world, clock, sync_mode)
+
+        # When the viewer's autopilot is ON, run our Python agent instead of TM
+        try:
+            import carla  # available after CARLA egg is loaded by manual_control
+            if isinstance(world.player, carla.Vehicle) and getattr(self, "_autopilot_enabled", False):
+                # Make sure Traffic Manager isn't touching the car
+                world.player.set_autopilot(False)
+
+                # (Re)bind agent if the ego changed or agent not present
+                agent = getattr(self, "_agent", None)
+                if not agent or getattr(agent, "vehicle", None) is None or agent.vehicle.id != world.player.id:
+                    # Optional: read some knobs from environment if you like
+                    lane_offset = float(os.getenv("TM_LANE_OFFSET", "0.0"))
+                    agent = SimpleAgent(world.player, params=None if lane_offset == 0.0 else None)
+                    # If your SimpleAgent accepts lane_offset directly:
+                    try:
+                        agent.set_parameters(lane_offset=lane_offset)  # no-op if method not present
+                    except Exception:
+                        pass
+                    self._agent = agent
+
+                # Compute dt: use fixed_delta_seconds in sync mode, otherwise clock time
+                dt = 0.0
+                try:
+                    settings = world.world.get_settings() if hasattr(world, "world") else None
+                    if settings and settings.fixed_delta_seconds:
+                        dt = settings.fixed_delta_seconds
+                except Exception:
+                    pass
+                if not dt or dt <= 0:
+                    dt = max(clock.get_time() / 1000.0, 1.0 / 60.0)
+
+                control = self._agent.run_step(dt=dt)
+                world.player.apply_control(control)
+        except Exception as e:
+            # Soft-fail: show in HUD, keep the viewer alive
+            try:
+                world.hud.notification(f"Agent error: {e}")
+            except Exception:
+                pass
+
+        return ret
+
+    mc.KeyboardControl.parse_events = parse_events_with_agent
+
+
 # --------------------------------- public entry --------------------------------
 def launch_from_runner(host="127.0.0.1", port=2000, res="1280x720", sync=True, carla_exe=None):
     """
@@ -152,7 +209,7 @@ def launch_from_runner(host="127.0.0.1", port=2000, res="1280x720", sync=True, c
         raise ValueError("launch_from_runner requires 'carla_exe' to locate manual_control.py")
 
     mc = _load_manual_control_from_carla(carla_exe)
-    _install_agent_patch(mc)
+    _install_simple_agent_patch(mc)
 
     # Build args namespace expected by manual_control.game_loop
     args = argparse.Namespace()
@@ -181,7 +238,7 @@ def main():
     args = parser.parse_args()
 
     mc = _load_manual_control_from_carla(args.carla_exe)
-    _install_agent_patch(mc)
+    _install_simple_agent_patch(mc)
     return mc.main()
 
 
