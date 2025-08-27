@@ -14,15 +14,23 @@ class SensedState:
     speed_limit_mps: float
     in_junction: bool
     next_options: List[carla.Waypoint]
+
+    # Traffic light sensed on path
     traffic_light_state: Optional[carla.TrafficLightState]
     at_traffic_light: bool
+    traffic_light_distance_m: float
+
+    # Signs / environment
     stop_or_yield_ahead: Optional[Tuple[str, float]]  # ("STOP"/"YIELD", distance)
     sun_altitude_angle: float
+
+    # Vehicles
     lead_vehicle: Optional[carla.Actor]
     lead_distance: float = math.inf
     lead_rel_speed: float = 0.0
-    curvature: float = 0.0  # local curvature estimate (1/m)
 
+    # Road geometry
+    curvature: float = 0.0  # local curvature estimate (1/m)
 
 @dataclass
 class Plan:
@@ -31,5 +39,5 @@ class Plan:
     blink_left: bool = False
     blink_right: bool = False
     headlights_on: bool = False
-    stop_now: bool = False  # used to force immediate stop (red light at line, etc.)
-    stop_distance: float = 0.0  # meters to stop line
+    stop_now: bool = False
+    stop_distance: float = 0.0

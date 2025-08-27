@@ -20,14 +20,26 @@ class Planning:
         # --- base target speed: respect speed limit ---
         target_speed = s.speed_limit_mps
 
-        # --- traffic lights: always stop at red ---
+        # --- Traffic lights: decelerate to stop by the stop line, even from far away ---
         stop_now = False
         stop_distance = 0.0
-        if s.at_traffic_light and s.traffic_light_state is not None:
+        if s.traffic_light_state is not None:
             if s.traffic_light_state in (carla.TrafficLightState.Red, carla.TrafficLightState.Yellow):
-                # When at the stop line, force stop. (Yellow treated conservatively.)
-                stop_now = True
-                target_speed = 0.0
+                # Distance to stop line from sensing (∞ if none)
+                dist = s.traffic_light_distance_m
+                if math.isfinite(dist):
+                    stop_distance = max(0.0, dist - self.ctx.cfg.stop_buffer)
+                    # Cap speed based on distance-to-stop (independent of current speed)
+                    target_speed = min(target_speed,
+                                       self._speed_cap_to_stop_in_distance(stop_distance, comfort_dec=3.0))
+                    # Force the final stop very near the line
+                    if dist <= (self.ctx.cfg.stop_buffer + 0.8):
+                        stop_now = True
+                        target_speed = 0.0
+        # If we are extremely close and CARLA also flags "at a TL", keep the stop
+        elif s.at_traffic_light:
+            stop_now = True
+            target_speed = 0.0
 
         # --- stop / yield signs: always stop ---
         if s.stop_or_yield_ahead:
@@ -67,6 +79,12 @@ class Planning:
             stop_now=stop_now,
             stop_distance=stop_distance
         )
+
+    def _speed_cap_to_stop_in_distance(self, dist: float, comfort_dec: float = 3.0) -> float:
+        """Max allowable speed to come to a comfortable stop within dist."""
+        if dist <= 0.0:
+            return 0.0
+        return math.sqrt(2.0 * comfort_dec * dist)
 
     def _choose_target_waypoint(self, s: SensedState) -> carla.Waypoint:
         """
