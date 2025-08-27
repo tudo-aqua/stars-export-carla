@@ -386,7 +386,7 @@ class _BlockBuilder:
             # vertices are from i .. j-1 (exclude the repeated closing point at j)
             poly = locs[i:j]
             if len(poly) >= 3:  # at least a triangle
-                vertices = [DataLocation(p.x, p.y, getattr(p, "z", 0.0)) for p in poly]
+                vertices = [DataLocation(p.x, -p.y, getattr(p, "z", 0.0)) for p in poly]
                 result.append(DataCrosswalk(crosswalk_id=cw_id, vertices=vertices))
                 cw_id += 1
 
