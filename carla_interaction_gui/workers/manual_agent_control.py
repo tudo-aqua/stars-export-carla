@@ -65,25 +65,27 @@ def _import_rule_based_agent():
     or when run as a standalone module.
     """
     try:
-        # Preferred: project package path
-        from carla_interaction_gui.adjustable_agent.rule_based_agent import RuleBasedAgent  # type: ignore
+        # Preferred: project package path # type: ignore
+        from carla_interaction_gui.adjustable_agent.rule_based_agent import RuleBasedAgent
         return RuleBasedAgent
-    except Exception:
+    except Exception as e:
+        print(e)
         pass
     try:
         # Same folder
-        from RuleBasedAgent import RuleBasedAgent  # type: ignore
+        from ..adjustable_agent.rule_based_agent import RuleBasedAgent  # type: ignore
         return RuleBasedAgent
-    except Exception:
+    except Exception as e:
+        print(e)
         pass
     raise ImportError(
-        "Could not import SimpleAgent. Ensure 'SimpleAgent.py' is available and importable "
-        "(e.g., carla_interaction_gui/workers/SimpleAgent.py)."
+        "Could not import RuleBasedAgent. Ensure 'RuleBasedAgent.py' is available and importable "
+        "(e.g., carla_interaction_gui/adjustable_agent/rule_based_agent.py)."
     )
 
 
 # -------------------------- patch manual_control behavior ---------------------
-def _install_rule_bases_agent_patch(mc):
+def _install_rule_based_agent_patch(mc):
     """
     Patch KeyboardControl.parse_events so that when '_autopilot_enabled' is ON,
     we disable TM autopilot and instead run SimpleAgent each tick. This keeps
@@ -99,12 +101,14 @@ def _install_rule_bases_agent_patch(mc):
         # When the viewer's autopilot is ON, run our Python carla_agent instead of TM
         try:
             import carla  # available after CARLA egg is loaded by manual_control
+            # (Re)bind carla_agent if the ego changed or carla_agent not present
+            agent = getattr(self, "_agent", None)
+            if isinstance(world.player, carla.Vehicle) and not getattr(self, "_autopilot_enabled", False):
+                agent = None
+                self._agent = None
             if isinstance(world.player, carla.Vehicle) and getattr(self, "_autopilot_enabled", False):
                 # Make sure Traffic Manager isn't touching the car
                 world.player.set_autopilot(False)
-
-                # (Re)bind carla_agent if the ego changed or carla_agent not present
-                agent = getattr(self, "_agent", None)
                 if not agent or getattr(agent, "ego", None) is None or agent.ego.id != world.player.id:
                     # Optional: read some knobs from environment if you like
                     lane_offset = float(os.getenv("TM_LANE_OFFSET", "0.0"))
@@ -209,7 +213,7 @@ def launch_from_runner(host="127.0.0.1", port=2000, res="1280x720", sync=True, c
         raise ValueError("launch_from_runner requires 'carla_exe' to locate manual_control.py")
 
     mc = _load_manual_control_from_carla(carla_exe)
-    _install_simple_agent_patch(mc)
+    _install_rule_based_agent_patch(mc)
 
     # Build args namespace expected by manual_control.game_loop
     args = argparse.Namespace()

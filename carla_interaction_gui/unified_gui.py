@@ -446,6 +446,8 @@ class UnifiedCarlaGUI(tk.Tk):
                     cmd += ["--map-name", m]
                 if getattr(cfg, "render_quality_low", False):
                     cmd.append("--quality-low")
+                if getattr(cfg, "render_off_screen", False):
+                    cmd.append("--offscreen")
 
                 # viewer needs a window; do NOT pass --offscreen
                 cmd += ["--res", "1280x720", "--sync"]

@@ -33,7 +33,7 @@ class TrafficLightLogic:
     def _get_affected_junction(self, loc: LocalizationBuffer):
         look_wp, _ = loc.get_target_waypoint(C.WaypointSelection.JUNCTION_LOOK_AHEAD)
         front_wp = loc.buffer[0]
-        look_id = self._junction_id(look_wp);
+        look_id = self._junction_id(look_wp)
         front_id = self._junction_id(front_wp)
         current_id = self.vehicle_last_junction.get(self.vehicle.id)
         if current_id is not None:
@@ -76,8 +76,8 @@ class TrafficLightLogic:
         return stops
 
     def _find_controlling_tl_ahead(self, loc: LocalizationBuffer) -> Optional[carla.TrafficLight]:
-        v = self.vehicle;
-        vloc = v.get_location();
+        v = self.vehicle
+        vloc = v.get_location()
         fwd = v.get_transform().get_forward_vector()
         front_wp = loc.buffer[0]
         best, best_d = None, float("inf")
@@ -91,14 +91,15 @@ class TrafficLightLogic:
                 if d < best_d and d <= 45.0: best, best_d = tl, d
         return best
 
-    def _ahead_path_lane_keys(self, loc: LocalizationBuffer,
+    @staticmethod
+    def _ahead_path_lane_keys(loc: LocalizationBuffer,
                               look_dist: float = C.WaypointSelection.JUNCTION_LOOK_AHEAD) -> List[tuple]:
         """Collect (road_id, lane_id) pairs along the buffered path up to look_dist."""
         keys = []
         acc = 0.0
         buf = list(loc.buffer)
         for i in range(1, len(buf)):
-            a = buf[i - 1].transform.location;
+            a = buf[i - 1].transform.location
             b = buf[i].transform.location
             dx, dy, dz = a.x - b.x, a.y - b.y, a.z - b.z
             d = (dx * dx + dy * dy + dz * dz) ** 0.5
@@ -137,7 +138,7 @@ class TrafficLightLogic:
         dq = self.entering_vehicles_map.get(junc_id, deque())
         now = self.world.get_snapshot().timestamp.elapsed_seconds
         if ego_id not in self.vehicle_stop_time:
-            self.vehicle_stop_time[ego_id] = now;
+            self.vehicle_stop_time[ego_id] = now
             return True
         if dq and dq[0] == ego_id:
             entry_time = self.vehicle_stop_time.get(ego_id, now)
@@ -171,7 +172,7 @@ class TrafficLightLogic:
                 stops = self._flatten_stop_wps(tl)
                 stop_wp = stops[0] if stops else None
                 if stop_wp is not None:
-                    sl = stop_wp.transform.location;
+                    sl = stop_wp.transform.location
                     vloc = self.vehicle.get_location()
                     dx, dy, dz = sl.x - vloc.x, sl.y - vloc.y, sl.z - vloc.z
                     dist = (dx * dx + dy * dy + dz * dz) ** 0.5
@@ -241,7 +242,7 @@ class TrafficLightLogic:
                     self._add_actor_to_non_signalised(ego_id, affected)
                     return True
 
-            # If we get here, tl_hazard is the decision for signals; non‑signalized otherwise unchanged
+            # If we get here, tl_hazard is the decision for signals non‑signalized otherwise unchanged
             return tl_hazard
 
         if at_tl and tl_state not in (carla.TrafficLightState.Green, carla.TrafficLightState.Off):
