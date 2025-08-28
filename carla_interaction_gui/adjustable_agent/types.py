@@ -36,6 +36,7 @@ class SensedState:
 class Plan:
     target_speed_mps: float
     target_wp: carla.Waypoint
+    path_waypoints: list[carla.Waypoint]
     blink_left: bool = False
     blink_right: bool = False
     headlights_on: bool = False

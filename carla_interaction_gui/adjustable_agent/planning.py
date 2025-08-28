@@ -4,6 +4,7 @@ import math
 from typing import Tuple, Optional, List
 
 import carla
+from carla import Waypoint
 
 from .types import SensedState, Plan
 
@@ -62,7 +63,7 @@ class Planning:
                 target_speed = 0.0
 
         # --- junction path choice (uniform random among branches) ---
-        target_wp = self._choose_target_waypoint(s)
+        target_wp, path_waypoints = self._choose_target_waypoint(s)
 
         # --- turn signals (based on planned target waypoint heading change) ---
         blink_left, blink_right = self._decide_blinkers(s.wp, target_wp)
@@ -73,6 +74,7 @@ class Planning:
         return Plan(
             target_speed_mps=max(0.0, target_speed),
             target_wp=target_wp,
+            path_waypoints=path_waypoints,
             blink_left=blink_left,
             blink_right=blink_right,
             headlights_on=headlights_on,
@@ -86,7 +88,7 @@ class Planning:
             return 0.0
         return math.sqrt(2.0 * comfort_dec * dist)
 
-    def _choose_target_waypoint(self, s: SensedState) -> carla.Waypoint:
+    def _choose_target_waypoint(self, s: SensedState) -> tuple[carla.Waypoint, list[carla.Waypoint]]:
         """
         CARLA-only lane following with *persistent* lane paths:
 
@@ -207,6 +209,8 @@ class Planning:
             self._active_path_idx = best_idx
             return path[best_idx]
 
+        path_waypoints: list[Waypoint] = []
+
         # ---------------- NOT in a junction: manage straight path and preselect upcoming junction branch ----------------
         if not wp.is_junction:
             # If we just exited a junction, clear junction state (keep/rebuild straight path separately)
@@ -259,7 +263,8 @@ class Planning:
 
             # Target from the *persisted straight* path
             tgt = pick_ahead_from_path(self._straight_path or [])
-            return tgt if tgt is not None else (self._straight_path[0] if self._straight_path else wp)
+            return tgt if tgt is not None else (
+                self._straight_path[0] if self._straight_path else wp), self._straight_path
 
         # ---------------- Inside a junction: stick to the preselected branch path ----------------
         if wp.is_junction:
@@ -271,9 +276,9 @@ class Planning:
                 self._entered_active_junction = True
                 tgt = pick_ahead_from_path(self._active_path)
                 if tgt is not None:
-                    return tgt
+                    return tgt, self._active_path
                 # If path exists but no ahead target, return its last point as a safe fallback
-                return self._active_path[-1]
+                return self._active_path[-1], self._active_path
 
             # Entered a junction without preselection (rare): choose an ahead DRIVING option and build its path
             opts = driving_only(s.next_options if s.next_options else wp.next(2.0))
@@ -286,12 +291,12 @@ class Planning:
                 self._active_path_idx = 0
                 self._entered_active_junction = True
                 tgt = pick_ahead_from_path(self._active_path)
-                return tgt if tgt is not None else choice
+                return tgt if tgt is not None else choice, self._active_path
 
         # ---------------- Default: best-effort follow ahead DRIVING option ----------------
         opts = driving_only(s.next_options if s.next_options else wp.next(2.0))
         ahead_opts = [o for o in opts if is_ahead_loc(o.transform.location)]
-        return (ahead_opts[0] if ahead_opts else (opts[0] if opts else wp))
+        return ahead_opts[0], ahead_opts if ahead_opts else (opts[0], opts if opts else wp, [])
 
     def _decide_blinkers(self, wp: carla.Waypoint, target_wp: carla.Waypoint) -> Tuple[bool, bool]:
         """Blinkers based on signed heading change between current and target waypoint."""
