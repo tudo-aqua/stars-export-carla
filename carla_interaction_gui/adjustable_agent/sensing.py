@@ -26,7 +26,7 @@ class Sensing:
         speed_vec = self.ego.get_velocity()
         speed_mps = (speed_vec.x ** 2 + speed_vec.y ** 2 + speed_vec.z ** 2) ** 0.5
 
-        speed_limit_kmh = getattr(ego_wp, "speed_limit", 30.0)
+        speed_limit_kmh = self.ego.get_speed_limit()
         speed_limit_mps = speed_limit_kmh / 3.6
 
         next_options = ego_wp.next(2.0)
