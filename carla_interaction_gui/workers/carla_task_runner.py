@@ -104,7 +104,7 @@ def run_gen_maps(args):
         client = restart_and_connect(
             exe=args.carla_exe,
             render_off_screen=args.offscreen,
-            render_quality_low=args.quality_low,
+            render_quality_low=False,
             # initial map doesn’t matter; we will load per-map below
             map_name=None,
             log=print,

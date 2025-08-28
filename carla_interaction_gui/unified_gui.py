@@ -375,8 +375,6 @@ class UnifiedCarlaGUI(tk.Tk):
         rendering_options.pack(fill="x", padx=4, pady=6)
         tk.Checkbutton(rendering_options, text="Render off screen",
                        variable=self.render_off_screen_variable, anchor="w").pack(fill="x", padx=6, pady=2)
-        tk.Checkbutton(rendering_options, text="Render quality low",
-                       variable=self.render_quality_low_variable, anchor="w").pack(fill="x", padx=6, pady=2)
 
         tk.Button(frame, text="Generate all maps", command=self._start_generate_maps).pack(pady=10)
         self.stop_btn_generate = tk.Button(frame, text="Stop",
