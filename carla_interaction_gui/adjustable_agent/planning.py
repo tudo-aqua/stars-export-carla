@@ -238,7 +238,7 @@ class Planning:
             first_junc_wp, last_non_junc = first_junction_and_last_non(wp)
             if first_junc_wp is not None:
                 junc_id = first_junc_wp.get_junction().id
-                raw_opts = first_junc_wp.next(2.0) or []
+                raw_opts = last_non_junc.next(2.0) or []
                 branch_opts = driving_only([o for o in raw_opts if is_ahead_loc(o.transform.location)])
                 if branch_opts:
                     # Keep existing choice if same junction; otherwise choose uniformly and build its path
