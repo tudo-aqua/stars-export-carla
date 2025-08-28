@@ -91,7 +91,6 @@ class Sensing:
     def _flatten_stop_wps(self, tl: carla.TrafficLight) -> List[carla.Waypoint]:
         """
         Returns all stop-line waypoints for this TL (handles API variants).
-        NOTE: use extend(), not append(), because the modern API returns a list of lists.
         """
         wps: List[carla.Waypoint] = []
         # Modern API: list[list[Waypoint]] (one list per lane)
@@ -99,7 +98,7 @@ class Sensing:
             groups = tl.get_stop_waypoints()
             for g in groups:
                 # g is a List[Waypoint]
-                wps.extend(g)
+                wps.append(g)
             return wps
         except Exception:
             pass
