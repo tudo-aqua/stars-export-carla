@@ -1,14 +1,15 @@
 carla~=0.9.15
 numpy~=2.2.6
-dataclass-wizard~=0.35.0
+dash-extensions~=1.0.20
+dataclass-wizard~=0.30.1
 opencv-python~=4.12.0.88
 scipy~=1.15.3
 psutil~=7.0.0
 orjson~=3.11.0
 plotly~=6.2.0
 dash~=3.1.1
-dash-extensions==1.0.20
 tzdata~=2025.2
 pandas~=2.3.1
 shapely~=2.1.1
 pygame
+networkx
