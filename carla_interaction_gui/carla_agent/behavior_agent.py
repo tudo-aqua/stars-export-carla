@@ -7,6 +7,7 @@
 """ This module implements an agent that roams around a track following random
 waypoints and avoiding other vehicles. The agent also responds to traffic lights,
 traffic signs, and has different possible configurations. """
+import random
 
 import carla
 import numpy as np
@@ -66,8 +67,8 @@ class BehaviorAgent(BasicAgent):
         This method updates the information regarding the ego
         vehicle based on the surrounding world.
         """
-        self._speed = get_speed(self._vehicle)
-        self._speed_limit = self._vehicle.get_speed_limit()
+        self._speed = get_speed(self.vehicle)
+        self._speed_limit = self.vehicle.get_speed_limit()
         self._local_planner.set_speed(self._speed_limit)
         self._direction = self._local_planner.target_road_option
         if self._direction is None:
@@ -112,21 +113,23 @@ class BehaviorAgent(BasicAgent):
                 carla.LaneChange.Both) and waypoint.lane_id * right_wpt.lane_id > 0 and right_wpt.lane_type == carla.LaneType.Driving:
                 new_vehicle_state, _, _ = self._vehicle_obstacle_detected(vehicle_list, max(
                     self._behavior.min_proximity_threshold, self._speed_limit / 2), up_angle_th=180, lane_offset=1)
-                if not new_vehicle_state:
-                    print("Tailgating, moving to the right!")
-                    end_waypoint = self._local_planner.target_waypoint
-                    self._behavior.tailgate_counter = 200
-                    self.set_destination(end_waypoint.transform.location,
-                                         right_wpt.transform.location)
+                if not self._local_planner.is_plan_locked():
+                    if not new_vehicle_state:
+                        print("Tailgating, moving to the right!")
+                        end_waypoint = self._local_planner.target_waypoint
+                        self._behavior.tailgate_counter = 200
+                        self.set_destination(end_waypoint.transform.location,
+                                             right_wpt.transform.location)
             elif left_turn == carla.LaneChange.Left and waypoint.lane_id * left_wpt.lane_id > 0 and left_wpt.lane_type == carla.LaneType.Driving:
                 new_vehicle_state, _, _ = self._vehicle_obstacle_detected(vehicle_list, max(
                     self._behavior.min_proximity_threshold, self._speed_limit / 2), up_angle_th=180, lane_offset=-1)
-                if not new_vehicle_state:
-                    print("Tailgating, moving to the left!")
-                    end_waypoint = self._local_planner.target_waypoint
-                    self._behavior.tailgate_counter = 200
-                    self.set_destination(end_waypoint.transform.location,
-                                         left_wpt.transform.location)
+                if not self._local_planner.is_plan_locked():
+                    if not new_vehicle_state:
+                        print("Tailgating, moving to the left!")
+                        end_waypoint = self._local_planner.target_waypoint
+                        self._behavior.tailgate_counter = 200
+                        self.set_destination(end_waypoint.transform.location,
+                                             left_wpt.transform.location)
 
     def collision_and_car_avoid_manager(self, waypoint):
         """
@@ -145,7 +148,7 @@ class BehaviorAgent(BasicAgent):
         def dist(v):
             return v.get_location().distance(waypoint.transform.location)
 
-        vehicle_list = [v for v in vehicle_list if dist(v) < 45 and v.id != self._vehicle.id]
+        vehicle_list = [v for v in vehicle_list if dist(v) < 45 and v.id != self.vehicle.id]
 
         if self._direction == RoadOption.CHANGELANELEFT:
             vehicle_state, vehicle, distance = self._vehicle_obstacle_detected(
@@ -242,7 +245,7 @@ class BehaviorAgent(BasicAgent):
 
         return control
 
-    def run_step(self, debug=False):
+    def run_step(self, debug=True):
         """
         Execute one step of navigation.
 
@@ -255,7 +258,7 @@ class BehaviorAgent(BasicAgent):
         if self._behavior.tailgate_counter > 0:
             self._behavior.tailgate_counter -= 1
 
-        ego_vehicle_loc = self._vehicle.get_location()
+        ego_vehicle_loc = self.vehicle.get_location()
         ego_vehicle_wp = self._map.get_waypoint(ego_vehicle_loc)
 
         # 1: Red lights and stops behavior
@@ -270,7 +273,7 @@ class BehaviorAgent(BasicAgent):
             # we use bounding boxes to calculate the actual distance
             distance = w_distance - max(
                 walker.bounding_box.extent.y, walker.bounding_box.extent.x) - max(
-                self._vehicle.bounding_box.extent.y, self._vehicle.bounding_box.extent.x)
+                self.vehicle.bounding_box.extent.y, self.vehicle.bounding_box.extent.x)
 
             # Emergency brake if the car is very close.
             if distance < self._behavior.braking_distance:
@@ -284,7 +287,7 @@ class BehaviorAgent(BasicAgent):
             # we use bounding boxes to calculate the actual distance
             distance = distance - max(
                 vehicle.bounding_box.extent.y, vehicle.bounding_box.extent.x) - max(
-                self._vehicle.bounding_box.extent.y, self._vehicle.bounding_box.extent.x)
+                self.vehicle.bounding_box.extent.y, self.vehicle.bounding_box.extent.x)
 
             # Emergency brake if the car is very close.
             if distance < self._behavior.braking_distance:
@@ -302,11 +305,25 @@ class BehaviorAgent(BasicAgent):
 
         # 4: Normal behavior
         else:
-            target_speed = min([
-                self._behavior.max_speed,
-                self._speed_limit - self._behavior.speed_lim_dist])
+            if self._direction == RoadOption.LANEFOLLOW and not self._incoming_waypoint.is_junction:
+                if self.maybe_random_lane_change(
+                        prob_per_tick=0.02,  # ~2% per tick
+                        look_ahead_m=30.0,
+                        same_lane_s=2.0, other_lane_s=4.0, change_s=3.5):
+                    return self._local_planner.run_step(debug=debug)  # use the new plan now
+
+            target_speed = min([self._behavior.max_speed, self._speed_limit - self._behavior.speed_lim_dist])
             self._local_planner.set_speed(target_speed)
             control = self._local_planner.run_step(debug=debug)
+
+        try:
+            if self._local_planner.is_plan_locked():
+                ahead = list(self._local_planner.get_plan())[:8]
+                # If there are no CHANGELANE markers among the next few, consider the change complete
+                if all(ro not in (RoadOption.CHANGELANELEFT, RoadOption.CHANGELANERIGHT) for _, ro in ahead):
+                    self._local_planner.resume_random_waypoints()
+        except Exception:
+            pass
 
         return control
 
@@ -322,3 +339,40 @@ class BehaviorAgent(BasicAgent):
         control.brake = self._max_brake
         control.hand_brake = False
         return control
+
+    def maybe_random_lane_change(self, prob_per_tick: float = 0.02,
+                                 look_ahead_m: float = 25.0,
+                                 same_lane_s=1.0, other_lane_s=2.0, change_s=3.0):
+        # Don't spam changes while already doing one / in junctions
+        wp = self.get_local_planner().target_waypoint
+        if wp is None or wp.is_junction:
+            return False
+
+        dirs = []
+
+        # Right allowed + clear?
+        if wp.right_lane_marking and (wp.right_lane_marking.lane_change & carla.LaneChange.Right):
+            r = wp.get_right_lane()
+            if r and r.lane_type == carla.LaneType.Driving and wp.lane_id * r.lane_id > 0:
+                blocked, _, _ = self._vehicle_obstacle_detected(
+                    vehicle_list=None, max_distance=look_ahead_m, up_angle_th=180, lane_offset=+1)
+                if not blocked:
+                    dirs.append('right')
+
+        # Left allowed + clear?
+        if wp.left_lane_marking and (wp.left_lane_marking.lane_change & carla.LaneChange.Left):
+            l = wp.get_left_lane()
+            if l and l.lane_type == carla.LaneType.Driving and wp.lane_id * l.lane_id > 0:
+                blocked, _, _ = self._vehicle_obstacle_detected(
+                    vehicle_list=None, max_distance=look_ahead_m, up_angle_th=180, lane_offset=-1)
+                if not blocked:
+                    dirs.append('left')
+
+        if dirs and random.random() < prob_per_tick:
+            self.lane_change(random.choice(dirs),
+                             same_lane_time=same_lane_s,
+                             other_lane_time=other_lane_s,
+                             lane_change_time=change_s)
+            print("Perform lane change")
+            return True
+        return False

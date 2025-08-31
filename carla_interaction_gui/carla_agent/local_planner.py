@@ -88,6 +88,7 @@ class LocalPlanner(object):
         self._base_min_distance = 3.0
         self._distance_ratio = 0.5
         self._follow_speed_limits = False
+        self._plan_locked = False  # prevents external plan changes during a lane change
 
         # Overload parameters
         if opt_dict:
@@ -122,6 +123,20 @@ class LocalPlanner(object):
     def reset_vehicle(self):
         """Reset the ego-vehicle"""
         self._vehicle = None
+
+    def is_plan_locked(self) -> bool:
+        return self._plan_locked
+
+    def lock_plan(self, locked: bool = True) -> None:
+        """Lock/unlock the current plan. While locked, no one may replace/append it and no random growth occurs."""
+        self._plan_locked = locked
+        # keep random growth OFF while locked
+        self._stop_waypoint_creation = True
+
+    def resume_random_waypoints(self) -> None:
+        """Resume normal random growth after a maneuver finished."""
+        self._plan_locked = False
+        self._stop_waypoint_creation = False
 
     def _init_controller(self):
         """Controller initialization"""
@@ -201,6 +216,13 @@ class LocalPlanner(object):
         :param clean_queue: bool
         :return:
         """
+        if self._plan_locked:
+            print("[LP] IGNORE set_global_plan while locked "
+                  f"(len={len(current_plan)}, stop={stop_waypoint_creation}, clean={clean_queue})")
+            return
+        if self._plan_locked:
+            return
+
         if clean_queue:
             self._waypoints_queue.clear()
 
@@ -229,11 +251,15 @@ class LocalPlanner(object):
         :param debug: boolean flag to activate waypoints debugging
         :return: control to be applied
         """
+        if self._plan_locked:
+            self._stop_waypoint_creation = True
+
         if self._follow_speed_limits:
             self._target_speed = self._vehicle.get_speed_limit()
 
         # Add more waypoints too few in the horizon
-        if not self._stop_waypoint_creation and len(self._waypoints_queue) < self._min_waypoint_queue_length:
+        if (not self._plan_locked) and (not self._stop_waypoint_creation) and \
+                len(self._waypoints_queue) < self._min_waypoint_queue_length:
             self._compute_next_waypoints(k=self._min_waypoint_queue_length)
 
         # Purge the queue of obsolete waypoints
@@ -262,6 +288,7 @@ class LocalPlanner(object):
         if len(self._waypoints_queue):
             head = list(self._waypoints_queue)[:6]
             print("[LP] stop_create=", self._stop_waypoint_creation,
+                  "_plan_locked", self._plan_locked,
                   "queue_len=", len(self._waypoints_queue),
                   "head_opts=", [ro.name for (_, ro) in head])
         # DEBUG END

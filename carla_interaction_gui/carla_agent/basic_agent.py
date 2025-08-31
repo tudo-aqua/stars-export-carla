@@ -148,6 +148,9 @@ class BasicAgent(object):
             :param end_location (carla.Location): final location of the route
             :param start_location (carla.Location): starting location of the route
         """
+        if self._local_planner.is_plan_locked():
+            print("[BA] set_destination ignored: plan locked")
+            return
         if not start_location:
             start_location = self._local_planner.target_waypoint.transform.location
             clean_queue = True
@@ -235,9 +238,8 @@ class BasicAgent(object):
 
     def lane_change(self, direction, same_lane_time=0, other_lane_time=0, lane_change_time=2):
         """
-        Changes the path so that the vehicle performs a lane change.
-        Use 'direction' to specify either a 'left' or 'right' lane change,
-        and the other 3 fine tune the maneuver
+        Build a lane-change path and make it 'sticky' so nothing overwrites it.
+        Also trim the lead-in so the change starts immediately.
         """
         speed = self.vehicle.get_velocity().length()
         path = self._generate_lane_change_path(
@@ -252,8 +254,17 @@ class BasicAgent(object):
         )
         if not path:
             print("WARNING: Ignoring the lane change as no path was found")
+            return
 
-        self.set_global_plan(path)
+        # --- TRIM: start near the first CHANGELANE so it can’t be purged before execution
+        for i, (_, ro) in enumerate(path):
+            if ro in (RoadOption.CHANGELANELEFT, RoadOption.CHANGELANERIGHT):
+                start_idx = i  # was: max(0, i - 1)
+                path = path[start_idx:]
+                break
+
+        self.set_global_plan(path, stop_waypoint_creation=True, clean_queue=True)
+        self._local_planner.lock_plan(True)
 
     def _affected_by_traffic_light(self, lights_list=None, max_distance=None):
         """

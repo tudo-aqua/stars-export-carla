@@ -164,7 +164,7 @@ def _install_carla_agent_patch(mc):
             if isinstance(world.player, carla.Vehicle) and getattr(self, "_autopilot_enabled", False):
                 # Make sure Traffic Manager isn't touching the car
                 world.player.set_autopilot(False)
-                if not agent or getattr(agent, "_vehicle", None) is None or agent.vehicle.id != world.player.id:
+                if not agent or getattr(agent, "vehicle", None) is None or agent.vehicle.id != world.player.id:
                     agent = Agent(world.player)
                     self._agent = agent
                 control = self._agent.run_step()
