@@ -39,8 +39,8 @@ class BasicAgent(object):
             :param grp_inst: GlobalRoutePlanner instance to avoid the expensive call of getting it.
 
         """
-        self._vehicle = vehicle
-        self._world = self._vehicle.get_world()
+        self.vehicle = vehicle
+        self._world = self.vehicle.get_world()
         if map_inst:
             if isinstance(map_inst, carla.Map):
                 self._map = map_inst
@@ -88,7 +88,7 @@ class BasicAgent(object):
             self._offset = opt_dict['offset']
 
         # Initialize the planners
-        self._local_planner = LocalPlanner(self._vehicle, opt_dict=opt_dict, map_inst=self._map)
+        self._local_planner = LocalPlanner(self.vehicle, opt_dict=opt_dict, map_inst=self._map)
         if grp_inst:
             if isinstance(grp_inst, GlobalRoutePlanner):
                 self._global_planner = grp_inst
@@ -152,7 +152,7 @@ class BasicAgent(object):
             start_location = self._local_planner.target_waypoint.transform.location
             clean_queue = True
         else:
-            start_location = self._vehicle.get_location()
+            start_location = self.vehicle.get_location()
             clean_queue = False
 
         start_waypoint = self._map.get_waypoint(start_location)
@@ -193,7 +193,7 @@ class BasicAgent(object):
         # Retrieve all relevant actors
         vehicle_list = self._world.get_actors().filter("*vehicle*")
 
-        vehicle_speed = get_speed(self._vehicle) / 3.6
+        vehicle_speed = get_speed(self.vehicle) / 3.6
 
         # Check for possible vehicle obstacles
         max_vehicle_distance = self._base_vehicle_threshold + self._speed_ratio * vehicle_speed
@@ -239,9 +239,9 @@ class BasicAgent(object):
         Use 'direction' to specify either a 'left' or 'right' lane change,
         and the other 3 fine tune the maneuver
         """
-        speed = self._vehicle.get_velocity().length()
+        speed = self.vehicle.get_velocity().length()
         path = self._generate_lane_change_path(
-            self._map.get_waypoint(self._vehicle.get_location()),
+            self._map.get_waypoint(self.vehicle.get_location()),
             direction,
             same_lane_time * speed,
             other_lane_time * speed,
@@ -279,7 +279,7 @@ class BasicAgent(object):
             else:
                 return (True, self._last_traffic_light)
 
-        ego_vehicle_location = self._vehicle.get_location()
+        ego_vehicle_location = self.vehicle.get_location()
         ego_vehicle_waypoint = self._map.get_waypoint(ego_vehicle_location)
 
         for traffic_light in lights_list:
@@ -306,7 +306,7 @@ class BasicAgent(object):
             if traffic_light.state != carla.TrafficLightState.Red:
                 continue
 
-            if is_within_distance(trigger_wp.transform, self._vehicle.get_transform(), max_distance, [0, 90]):
+            if is_within_distance(trigger_wp.transform, self.vehicle.get_transform(), max_distance, [0, 90]):
                 self._last_traffic_light = traffic_light
                 return (True, traffic_light)
 
@@ -325,7 +325,7 @@ class BasicAgent(object):
 
         def get_route_polygon():
             route_bb = []
-            extent_y = self._vehicle.bounding_box.extent.y
+            extent_y = self.vehicle.bounding_box.extent.y
             r_ext = extent_y + self._offset
             l_ext = -extent_y + self._offset
             r_vec = ego_transform.get_right_vector()
@@ -357,7 +357,7 @@ class BasicAgent(object):
         if not max_distance:
             max_distance = self._base_vehicle_threshold
 
-        ego_transform = self._vehicle.get_transform()
+        ego_transform = self.vehicle.get_transform()
         ego_location = ego_transform.location
         ego_wpt = self._map.get_waypoint(ego_location)
 
@@ -368,16 +368,16 @@ class BasicAgent(object):
         # Get the transform of the front of the ego
         ego_front_transform = ego_transform
         ego_front_transform.location += carla.Location(
-            self._vehicle.bounding_box.extent.x * ego_transform.get_forward_vector())
+            self.vehicle.bounding_box.extent.x * ego_transform.get_forward_vector())
 
-        opposite_invasion = abs(self._offset) + self._vehicle.bounding_box.extent.y > ego_wpt.lane_width / 2
+        opposite_invasion = abs(self._offset) + self.vehicle.bounding_box.extent.y > ego_wpt.lane_width / 2
         use_bbs = self._use_bbs_detection or opposite_invasion or ego_wpt.is_junction
 
         # Get the route bounding box
         route_polygon = get_route_polygon()
 
         for target_vehicle in vehicle_list:
-            if target_vehicle.id == self._vehicle.id:
+            if target_vehicle.id == self.vehicle.id:
                 continue
 
             target_transform = target_vehicle.get_transform()
