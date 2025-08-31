@@ -258,6 +258,14 @@ class LocalPlanner(object):
             for _ in range(num_waypoint_removed):
                 self._waypoints_queue.popleft()
 
+        # DEBUG START
+        if len(self._waypoints_queue):
+            head = list(self._waypoints_queue)[:6]
+            print("[LP] stop_create=", self._stop_waypoint_creation,
+                  "queue_len=", len(self._waypoints_queue),
+                  "head_opts=", [ro.name for (_, ro) in head])
+        # DEBUG END
+
         # Get the target waypoint and move using the PID controllers. Stop if no target waypoint
         if len(self._waypoints_queue) == 0:
             control = carla.VehicleControl()
