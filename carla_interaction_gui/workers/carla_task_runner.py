@@ -3,10 +3,10 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 import traceback
 from typing import List
 
-from carla_interaction_gui import carla_launcher
 from carla_interaction_gui.carla_launcher import restart_and_connect, kill_carla
 from carla_interaction_gui.workers import manual_agent_control
 from data_av_static import MapRasterizer  # existing import for other subcommands
@@ -120,8 +120,19 @@ def run_gen_maps(args):
 
         for map_name in maps:
             print(f">> [GenerateMaps] Loading map: {map_name}")
-            carla_launcher.set_map_via_config_py(exe=args.carla_exe, map_name=map_name)
+            client.load_world(map_name)
+            time.sleep(3)
             world = client.get_world()
+            current_map_name = world.get_map().name
+            if map_name not in current_map_name:
+                print(f">> [GenerateMaps] Warning: map name mismatch: {current_map_name} != {map_name}")
+                print(f">> [GenerateMaps] Wait 10 seconds and retry.")
+                time.sleep(10)
+                world = client.get_world()
+                current_map_name = world.get_map().name
+                if map_name not in current_map_name:
+                    print(f">> [GenerateMaps] Failed to load map: {map_name}")
+                    continue
 
             rasterizer = MapRasterizer(world)
             print(">> [Data-AV Transformer] Load or calculate map data.")

@@ -23,7 +23,7 @@ ALLOWED_NON_LAYERED_MAPS = [
     "Town03",
     # "Town04",
     "Town05",
-    "Town10HD_Opt",
+    "Town10HD",
 ]
 ALLOWED_CARLA_MAPS = ALLOWED_NON_LAYERED_MAPS
 
