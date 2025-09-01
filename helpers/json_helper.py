@@ -1,6 +1,5 @@
 import json
 import os
-import re
 import zipfile
 from datetime import datetime
 from os.path import dirname
@@ -187,17 +186,6 @@ class JSONHelper:
         with open(path, encoding="utf8") as logfile:
             data = json.loads(logfile.read())
             return DataWeatherParameters.from_dict(data)
-
-    @staticmethod
-    def load_weather_from_scenic(path: os.path) -> DataWeatherParameters:
-        # Read the file and extract the weather value
-        with open(path, "r") as file:
-            for line in file:
-                match = re.search(r'param weather = "(.*?)"', line)
-                if match:
-                    weather_value = match.group(1)
-                    print(f">> [Scenic] Extracted weather value: {weather_value}")
-                    return DataWeatherParameters.from_enum_value(weather_value)
 
     @staticmethod
     def zip_and_delete_file(path: os.path) -> None:

@@ -50,7 +50,7 @@ class CarlaMonitor:
             print(f">> [IO] There is no weather data for the recording file: '{weather_file}'")
             print(">> [CARLA] Take default weather parameters.")
             return DataWeatherParameters.from_weather(WeatherParameters.Default, DataWeatherParametersType.Default)
-        return JSONHelper.load_weather_from_scenic(weather_file)
+        return JSONHelper.load_weather(weather_file)
 
     # -------- tiny helpers -----------------------------------------------------
 
