@@ -95,7 +95,6 @@ class BehaviorAgent(BasicAgent):
         """
         This method is in charge of tailgating behaviors.
 
-            :param location: current location of the agent
             :param waypoint: current waypoint of the agent
             :param vehicle_list: list of all the nearby vehicles
         """
@@ -136,7 +135,6 @@ class BehaviorAgent(BasicAgent):
         This module is in charge of warning in case of a collision
         and managing possible tailgating chances.
 
-            :param location: current location of the agent
             :param waypoint: current waypoint of the agent
             :return vehicle_state: True if there is a vehicle nearby, False if not
             :return vehicle: nearby vehicle
@@ -176,7 +174,6 @@ class BehaviorAgent(BasicAgent):
         This module is in charge of warning in case of a collision
         with any pedestrian.
 
-            :param location: current location of the agent
             :param waypoint: current waypoint of the agent
             :return vehicle_state: True if there is a walker nearby, False if not
             :return vehicle: nearby walker
