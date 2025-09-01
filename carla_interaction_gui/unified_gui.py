@@ -75,6 +75,14 @@ class UnifiedCarlaGUI(tk.Tk):
             value=getattr(self.config, "render_quality_low", False)
         )
 
+        self.only_track_at_specific_interval_variable = tk.BooleanVar(
+            value=getattr(self.config, "only_track_at_specific_interval", False)
+        )
+        self.specific_track_interval_variable = tk.DoubleVar(
+            value=getattr(self.config, "specific_track_interval", 0.5)
+        )
+        self._specific_interval_entry: tk.Entry | None = None
+
         if getattr(self.config, "selected_map", "") in ALLOWED_CARLA_MAPS:
             default_map = self.config.selected_map
         else:
@@ -261,7 +269,7 @@ class UnifiedCarlaGUI(tk.Tk):
         self._entry_row(frame, "Output folder:", self.transformer_output_path_variable,
                         lambda: self._open_directory_dialog(self.transformer_output_path_variable))
 
-        # ── NEW: Rendering options ─────────────────────────────────────────────────
+        # ── Rendering options ─────────────────────────────────────────────────
         rendering_options = ttk.LabelFrame(frame, text="Rendering options")
         rendering_options.pack(fill="x", padx=4, pady=6)
 
@@ -278,7 +286,35 @@ class UnifiedCarlaGUI(tk.Tk):
             variable=self.render_quality_low_variable,
             anchor="w",
         ).pack(fill="x", padx=6, pady=2)
-        # ──────────────────────────────────────────────────────────────────────────
+        # ─────────────────────────────────────────────────────────────────────
+
+        # ── Tracking interval options ───────────────────────────────────
+        tracking_frame = ttk.LabelFrame(frame, text="Tracking interval")
+        tracking_frame.pack(fill="x", padx=4, pady=6)
+
+        tk.Checkbutton(
+            tracking_frame,
+            text="Only track at specific interval",
+            variable=self.only_track_at_specific_interval_variable,
+            anchor="w",
+            command=self._update_interval_entry_state
+        ).pack(fill="x", padx=6, pady=2)
+
+        row = tk.Frame(tracking_frame)
+        row.pack(fill="x", pady=2)
+        tk.Label(row, text="Interval (s):", width=26, anchor="w").pack(side="left")
+
+        vcmd = (self.register(self._validate_number), "%P")
+        self._specific_interval_entry = tk.Entry(
+            row,
+            textvariable=self.specific_track_interval_variable,
+            width=10,
+            validate="key",
+            validatecommand=vcmd
+        )
+        self._specific_interval_entry.pack(side="left", fill="x", expand=False)
+        self._update_interval_entry_state()
+        # ─────────────────────────────────────────────────────────────────────
 
         tk.Button(frame, text="Start transform",
                   command=self._start_transform).pack(pady=10)
@@ -337,7 +373,6 @@ class UnifiedCarlaGUI(tk.Tk):
             validate="key",
             validatecommand=vcmd
         ).pack(side="left", fill="x", expand=True)
-        # --------------------------------------------------------------
 
         tk.Checkbutton(video_parameters_label_frame, text="Draw 3-D bounding boxes",
                        variable=self.with_bboxes_variable).pack(anchor="w", padx=4, pady=4)
@@ -364,13 +399,11 @@ class UnifiedCarlaGUI(tk.Tk):
         notebook.add(frame, text="Generate Maps")
         tk.Label(frame, text="Generate map data for all allowed maps.").pack(pady=5)
 
-        # Reuse CARLA exe and output folder
         self._entry_row(frame, "CARLA executable:", self.carla_executable_variable,
                         lambda: self._open_file_dialog(self.carla_executable_variable))
         self._entry_row(frame, "Maps output folder:", self.transformer_output_path_variable,
                         lambda: self._open_directory_dialog(self.transformer_output_path_variable))
 
-        # Rendering options (same as other tabs)
         rendering_options = ttk.LabelFrame(frame, text="Rendering options")
         rendering_options.pack(fill="x", padx=4, pady=6)
         tk.Checkbutton(rendering_options, text="Render off screen",
@@ -447,24 +480,14 @@ class UnifiedCarlaGUI(tk.Tk):
                 if getattr(cfg, "render_off_screen", False):
                     cmd.append("--offscreen")
 
-                # viewer needs a window; do NOT pass --offscreen
                 cmd += ["--res", "1280x720", "--sync"]
 
-                # === Pass Agent settings to the subprocess via environment =========
-                # SimpleAgent reads these if present (kept generic on purpose).
                 os.environ["AGENT_TARGET_KPH"] = str(getattr(cfg, "agent_target_speed_kph", 35.0))
                 os.environ["AGENT_VEHICLE_FILTER"] = getattr(cfg, "agent_vehicle_filter", "vehicle.*")
-
-                # (Optional) TM-style knobs you might add later:
-                # os.environ["TM_PERCENT_RUN_LIGHT"] = "0.0"
-                # os.environ["TM_PERCENT_RUN_SIGN"] = "0.0"
-                # os.environ["TM_LANE_OFFSET"] = "0.0"
-                # ==================================================================
 
                 self_inner._start_and_stream(cmd)
 
         w = _Runner(cfg, self._log)
-        # IMPORTANT: attach the Agent tab's Stop button (not the Manual tab)
         self._attach_worker(w, stop_button=self.stop_btn_agent)
 
     def _validate_number(self, proposed: str) -> bool:
@@ -499,7 +522,6 @@ class UnifiedCarlaGUI(tk.Tk):
 
         if worker.exclusive:
             self._active_worker = worker
-            # enable the specific stop button for this task
             if stop_button is not None:
                 stop_button.config(state="normal")
                 self._current_stop_button = stop_button
@@ -510,7 +532,6 @@ class UnifiedCarlaGUI(tk.Tk):
             else:
                 if worker is self._active_worker:
                     self._active_worker = None
-                    # disable whichever stop button was tied to this worker
                     if self._current_stop_button is not None:
                         self._current_stop_button.config(state="disabled")
                         self._current_stop_button = None
@@ -555,8 +576,8 @@ class UnifiedCarlaGUI(tk.Tk):
         w = ManualControlWorker(
             self._collect_cfg(),
             self._log,
-            vehicle_filter="vehicle.lincoln.mkz_2020",  # requested default
-            role_name=None,  # manual_control.py default -> "hero"
+            vehicle_filter="vehicle.lincoln.mkz_2020",
+            role_name=None,
             restart_before=True,
             kill_server_after=True,
             exclusive=True,
@@ -579,12 +600,11 @@ class UnifiedCarlaGUI(tk.Tk):
             self._log,
             vehicle_filter=filter_str,
             role_name="manual_control",
-            restart_before=False,  # do NOT reboot the server
-            kill_server_after=False,  # do NOT kill the server when this instance ends
+            restart_before=False,
+            kill_server_after=False,
             exclusive=False,
         )
         self._manual_workers.append(w)
-        # non-exclusive: do not pass a stop_button tied to exclusivity
         self._attach_worker(w, stop_button=None, enable_move=False)
 
     def _move_latest(self):
@@ -652,7 +672,6 @@ class UnifiedCarlaGUI(tk.Tk):
 
         end_str = (self.end_at_variable.get() or "").strip()
         if not end_str:
-            # empty -> use file end
             config.end_at = float("inf")
         else:
             end_val = float(end_str)
@@ -672,7 +691,6 @@ class UnifiedCarlaGUI(tk.Tk):
         cfg = self._collect_cfg()
         cfg.maps_output_path = self.transformer_output_path_variable.get().strip()
 
-        # Only use the allowed maps constant here (as requested)
         allowed_maps = list(ALLOWED_NON_LAYERED_MAPS)
 
         from carla_interaction_gui.workers.GenerateMapsWorker import GenerateMapsWorker
@@ -695,7 +713,6 @@ class UnifiedCarlaGUI(tk.Tk):
                 pass
         self._manual_workers.clear()
 
-        # existing exclusive worker stop (kept)
         w = getattr(self, "_active_worker", None)
         if w:
             try:
@@ -714,7 +731,6 @@ class UnifiedCarlaGUI(tk.Tk):
             except Exception:
                 pass
 
-            # Defensive: also disable any per-tab stop buttons if they exist
             for btn_name in ("stop_btn_manual", "stop_btn_server", "stop_btn_transform", "stop_btn_video",
                              "stop_btn_agent", "btn_agent_toggle_ap", "btn_agent_toggle_rec"):
                 btn = getattr(self, btn_name, None)
@@ -724,7 +740,6 @@ class UnifiedCarlaGUI(tk.Tk):
                     except Exception:
                         pass
 
-        # stop CARLA server worker if running
         if getattr(self, "_carla_worker", None) and self._carla_worker.is_alive():
             try:
                 self._carla_worker.cancel()
@@ -764,7 +779,9 @@ class UnifiedCarlaGUI(tk.Tk):
                 self.render_off_screen_variable,
                 self.render_quality_low_variable,
                 self.agent_vehicle_filter_variable,
-                self.agent_target_speed_variable
+                self.agent_target_speed_variable,
+                self.only_track_at_specific_interval_variable,
+                self.specific_track_interval_variable,
         ):
             variable.trace_add("write", self._auto_save)
 
@@ -781,7 +798,6 @@ class UnifiedCarlaGUI(tk.Tk):
         try:
             self._collect_cfg()
         except Exception:
-            # Ignore transient parsing glitches while editing
             pass
 
     def _on_close(self):
@@ -818,13 +834,11 @@ class UnifiedCarlaGUI(tk.Tk):
         except Exception:
             config.agent_target_speed_kph = 35.0
 
-        # ---- tolerant numeric parsing (works with StringVar or DoubleVar) ----
         def _parse_var_as_float(var, default: float) -> float:
             try:
                 val = var.get()
             except Exception:
                 return default
-            # normalize to string for consistent handling
             s = str(val).strip()
             if s in ("", "-", ".", "-."):
                 return default
@@ -833,22 +847,21 @@ class UnifiedCarlaGUI(tk.Tk):
             except ValueError:
                 return default
 
-        # begin_at: clamp to >= 0
         begin = _parse_var_as_float(self.begin_at_variable, 0.0)
         config.begin_at = max(0.0, begin)
 
-        # end_at: empty -> file end; any negative -> file end
         end_val = _parse_var_as_float(self.end_at_variable, float("inf"))
         config.end_at = float("inf") if end_val < 0 else end_val
-        # ---------------------------------------------------------------------
 
-        # rendering + selected map (if you added these previously)
         if hasattr(self, "render_off_screen_variable"):
             config.render_off_screen = self.render_off_screen_variable.get()
         if hasattr(self, "render_quality_low_variable"):
             config.render_quality_low = self.render_quality_low_variable.get()
         if hasattr(self, "selected_map_variable"):
             config.selected_map = self.selected_map_variable.get().strip()
+
+        config.only_track_at_specific_interval = bool(self.only_track_at_specific_interval_variable.get())
+        config.specific_track_interval = _parse_var_as_float(self.specific_track_interval_variable, 0.5)
 
         save(config)
         return config
@@ -912,34 +925,27 @@ class UnifiedCarlaGUI(tk.Tk):
 
         class _TextOutputHandler:
             def __init__(self, gui): self.gui = gui
-
             def write(self, txt):
                 for lines in txt.rstrip().splitlines():
                     self.gui._log(lines)
-
             def flush(self): pass
-
         sys.stdout = sys.stderr = _TextOutputHandler(self)
 
     def _log(self, txt: str):
         """
         Logs a given text message to the GUI text widget and also appends it to a file.
         """
-        # 1) GUI pane
         self.log.configure(state="normal")
         self.log.insert("end", txt + "\n")
         self.log.see("end")
         self.log.configure(state="disabled")
 
-        # 2) File (append). Open per write to avoid cross-thread handle issues.
-        #    If _init_log_file didn't run yet for some reason, skip quietly.
         log_path = getattr(self, "_log_file_path", None)
         if log_path:
             try:
                 with open(log_path, "a", encoding="utf-8") as f:
                     f.write(txt + "\n")
             except Exception:
-                # never let file I/O break the GUI
                 pass
 
     def _clear_log(self):
@@ -956,18 +962,15 @@ class UnifiedCarlaGUI(tk.Tk):
         try:
             os.makedirs(logs_dir, exist_ok=True)
         except Exception:
-            # fallback to current working directory if making 'logs' failed
             logs_dir = os.getcwd()
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self._log_file_path = os.path.join(logs_dir, f"carla_gui_{timestamp}.log")
 
-        # write a small header
         try:
             with open(self._log_file_path, "a", encoding="utf-8") as f:
                 f.write(f"=== CARLA GUI log started {datetime.now().isoformat()} ===\n")
         except Exception:
-            # don't crash the GUI if file logging can't be set up
             pass
 
     def _validate_paths(self, specs: list[tuple[str, tk.Variable, str]]) -> bool:
@@ -995,11 +998,20 @@ class UnifiedCarlaGUI(tk.Tk):
                 if not os.path.isdir(value):
                     messagebox.showerror("Invalid path", f"{label} does not exist as a folder:\n{value}")
                     return False
-            else:  # "any"
+            else:
                 if not os.path.exists(value):
                     messagebox.showerror("Invalid path", f"{label} path does not exist:\n{value}")
                     return False
         return True
+
+    # NEW: enable/disable interval entry when checkbox toggles
+    def _update_interval_entry_state(self):
+        if not self._specific_interval_entry:
+            return
+        if self.only_track_at_specific_interval_variable.get():
+            self._specific_interval_entry.config(state="normal")
+        else:
+            self._specific_interval_entry.config(state="disabled")
 
 
 if __name__ == "__main__":

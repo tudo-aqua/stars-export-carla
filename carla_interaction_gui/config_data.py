@@ -20,10 +20,12 @@ class Config:
     new_file_name: str = ""
 
     transform_input_file: str = ""
-    video_input_file: str = ""
     transformer_output_path: str = ""
-    video_output_path: str = ""
+    only_track_at_specific_interval: bool = False
+    specific_track_interval: float = 0.5
 
+    video_input_file: str = ""
+    video_output_path: str = ""
     video_width: int = 640
     video_height: int = 480
     vehicle_id: int = -1

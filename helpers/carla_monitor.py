@@ -1,11 +1,9 @@
-import argparse
 import math
 import os
 import re
 from datetime import datetime
 from typing import List
 
-import carla
 from carla import World, Client
 from carla import WorldSnapshot, Vehicle, WeatherParameters
 from carla.libcarla import TrafficLight
@@ -20,19 +18,12 @@ from carla_data_classes.dynamic import (
 from carla_data_classes.enums.DataWeatherParametersType import DataWeatherParametersType
 from data_av_static import MapRasterizer
 from helpers.carla_api_helper import CarlaAPIHelper
-# NEW: log-driven collisions + ID mapping
 from helpers.collisions import RecorderIndex, IdMapper, collisions_for_time_window
 from helpers.json_helper import JSONHelper
 from helpers.kinematics import compute_vel_acc_for_ticks
 
 
 class CarlaMonitor:
-    FORCE_JSON_FILE_UPDATES = False
-    ONLY_TRACK_AT_SPECIFIC_INTERVAL = False
-    SPECIFIC_TRACK_INTERVAL = 0.5  # in seconds
-
-    DEFAULT_LOG_FOLDER = "C:/Users/Till/Downloads/scenarios/scenarios/scenario_1"
-
     def __init__(self, carla_client: Client):
         self.ego_vehicle = None
         self.client = carla_client
@@ -55,7 +46,7 @@ class CarlaMonitor:
     # -------- tiny helpers -----------------------------------------------------
 
     @staticmethod
-    def _parse_map_and_duration(info: str) -> (str, float, int):
+    def _parse_map_and_duration(info: str) -> tuple[str, float, int]:
         """
         Extract map name and duration (seconds) + frames from the info string.
         """
@@ -74,7 +65,14 @@ class CarlaMonitor:
 
     # -------- main entry -------------------------------------------------------
 
-    def monitor_simulation_run(self, file_path: str, weather_file_path: str, result_file_path: str) -> None:
+    def monitor_simulation_run(
+            self,
+            file_path: str,
+            weather_file_path: str,
+            result_file_path: str,
+            only_track_at_specific_interval: bool = False,
+            specific_track_interval: float = 0.5
+    ) -> None:
         """
         Replays the given .log and records dynamic data until the replay finishes.
         Collisions are taken from the recorder info and aligned by simulation time.
@@ -151,8 +149,8 @@ class CarlaMonitor:
                 current_time = sim_t - base_sim_time  # time since replay start (in-sim)
 
                 # Optional sampling throttle (unchanged)
-                if CarlaMonitor.ONLY_TRACK_AT_SPECIFIC_INTERVAL and math.fmod(
-                        round(current_time, 3), CarlaMonitor.SPECIFIC_TRACK_INTERVAL) != 0:
+                if only_track_at_specific_interval and math.fmod(
+                        round(current_time, 3), specific_track_interval) != 0:
                     world.tick()
                     continue
 
@@ -242,46 +240,3 @@ class CarlaMonitor:
             print(">> [Error] Logged failed Carla run")
             print(f">> [Error] Unexpected {err}, {type(err)}")
             JSONHelper.log_error("failed_run", name=log_data_path, error_message=f"{err}")
-
-
-if __name__ == '__main__':
-    argparser = argparse.ArgumentParser(description=__doc__)
-    argparser.add_argument(
-        '-f', '--folder',
-        metavar='F',
-        type=str,
-        default=CarlaMonitor.DEFAULT_LOG_FOLDER,
-        help='Set explicit recording folder path')
-    args = argparser.parse_args()
-    folder_path = os.path.abspath(args.folder)
-    print("Analyze folder at:", folder_path)
-
-    # Initialize variables
-    log_file = None
-    scenic_file = None
-
-    # Search for the files
-    for file in os.listdir(folder_path):
-        if file.endswith(".log"):
-            log_file = os.path.join(folder_path, file)
-        elif file.endswith(".scenic"):
-            scenic_file = os.path.join(folder_path, file)
-
-    print(f"Got simulation file: {log_file}")
-    print(f"Got scenic file: {scenic_file}")
-    print("Connect to Carla")
-
-    try:
-        client = carla.Client('localhost', 2000)
-        client.set_timeout(60.0)
-        client.get_world().get_actors()
-        monitor = CarlaMonitor(carla_client=client)
-        print("Connected to carla")
-        print("Analyze recording", log_file)
-        # Example:
-        # monitor.monitor_simulation_run(file_path=log_file, weather_file_path=scenic_file, result_file_path="<out dir>")
-        print("Done with monitoring the recording")
-    except RuntimeError as err:
-        print("Logged failed Carla run in main")
-        print(f"Unexpected {err}, {type(err)}")
-        JSONHelper.log_error("failed_run", name=folder_path, error_message=f"{err}")

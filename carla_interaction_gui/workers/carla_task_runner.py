@@ -9,7 +9,7 @@ from typing import List
 
 from carla_interaction_gui.carla_launcher import restart_and_connect, kill_carla
 from carla_interaction_gui.workers import manual_agent_control
-from data_av_static import MapRasterizer  # existing import for other subcommands
+from data_av_static import MapRasterizer
 from helpers.carla_monitor import CarlaMonitor
 
 
@@ -25,11 +25,24 @@ def run_transform(args):
         )
         mon = CarlaMonitor(carla_client=client)
         print(f">> [Runner] Transform '{args.input}' -> '{args.output}'")
-        mon.monitor_simulation_run(
-            file_path=args.input,
-            weather_file_path="",
-            result_file_path=args.output,
-        )
+
+        if args.only_track_at_specific_interval:
+            # Pass kwargs ONLY when the toggle is enabled
+            mon.monitor_simulation_run(
+                file_path=args.input,
+                weather_file_path="",
+                result_file_path=args.output,
+                only_track_at_specific_interval=True,
+                specific_track_interval=args.specific_track_interval,
+            )
+        else:
+            # Do not pass the parameters at all
+            mon.monitor_simulation_run(
+                file_path=args.input,
+                weather_file_path="",
+                result_file_path=args.output,
+            )
+
         print(">> [Runner] Transform finished.")
     except Exception:
         traceback.print_exc()
@@ -59,7 +72,6 @@ def run_record_video(args):
         )
         rec = Recorder(client)
 
-        # begin/end semantics: align with your GUI (end < 0 => file end)
         end_at = sys.maxsize if args.end_at is None or args.end_at < 0 else args.end_at
 
         print(f">> [Runner] Record video (bboxes={args.with_bboxes}) from '{args.input}'")
@@ -100,12 +112,10 @@ def run_gen_maps(args):
     """
     client = None
     try:
-        # Start CARLA once; we’ll swap maps via load_world per your snippet
         client = restart_and_connect(
             exe=args.carla_exe,
             render_off_screen=args.offscreen,
             render_quality_low=False,
-            # initial map doesn’t matter; we will load per-map below
             map_name=None,
             log=print,
         )
@@ -197,6 +207,9 @@ def main():
     add_common(pt)
     pt.add_argument("--input", required=True, help="Input recording file (.log/.zip/etc.)")
     pt.add_argument("--output", required=True, help="Output folder for JSON/zip")
+    # NEW: CLI to control sampling
+    pt.add_argument("--only-track-at-specific-interval", action="store_true", default=False)
+    pt.add_argument("--specific-track-interval", type=float, default=0.5)
     pt.set_defaults(_fn=run_transform)
 
     # record_video

@@ -27,8 +27,17 @@ class TransformRecordingWorker(ThreadWorker):
             "--input", self.cfg.transform_input_file,
             "--output", self.cfg.transformer_output_path,
         ]
-        if getattr(self.cfg, "render_off_screen", False): cmd.append("--offscreen")
-        if getattr(self.cfg, "render_quality_low", False): cmd.append("--quality-low")
+        if getattr(self.cfg, "render_off_screen", False):
+            cmd.append("--offscreen")
+        if getattr(self.cfg, "render_quality_low", False):
+            cmd.append("--quality-low")
+
+        if getattr(self.cfg, "only_track_at_specific_interval", False):
+            cmd += [
+                "--only-track-at-specific-interval",
+                "--specific-track-interval",
+                str(getattr(self.cfg, "specific_track_interval", 0.5))
+            ]
 
         self._start_and_stream(cmd)
         self.log(">> [Data-AV Transformer] Done.")
