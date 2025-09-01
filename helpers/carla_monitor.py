@@ -156,6 +156,13 @@ class CarlaMonitor:
                     world.tick()
                     continue
 
+                vehicles = api_helper.get_vehicles()
+                if len(vehicles) == 0:
+                    # Skip monitoring, as there are no vehicles to monitor
+                    print("[CARLA] There are no vehicles at the current tick. Skip")
+                    world.tick()
+                    continue
+
                 elapsed_time = (datetime.now() - start_wall).total_seconds()  # wall clock (print only)
                 print(
                     f">> [CARLA] Simulation tick {tick_count} at {current_time:05f}s of {replay_duration}s; Elapsed time: {elapsed_time:3f}s")
