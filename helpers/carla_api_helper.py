@@ -1,4 +1,6 @@
 import os
+import re
+from math import hypot
 from typing import List, Optional
 
 from carla import *
@@ -109,6 +111,214 @@ class CarlaAPIHelper:
         self.client.set_replayer_time_factor(time_factor)
         if show_file_info:
             self.client.show_recorder_file_info(file, True)
+
+    @staticmethod
+    def create_recorder_to_sim_id_map(world: World,
+                                      info_text: str,
+                                      actor_filters: tuple[str, ...] = ("vehicle.*", "walker.*",
+                                                                        "traffic.traffic_light"),
+                                      position_tolerance_m: float = 5.0) -> dict[int, int]:
+        """
+        Build a mapping from *recorder* actor IDs (ground truth from the .log) to the
+        *dynamic* CARLA actor IDs that exist in the currently replaying world.
+
+        Notes:
+          - Call this AFTER you started replaying the recording and advanced at least one tick,
+            so that the actors from the recording exist in the world.
+          - This version preserves and uses the actor *type* parsed from "Create <id>: <type> ..."
+            lines (e.g., spectator, vehicle.*, walker.*, traffic light) and prefers 'at (...)'
+            locations to avoid picking up rotation tuples.
+          - 'traffic light' is normalized to 'traffic.traffic_light'.
+
+        Returns:
+          dict[recorder_id] = runtime_actor.id
+        """
+        # --- 2) Parse recorder actors (id, type_id, role_name, approx location) ---
+        recorded: dict[int, dict] = {}
+
+        # Regexes
+        # e.g. "Create 24: spectator (0) at (10828, 30786, 431)"
+        create_rx = re.compile(
+            r"Create\s+(\d+)\s*:\s*([A-Za-z0-9_.]+|traffic\s+light|spectator)",
+            re.IGNORECASE
+        )
+        # Fallback id patterns (covers normalized "Id: 24", "Actor 24", etc.)
+        id_rx = re.compile(r"(?:^|\s)(?:Actor\s*|Id\s*[=:]\s*)(\d+)\b", re.IGNORECASE)
+
+        # Type patterns (now also accept bare labels like 'spectator' or 'traffic light')
+        type_rx = re.compile(
+            r"(vehicle\.[\w\.]+|walker\.[\w\.]+|sensor\.[\w\.]+|static\.[\w\.]+|traffic\.traffic_light|traffic\s+light|spectator)",
+            re.IGNORECASE
+        )
+        role_rx = re.compile(r"role_name\s*[=:]\s*([^\s,)\]]+)", re.IGNORECASE)
+
+        # Prefer 'at (x, y, z)' to avoid matching rotation tuples
+        at_loc_rx = re.compile(
+            r"at\s*\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)",
+            re.IGNORECASE
+        )
+        # Generic first tuple as a fallback
+        loc_rx = re.compile(
+            r"\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)"
+        )
+
+        def _norm_type(tok: str | None) -> str | None:
+            if not tok:
+                return None
+            t = tok.strip().lower()
+            if t == "traffic light":
+                return "traffic.traffic_light"
+            return t
+
+        lines = info_text.splitlines()
+        current_id: int | None = None
+        for line in lines:
+            # A) Preferred: "Create <id>: <type> ..."
+            cm = create_rx.search(line)
+            if cm:
+                current_id = int(cm.group(1))
+                t = _norm_type(cm.group(2))
+                if current_id not in recorded:
+                    recorded[current_id] = {"type_id": t, "role_name": None, "loc": None}
+                else:
+                    recorded[current_id]["type_id"] = recorded[current_id]["type_id"] or t
+
+                # Prefer 'at (x, y, z)' on the same line
+                am = at_loc_rx.search(line)
+                if am and recorded[current_id]["loc"] is None:
+                    try:
+                        x, y, z = float(am.group(1)), float(am.group(2)), float(am.group(3))
+                        recorded[current_id]["loc"] = (x, y, z)
+                    except Exception:
+                        pass
+                # Try to grab role_name if present inline
+                rm = role_rx.search(line)
+                if rm and recorded[current_id]["role_name"] is None:
+                    recorded[current_id]["role_name"] = rm.group(1)
+                continue  # We've handled this line; go next
+
+            # B) Fallback flows (normalized formats, multi-line blocks)
+            id_m = id_rx.search(line)
+            if id_m:
+                current_id = int(id_m.group(1))
+                if current_id not in recorded:
+                    recorded[current_id] = {"type_id": None, "role_name": None, "loc": None}
+            if current_id is None:
+                continue
+
+            # Type: accept dotted + bare tokens (spectator/traffic light)
+            if recorded[current_id]["type_id"] is None:
+                t = type_rx.search(line)
+                if t:
+                    recorded[current_id]["type_id"] = _norm_type(t.group(1))
+
+            # Role name
+            if recorded[current_id]["role_name"] is None:
+                r = role_rx.search(line)
+                if r:
+                    recorded[current_id]["role_name"] = r.group(1)
+
+            # Location: prefer 'at (...)', else first tuple
+            if recorded[current_id]["loc"] is None:
+                am = at_loc_rx.search(line)
+                if am:
+                    try:
+                        x, y, z = float(am.group(1)), float(am.group(2)), float(am.group(3))
+                        recorded[current_id]["loc"] = (x, y, z)
+                    except Exception:
+                        pass
+                else:
+                    p = loc_rx.search(line)
+                    if p:
+                        try:
+                            x, y, z = float(p.group(1)), float(p.group(2)), float(p.group(3))
+                            recorded[current_id]["loc"] = (x, y, z)
+                        except Exception:
+                            pass
+
+        # --- 3) Collect current simulation actors we care about ---
+        alist = world.get_actors()
+        sim_actors = []
+        for f in actor_filters:
+            sim_actors.extend(alist.filter(f))
+
+        sim_pool = [{
+            "id": a.id,
+            "type_id": getattr(a, "type_id", None),
+            "role_name": (a.attributes.get("role_name") if hasattr(a, "attributes") else None),
+            "loc": (lambda L: (L.x, L.y, L.z))(a.get_transform().location)
+        } for a in sim_actors]
+
+        # --- 4) Helper: distance on ground plane (x, y) ---
+        def dist_xy(p, q) -> float:
+            return hypot(p[0] - q[0], p[1] - q[1])
+
+        # --- 5) Greedy matching: role_name+type_id; then type_id+nearest; then role_name only; then nearest ---
+        mapping: dict[int, int] = {}
+        used_sim_ids: set[int] = set()
+
+        # A) role_name + type_id exact
+        for rid, rinfo in recorded.items():
+            r_role = (rinfo["role_name"] or "").lower()
+            r_type = (rinfo["type_id"] or "").lower()
+            if not r_role and not r_type:
+                continue
+            candidates = [s for s in sim_pool
+                          if s["id"] not in used_sim_ids
+                          and (s["type_id"] or "").lower() == r_type
+                          and (s["role_name"] or "").lower() == r_role]
+            if len(candidates) == 1:
+                mapping[rid] = candidates[0]["id"]
+                used_sim_ids.add(candidates[0]["id"])
+
+        # B) type_id + nearest position (within tolerance)
+        for rid, rinfo in recorded.items():
+            if rid in mapping:
+                continue
+            r_type = (rinfo["type_id"] or "").lower()
+            r_loc = rinfo["loc"]
+            if not r_type or r_loc is None:
+                continue
+            candidates = [s for s in sim_pool
+                          if s["id"] not in used_sim_ids
+                          and (s["type_id"] or "").lower() == r_type]
+            if not candidates:
+                continue
+            best = min(candidates, key=lambda s: dist_xy(r_loc, s["loc"]))
+            if dist_xy(r_loc, best["loc"]) <= position_tolerance_m:
+                mapping[rid] = best["id"]
+                used_sim_ids.add(best["id"])
+
+        # C) role_name only (unique)
+        for rid, rinfo in recorded.items():
+            if rid in mapping:
+                continue
+            r_role = (rinfo["role_name"] or "").lower()
+            if not r_role:
+                continue
+            candidates = [s for s in sim_pool
+                          if s["id"] not in used_sim_ids
+                          and (s["role_name"] or "").lower() == r_role]
+            if len(candidates) == 1:
+                mapping[rid] = candidates[0]["id"]
+                used_sim_ids.add(candidates[0]["id"])
+
+        # D) final nearest (require being reasonably close)
+        for rid, rinfo in recorded.items():
+            if rid in mapping:
+                continue
+            r_loc = rinfo["loc"]
+            if r_loc is None:
+                continue
+            candidates = [s for s in sim_pool if s["id"] not in used_sim_ids]
+            if not candidates:
+                continue
+            best = min(candidates, key=lambda s: dist_xy(r_loc, s["loc"]))
+            if dist_xy(r_loc, best["loc"]) <= position_tolerance_m:
+                mapping[rid] = best["id"]
+                used_sim_ids.add(best["id"])
+
+        return mapping
 
     # region Static methods
     ########################################

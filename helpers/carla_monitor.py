@@ -123,9 +123,21 @@ class CarlaMonitor:
             world.apply_settings(settings)
             dt_nominal = settings.fixed_delta_seconds or 0.05
 
+            vehicles = []
+
             # Start replay of simulation and step once to let actors spawn
             api_helper.start_replaying(log_data_path)
             world.tick()
+
+            while len(vehicles) == 0:
+                vehicles = api_helper.get_vehicles()
+                world.tick()
+
+            vehicle_id_mapping = CarlaAPIHelper.create_recorder_to_sim_id_map(world, info, position_tolerance_m=1)
+            reverse_vehicle_id_mapping = {v: k for k, v in vehicle_id_mapping.items()}
+            if len(vehicle_id_mapping) != len(vehicles):
+                print(">> [CARLA] The vehicle id mapping is not equal to the vehicle id")
+                return
 
             snapshot: WorldSnapshot = world.get_snapshot()
             base_sim_time = snapshot.timestamp.elapsed_seconds
@@ -185,6 +197,10 @@ class CarlaMonitor:
                     data_actor = api_helper.get_data_actor_from_actor(actor, is_ego)
                     if data_actor is None:
                         continue
+
+                    mapped_id = reverse_vehicle_id_mapping.get(data_actor.id)
+                    if mapped_id is not None:
+                        data_actor.id = mapped_id
 
                     # Attach collisions for this runtime actor id (if any for this frame)
                     data_actor.collisions = per_actor_collisions.get(data_actor.id, [])

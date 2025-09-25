@@ -141,11 +141,16 @@ class CarlaCameraRecorder:
             vehicles = api_helper.get_vehicles()
             world.tick()
 
+        vehicle_id_mapping = CarlaAPIHelper.create_recorder_to_sim_id_map(world, info, position_tolerance_m=1)
+        if len(vehicle_id_mapping) != len(vehicles):
+            print(">> [CARLA] The vehicle id mapping is not equal to the vehicle id")
+            return
+
         # Get the ego vehicle from the given vehicle id
         if vehicle_id == -1:
             ego_vehicle: Vehicle = list(filter(lambda v: 'hero' in v.attributes['role_name'], vehicles))[0]
         else:
-            ego_vehicle: Vehicle = list(filter(lambda v: v.id == vehicle_id, vehicles))[0]
+            ego_vehicle: Vehicle = list(filter(lambda v: v.id == vehicle_id_mapping[vehicle_id], vehicles))[0]
 
         # --------------
         # Spawn attached RGB camera
