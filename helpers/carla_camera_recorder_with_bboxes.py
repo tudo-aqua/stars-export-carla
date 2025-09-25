@@ -1,4 +1,5 @@
 import argparse
+import math
 import os
 import queue
 import sys
@@ -15,6 +16,7 @@ from helpers.json_helper import JSONHelper
 
 
 class CarlaCameraRecorder:
+    TICK_SECONDS: float = 0.05
 
     def __init__(self, carla_client: Client):
         self.ego_vehicle = None
@@ -44,21 +46,42 @@ class CarlaCameraRecorder:
         # Check data from carla recording for validity
         info = self.client.show_recorder_file_info(log_data_path, True)
         if info == "File is not a CARLA recorder\n":
-            print(f">> [CARLA] The file at path '{log_data_path}' is not a CARLA recorder")
+            print(">> [CARLA] The file at path", log_data_path, "is not a CARLA recorder")
             return
 
         if info.__contains__("not found"):
-            print(">> [IO] The file at path '{log_data_path}' cannot be found.")
+            print(">> [IO] The file at path", log_data_path, "cannot be found.")
             return
 
-        # Get recording frequency in the recorded file using the recorder_file_info and split
-        recording_frequency = float(info.split("Frame 2 at ")[1].split(" seconds")[0])
+        # ----------
+        # Parse recording meta
+        # ----------
+        # Frequency present in recorder info (not used to drive sim anymore, but kept for reference)
+        try:
+            recording_frequency = float(info.split('Frame 2 at ')[1].split(' seconds')[0])
+        except Exception:
+            recording_frequency = 0.0
 
-        # Get count of all ticks in the recorded file using the recorder_file_info and split
-        replay_tick_count = int(info.split("Frames: ")[1].split("Duration")[0])
+        # Frames count
+        try:
+            replay_tick_count = int(info.split('Frames: ')[1].split('Duration')[0])
+        except Exception:
+            replay_tick_count = 0
 
+        # Duration in seconds (primary driver for how long we run the loop)
+        duration_seconds = None
+        try:
+            duration_seconds = float(info.split('Duration: ')[1].split(' seconds')[0])
+        except Exception:
+            # Fallback: derive from frames & recording_frequency if duration is not explicitly present
+            if replay_tick_count > 0 and recording_frequency > 0.0:
+                duration_seconds = (replay_tick_count - 1) * recording_frequency
+            else:
+                duration_seconds = 0.0
+
+        # If no end is provided, use the full recording duration from the recorder info
         if end_at == sys.maxsize:
-            end_at = (replay_tick_count - 1) * recording_frequency
+            end_at = duration_seconds
         CarlaCameraRecorder.END_AT = end_at
 
         filename_without_extension = os.path.splitext(filename)[0]
@@ -69,7 +92,7 @@ class CarlaCameraRecorder:
                                                                       end_at=CarlaCameraRecorder.END_AT,
                                                                       bounding_boxes=True)
         if os.path.exists(image_save_folder):
-            print(f"The files were already recorded at {image_save_folder}")
+            print(f">> [Recorder] The files were already recorded at {image_save_folder}")
             return
         else:
             os.makedirs(image_save_folder)
@@ -95,7 +118,7 @@ class CarlaCameraRecorder:
         # Set synchronous mode settings
         new_settings = world.get_settings()
         new_settings.synchronous_mode = True
-        new_settings.fixed_delta_seconds = recording_frequency
+        new_settings.fixed_delta_seconds = CarlaCameraRecorder.TICK_SECONDS
         world.apply_settings(new_settings)
 
         image_queue = queue.Queue()
@@ -142,14 +165,27 @@ class CarlaCameraRecorder:
                                                          recording_folder=recording_folder,
                                                          filename_without_extension=filename_without_extension,
                                                          vehicle_id=vehicle_id, begin_at=begin_at,
-                                                         end_at=end_at, recording_frequency=recording_frequency))
+                                                         end_at=end_at,
+                                                         recording_frequency=CarlaCameraRecorder.TICK_SECONDS))
 
         spectator = world.get_spectator()
 
-        # Tick the world for each frame in the replay
-        for tick in range(1, replay_tick_count):
-            # Advance simulation by one tick
+        # ----------
+        # Tick the world for the entire length of the recording (derived from Duration in recorder info)
+        # ----------
+        total_ticks = int(math.ceil(duration_seconds / CarlaCameraRecorder.TICK_SECONDS))
+        # Ensure we run at least one tick if duration rounds to 0
+        total_ticks = max(total_ticks, 1)
+
+        for tick in range(1, total_ticks + 1):
             world.tick()
+            current_time = CarlaCameraRecorder.TICK_SECONDS * tick
+            if current_time < begin_at:
+                print(f">> [Recorder] Current time {current_time:.3f}s is not within [{begin_at}, {end_at}]")
+                continue
+            if current_time > end_at:
+                print(f">> [Recorder] Current time {current_time:.3f}s is not within [{begin_at}, {end_at}]")
+                break
 
             image = image_queue.get()
 
@@ -213,7 +249,7 @@ class CarlaCameraRecorder:
                 break
             transform = ego_cam.get_transform()
             spectator.set_transform(carla.Transform(transform.location, transform.rotation))
-            print(f">> [CARLA] Tick {tick} of {replay_tick_count}. Simulation Tick: {current_tick}")
+            print(f">> [CARLA] Tick {tick:05d} of {total_ticks:05d}. Simulation Time: {current_time:.3f}s")
 
         self.client.reload_world()
 
@@ -299,15 +335,19 @@ class CarlaCameraRecorder:
     def save_image_data(image, recording_folder: str, filename_without_extension: str, vehicle_id: int, begin_at: float,
                         end_at: float, recording_frequency: float):
         CarlaCameraRecorder.COUNTER += 1
-        current_tick = recording_frequency * CarlaCameraRecorder.COUNTER
-        if begin_at <= current_tick <= end_at:
+        current_tick_time = recording_frequency * CarlaCameraRecorder.COUNTER
+        if begin_at <= current_tick_time <= end_at:
             image_name = "%.6d.jpg" % CarlaCameraRecorder.COUNTER
-            image_save_folder = CarlaCameraRecorder.get_image_save_folder(recording_folder=recording_folder,
+            image_save_folder = CarlaCameraRecorder.get_image_save_folder(
+                recording_folder=recording_folder,
                                                                           filename_without_extension=filename_without_extension,
                                                                           vehicle_id=vehicle_id,
                                                                           begin_at=begin_at,
-                                                                          end_at=end_at)
+                end_at=end_at
+            )
             recording_path = os.path.join(image_save_folder, image_name)
+            # Ensure directory exists
+            os.makedirs(image_save_folder, exist_ok=True)
             print(f">> [IO] Save image {image_name}")
             image.save_to_disk(recording_path)
 
@@ -326,12 +366,12 @@ class CarlaCameraRecorder:
         video_path = os.path.join(video_folder, video_name)
 
         if os.path.exists(video_path):
-            print(f"The video was already produced at {video_path}")
+            print(f">> [Recorder] The video was already produced at {video_path}")
             return
 
-        images_in_folder = os.listdir(image_folder)
-        if images_in_folder.__sizeof__() == 0:
-            print("There are no images to save as video")
+        images_in_folder = os.listdir(image_folder) if os.path.exists(image_folder) else []
+        if len(images_in_folder) == 0:
+            print(">> [IO] There are no images to save as video")
             return
 
         images = [img for img in images_in_folder if img.endswith(".jpg")]
@@ -383,13 +423,13 @@ if __name__ == '__main__':
         metavar='B',
         type=float,
         default=0.0,
-        help='Tick at which the video should start')
+        help='Time (seconds) at which the video should start')
     argparser.add_argument(
         '-e', '--end_at',
         metavar='E',
         type=float,
         default=sys.maxsize,
-        help='Tick at which the video should end')
+        help='Time (seconds) at which the video should end')
     argparser.add_argument(
         '-d', '--destination',
         metavar='D',
@@ -408,16 +448,17 @@ if __name__ == '__main__':
     video_width = args.width
     video_height = args.height
 
-    print("Proceed with the following arguments:")
-    print(f"Path: {path}, Vehicle Id: {vehicle_id}, Tick Range: [{begin_at}, {end_at}] ")
-    print(f"Video Width: {video_width}, Video Height: {video_height}")
+    print('Proceed with the following arguments:')
+    print(f'Path: {path}, Vehicle Id: {vehicle_id}, Time Range: [{begin_at}, {end_at}] ')
+    print(f'Video Width: {video_width}, Video Height: {video_height}')
+    print(f'Fixed tick: {CarlaCameraRecorder.TICK_SECONDS}s (synchronous mode)')
 
     print("Connect to Carla")
 
     # Find carla simulator at localhost on port 2000
     client = carla.Client('localhost', 2000)
 
-    # Try to connect for 10 seconds. Fail if not successful
+    # Try to connect for 60 seconds. Fail if not successful
     client.set_timeout(60.0)
     recorder = CarlaCameraRecorder(carla_client=client)
     print("Connected to carla")
