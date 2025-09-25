@@ -69,8 +69,7 @@ def start_carla(
         _log(f">> [CARLA] Waiting {boot:.1f}s for CARLA to boot")
         time.sleep(boot)
     if map_name:
-        _log(f">> [CARLA] Loading map: '{map_name}'")
-        ok = set_map_via_config_py(exe, map_name, log=_log)
+        ok = set_map(map_name, log=_log)
         if not ok:
             _log(f">> [CARLA] Warning: failed to set map '{map_name}' via config.py")
 
@@ -203,8 +202,7 @@ def _find_carla_config_py(exe: str) -> str | None:
     return None
 
 
-def set_map_via_config_py(
-        exe: str,
+def set_map(
         map_name: str,
         *,
         host: str = "localhost",
@@ -217,24 +215,14 @@ def set_map_via_config_py(
     Returns True on success, False otherwise.
     """
     _log = log or print
-    config_py = _find_carla_config_py(exe)
-    if not config_py:
-        _log(">> [CARLA] Could not locate PythonAPI/util/config.py next to the executable.")
-        return False
-
-    py = sys.executable or "python"
-    cmd = [py, config_py, "--host", host, "--port", str(port), "--map", map_name]
-    _log(f">> [CARLA] Changing map via config.py to: '{map_name}'")
+    _log(f">> [CARLA] Changing map to '{map_name}'")
+    client = carla.Client(host=host, port=port)
+    client.set_timeout(20.0)
+    world = client.load_world_if_different(map_name)
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        if proc.stdout:
-            _log(proc.stdout.rstrip())
-        if proc.stderr:
-            _log(proc.stderr.rstrip())
-        if proc.returncode != 0:
-            _log(f">> [CARLA] config.py failed with return code {proc.returncode}")
-            return False
+        client.get_available_maps()
+        _log(f">> [CARLA] Loaded map '{map_name}'")
         return True
-    except Exception as e:
-        _log(f">> [CARLA] Failed to run config.py: {e!r}")
+    except RuntimeError:
+        _log(f">> [CARLA] Failed loading map '{map_name}'")
         return False
