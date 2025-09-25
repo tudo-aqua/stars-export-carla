@@ -182,7 +182,7 @@ def _install_carla_agent_patch(mc):
 
 
 # --------------------------------- public entry --------------------------------
-def launch_from_runner(host="127.0.0.1", port=2000, res="1280x720", sync=True, carla_exe=None):
+def launch_from_runner(host="127.0.0.1", port=2000, res="1280x720", carla_exe=None):
     """
     Used by carla_task_runner.py. Loads CARLA's manual_control.py and installs the carla_agent patch.
     """
@@ -200,7 +200,7 @@ def launch_from_runner(host="127.0.0.1", port=2000, res="1280x720", sync=True, c
     args.autopilot = False
     args.res = res
     args.width, args.height = [int(x) for x in args.res.split("x")]
-    args.sync = bool(sync)
+    args.sync = True
     args.filter = os.getenv("AGENT_VEHICLE_FILTER", "vehicle.*")
     args.generation = "2"
     args.rolename = "hero"

@@ -69,6 +69,8 @@ class ManualControlWorker(ThreadWorker):
         if self.vehicle_filter:
             cmd += ["--filter", self.vehicle_filter]
 
+        cmd += ["--sync"]
+
         # launch in separate process group so we can later kill the group
         self.log(">> [CARLA] Launching manual_control.py  " + " ".join(cmd[2:]))
         creation: dict[str, int | None] = {}
