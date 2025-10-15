@@ -61,19 +61,16 @@ class CarlaDataGenerator:
             print("   Warning! Actor Generation is not valid. No actor will be spawned.")
             return []
 
-    def generate_traffic(self, args) -> List[int]:
+    def generate_traffic(self, args, client, world) -> List[int]:
         """
         This is a copy of the code in the shipped generate_traffic.py file of Carla
         """
         vehicles_list = []
         walkers_list = []
         all_id = []
-        client = carla.Client(args.host, args.port)
         client.set_timeout(10.0)
         synchronous_master = False
         random.seed(args.seed if args.seed is not None else int(time.time()))
-
-        world = client.get_world()
 
         traffic_manager = client.get_trafficmanager(args.tm_port)
         traffic_manager.set_global_distance_to_leading_vehicle(2.5)
@@ -411,7 +408,7 @@ if __name__ == '__main__':
     # Find carla simulator at localhost on port 2000
     client = carla.Client('localhost', 2000)
     # Try to connect for 10 seconds. Fail if not successful
-    client.set_timeout(10.0)
+    client.set_timeout(20.0)
     world: World = client.get_world()
     print("Connected to Carla")
     data_generator = CarlaDataGenerator(client)
@@ -421,10 +418,13 @@ if __name__ == '__main__':
     map_name = data_generator.change_map(client=client)
     time.sleep(5)
 
+    world = client.get_world()
+    data_generator.world = world
+
     file_name = map_name + "_seed" + str(args.seed)
     recording_dir = data_generator.start_recording(client=client, file_name=file_name, map_name=map_name)
 
-    spawned_vehicle_ids = data_generator.generate_traffic(args)
+    spawned_vehicle_ids = data_generator.generate_traffic(args, client, world)
 
     try:
         target_length_of_run_in_minutes = args.length_of_run
