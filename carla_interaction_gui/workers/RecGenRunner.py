@@ -71,6 +71,7 @@ class RecGenRunner(ThreadWorker):
             "--filterw", getattr(cfg, "recgen_filter_walkers", "walker.pedestrian.*"),
             "--generationw", getattr(cfg, "recgen_generation_walkers", "2"),
             "--length-of-run", str(getattr(cfg, "recgen_length_minutes", 5.0)),
+            "--number-of-parked", str(getattr(cfg, "recgen_num_parked", 0))
         ]
 
         # Stream it like the other workers

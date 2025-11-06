@@ -133,7 +133,9 @@ class CarlaMonitor:
                 vehicles = api_helper.get_vehicles()
                 world.tick()
 
-            vehicle_id_mapping = CarlaAPIHelper.create_recorder_to_sim_id_map(world, info, position_tolerance_m=1)
+            vehicle_id_mapping = CarlaAPIHelper.create_recorder_to_sim_id_map(world, info,
+                                                                              actor_filters=("vehicle.*",),
+                                                                              position_tolerance_m=1)
             reverse_vehicle_id_mapping = {v: k for k, v in vehicle_id_mapping.items()}
             if len(vehicle_id_mapping) != len(vehicles):
                 print(">> [CARLA] The vehicle id mapping is not equal to the vehicle id")

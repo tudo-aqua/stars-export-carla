@@ -26,6 +26,9 @@ ALLOWED_NON_LAYERED_MAPS = [
     "Town05",
     "Town10HD",
 ]
+ALLOWED_PARKED_MAPS = [
+    "Town10HD",
+]
 ALLOWED_CARLA_MAPS = ALLOWED_NON_LAYERED_MAPS
 
 
@@ -105,6 +108,7 @@ class UnifiedCarlaGUI(tk.Tk):
 
         self.recgen_length_minutes_var = tk.DoubleVar(value=getattr(self.config, "recgen_length_minutes", 5.0))
         self.recgen_output_dir_variable = tk.StringVar(value=getattr(self.config, "recgen_output_dir", ""))
+        self.recgen_num_parked_var = tk.IntVar(value=getattr(self.config, "recgen_num_parked", 0))
 
         # Selected maps: None in config means default to ALLOWED_NON_LAYERED_MAPS
         _saved = getattr(self.config, "recgen_selected_maps", None)
@@ -570,6 +574,8 @@ class UnifiedCarlaGUI(tk.Tk):
         self._entry_row(tp, "Vehicle generation:", self.recgen_generation_vehicles_var, width=12)
         self._entry_row(tp, "Walker filter:", self.recgen_filter_walkers_var)
         self._entry_row(tp, "Walker generation:", self.recgen_generation_walkers_var, width=12)
+        self._entry_row(tp, "Parked vehicles (N):", self.recgen_num_parked_var, width=12)
+
 
         # ── Run settings
         rs = ttk.LabelFrame(frame, text="Run settings")
@@ -820,6 +826,13 @@ class UnifiedCarlaGUI(tk.Tk):
         if not selected_maps:
             return messagebox.showerror("Missing", "Select at least one map.")
 
+        parked = max(0, int(self.recgen_num_parked_var.get()))
+        if parked > 0:
+            selected_maps = [m for m in selected_maps if m in ALLOWED_PARKED_MAPS]
+            if not selected_maps:
+                return messagebox.showerror("No valid maps",
+                                            "With parked vehicles > 0, select maps from ALLOWED_PARKED_MAPS only.")
+
         # Build seeds from (start, count)
         try:
             seed_start = int(self.recgen_seed_start_var.get())
@@ -835,6 +848,25 @@ class UnifiedCarlaGUI(tk.Tk):
         self._clear_log()
         runner = RecGenRunner(cfg, self._log, selected_maps=selected_maps, seeds=seeds)
         self._attach_worker(runner, stop_button=getattr(self, "stop_btn_recgen", None))
+        self._refresh_recgen_map_filters()
+
+    def _refresh_recgen_map_filters(self):
+        """Disable/uncheck maps that can't spawn parked vehicles if parked>0."""
+        parked = 0
+        try:
+            parked = int(self.recgen_num_parked_var.get())
+        except Exception:
+            parked = 0
+
+        for m, var in getattr(self, "_recgen_map_vars", {}).items():
+            cb_widget = None  # we created raw Checkbuttons without keeping refs; so we only toggle value
+            allowed = (parked <= 0) or (m in ALLOWED_PARKED_MAPS)
+            if not allowed:
+                # force uncheck
+                if var.get():
+                    var.set(False)
+            # (Optional) if you kept references to each Checkbutton, set state=DISABLED/normal here
+            # e.g., cb_widget.configure(state=("normal" if allowed else "disabled"))
 
     # allow resolving arbitrary script in the project next to runner files
     def _resolve_script(self_inner, name: str) -> str | None:
@@ -944,7 +976,8 @@ class UnifiedCarlaGUI(tk.Tk):
                 self.recgen_filter_walkers_var,
                 self.recgen_generation_walkers_var,
                 self.recgen_length_minutes_var,
-                self.recgen_output_dir_variable
+                self.recgen_output_dir_variable,
+                self.recgen_num_parked_var
         ):
             if variable is not None:
                 variable.trace_add("write", self._auto_save)
@@ -952,6 +985,8 @@ class UnifiedCarlaGUI(tk.Tk):
         # Map checkboxes also need to trigger a save
         for var in getattr(self, "_recgen_map_vars", {}).values():
             var.trace_add("write", self._auto_save)
+
+        self.recgen_num_parked_var.trace_add("write", lambda *_: self._refresh_recgen_map_filters())
 
     def _auto_save(self, *_):
         """
@@ -1038,6 +1073,9 @@ class UnifiedCarlaGUI(tk.Tk):
         # Output directory for the recording generator
         if hasattr(self, "recgen_output_dir_variable"):
             self.config.recgen_output_dir = self.recgen_output_dir_variable.get().strip()
+
+        if hasattr(self, "recgen_num_parked_var"):
+            self.config.recgen_num_parked = max(0, int(self.recgen_num_parked_var.get()))
 
         def _parse_var_as_float(var, default: float) -> float:
             try:

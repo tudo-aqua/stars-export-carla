@@ -47,6 +47,7 @@ class Config:
     recgen_generation_walkers: str = "2"  # "1" | "2" | "All"
     recgen_length_minutes: float = 5.0
     recgen_output_dir: str = ""
+    recgen_num_parked: int = 0
 
 
 def load() -> Config:

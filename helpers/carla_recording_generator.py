@@ -7,9 +7,12 @@ from typing import List, Optional
 
 import carla
 from carla import World, Client, WeatherParameters
+from more_itertools import flatten
 
 from carla_data_classes.dynamic import DataWeatherParameters
 from carla_data_classes.enums.DataWeatherParametersType import DataWeatherParametersType
+from data_av_static.lane_utils import _LaneUtils
+from data_av_static.world_builder import _BlockBuilder
 from helpers.carla_api_helper import CarlaAPIHelper
 from helpers.json_helper import JSONHelper
 
@@ -239,6 +242,147 @@ class CarlaDataGenerator:
 
         return vehicles_list
 
+    def _spawn_parked_vehicles(
+            self,
+            world: World,
+            count: int,
+            rng: random.Random,
+            *,
+            filterv: str = "vehicle.*",
+    ) -> list[carla.Actor]:
+        """
+        Spawn `count` parked vehicles on shoulder lanes.
+        Strategy:
+          - sample shoulder waypoints,
+          - for each, try a small search of (lateral, forward, z) offsets to find a collision-free pose,
+          - use compact vehicles,
+          - tag via role_name='parked', disable movement.
+        """
+        if count <= 0:
+            return []
+
+        # Shoulder candidates (centerline transforms)
+        transforms = self._find_shoulder_spawn_transforms(world, min_width_m=1.8)
+        if not transforms:
+            print("[CARLA] No shoulder transforms found for parked vehicles.")
+            return []
+
+        rng.shuffle(transforms)
+
+        # Compact vehicles only → much higher success rate on ~2 m shoulders
+        bps = list(world.get_blueprint_library().filter(filterv or "vehicle.*"))
+        small: list[carla.ActorBlueprint] = []
+        for bp in bps:
+            bid = bp.id.lower()
+            if any(k in bid for k in
+                   ("bus", "truck", "firetruck", "ambulance", "garbage", "sprinter", "van", "carlacola", "semi",
+                    "trailer")):
+                continue
+            # prefer 4-wheelers
+            if bp.has_attribute("number_of_wheels") and bp.get_attribute("number_of_wheels").as_int() < 4:
+                continue
+            small.append(bp)
+        candidates = small or bps  # fallback to any if filter empties
+
+        spawned: list[carla.Actor] = []
+        placed: list[carla.Location] = []
+
+        # Tuning knobs
+        min_spacing_m = 2.0  # allow close spacing; lower to 0.6 if you want even denser
+        lateral_margin_m = 0.5  # margin from outer shoulder edge
+        z_lift = 0.35  # spawn slightly above ground to avoid ground collision
+        fwd_nudge_vals = (0.0, 0.6, -0.6)  # try in-place, then forward/back
+        # try positions across the shoulder from near edge inward
+        lateral_fractions = (0.9, 0.7, 0.5, 0.3)  # relative to (lane_width/2)
+
+        def _too_close(loc: carla.Location) -> bool:
+            for p in placed:
+                dx = loc.x - p.x
+                dy = loc.y - p.y
+                dz = loc.z - p.z
+                if (dx * dx + dy * dy + dz * dz) < (min_spacing_m * min_spacing_m):
+                    return True
+            return False
+
+        amap = world.get_map()
+
+        for base_tf in transforms:
+            if len(spawned) >= count:
+                break
+
+            # verify shoulder at this transform
+            wp = amap.get_waypoint(base_tf.location, project_to_road=True, lane_type=carla.LaneType.Any)
+            if not wp or wp.lane_type != carla.LaneType.Shoulder:
+                continue
+
+            fwd = wp.transform.get_forward_vector()
+            right = wp.transform.get_right_vector()
+            half_w = max(0.0, wp.lane_width * 0.5)
+
+            # search small set of offsets (lateral across shoulder; fwd nudge ±)
+            placed_here = False
+            for frac in lateral_fractions:
+                if placed_here:
+                    break
+                lateral = max(0.0, half_w * frac - lateral_margin_m)
+
+                for fn in fwd_nudge_vals:
+                    if placed_here:
+                        break
+
+                    # compute candidate transform
+                    loc = carla.Location(
+                        x=base_tf.location.x + right.x * lateral + fwd.x * fn,
+                        y=base_tf.location.y + right.y * lateral + fwd.y * fn,
+                        z=base_tf.location.z + z_lift,
+                    )
+                    rot = carla.Rotation(
+                        pitch=base_tf.rotation.pitch,
+                        yaw=base_tf.rotation.yaw,
+                        roll=base_tf.rotation.roll,
+                    )
+                    tf = carla.Transform(loc, rot)
+
+                    # crowding check
+                    if _too_close(loc):
+                        continue
+
+                    # get a fresh blueprint by id (no .clone() in CARLA)
+                    base_bp = rng.choice(candidates)
+                    bp = world.get_blueprint_library().find(base_bp.id)
+                    if bp.has_attribute("role_name"):
+                        bp.set_attribute("role_name", "parked")
+
+                    actor = world.try_spawn_actor(bp, tf)
+                    if not actor:
+                        # final micro-nudge forward if needed
+                        loc2 = carla.Location(loc.x + fwd.x * 0.3, loc.y + fwd.y * 0.3, loc.z)
+                        tf2 = carla.Transform(loc2, rot)
+                        actor = world.try_spawn_actor(bp, tf2)
+
+                    if not actor:
+                        continue
+
+                    # pin it in place
+                    try:
+                        actor.set_autopilot(False)
+                    except Exception:
+                        pass
+                    try:
+                        actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0, hand_brake=True))
+                    except Exception:
+                        pass
+
+                    spawned.append(actor)
+                    placed.append(actor.get_transform().location)
+                    placed_here = True
+
+                    if len(spawned) >= count:
+                        break
+
+        print(f"Spawned {len(spawned)} parked vehicles (requested {count}).")
+        return spawned
+
     def _to_asset_path(self, name: str) -> str:
         """Accepts 'Town05' or a full asset path and returns the asset path."""
         name = (name or "").strip()
@@ -271,21 +415,24 @@ class CarlaDataGenerator:
         client.load_world(chosen)
         return chosen
 
-    def run_recording_generation(self,
-                                 client: Client,
-                                 *,
-                                 seed: int,
-                                 length_minutes: float,
-                                 number_of_vehicles: int,
-                                 number_of_walkers: int,
-                                 filterv: str = "vehicle.*",
-                                 generationv: str = "All",
-                                 filterw: str = "walker.pedestrian.*",
-                                 generationw: str = "2",
-                                 candidate_maps: Optional[list[str]] = None,
-                                 output_dir: Optional[str] = None,
-                                 no_rendering: bool = False,
-                                 ) -> None:
+    def run_recording_generation(
+            self,
+            client: Client,
+            *,
+            seed: int,
+            length_minutes: float,
+            number_of_vehicles: int,
+            number_of_walkers: int,
+            filterv: str = "vehicle.*",
+            generationv: str = "All",
+            filterw: str = "walker.pedestrian.*",
+            generationw: str = "2",
+            candidate_maps: Optional[list[str]] = None,
+            output_dir: Optional[str] = None,
+            no_rendering: bool = False,
+            number_of_parked: int = 0,
+    ) -> None:
+
         """
         Perform a single recording run in the already-connected CARLA server.
         - Deterministically selects a map from candidate_maps using 'seed'
@@ -323,6 +470,7 @@ class CarlaDataGenerator:
             generationv=str(generationv or "All"),
             filterw=str(filterw or "walker.pedestrian.*"),
             generationw=str(generationw or "2"),
+            number_of_parked=number_of_parked,
 
             # duration (minutes -> used later)
             length_of_run=float(length_minutes),
@@ -352,16 +500,25 @@ class CarlaDataGenerator:
             map_name=map_name,
             file_ending="log",
             folder=JSONHelper.RECORDINGS_RUNS_FOLDER,
-            # NOTE: Use your existing constant here if it differs:
             prefix=getattr(JSONHelper, "RECORDING_FILE_NAME_PREFIX", "recording"),
         )
-
-        # Switch world settings (sync/no_rendering) inside your generate_traffic() already,
-        # but we still start the recorder here before spawning traffic (like your main).
-        client.start_recorder(recording_dir, True)
         try:
             # Spawn traffic (your existing function configures TM/sync etc.)
             data_generator.generate_traffic(args, client, world)
+
+            # Parked vehicles (if requested)
+            if number_of_parked and number_of_parked > 0:
+                print(f"[CARLA] Generate {number_of_parked} parked vehicles")
+                self._spawn_parked_vehicles(
+                    world,
+                    count=int(number_of_parked),
+                    rng=random.Random(seed + 13),  # independent but deterministic stream
+                    filterv=filterv,
+                )
+
+            # Switch world settings (sync/no_rendering) inside your generate_traffic() already,
+            # but we still start the recorder here before spawning traffic (like your main).
+            client.start_recorder(recording_dir, True)
 
             # Record for the requested duration
             end_time = time.time() + args.length_of_run * 60.0
@@ -460,6 +617,24 @@ class CarlaDataGenerator:
         # Set the weather to the world
         world.set_weather(new_weather)
         return DataWeatherParameters.from_weather(new_weather, new_weather_enum)
+
+    def _find_shoulder_spawn_transforms(self, world: World, *, min_width_m: float = 1.8) -> list[carla.Transform]:
+        """
+        Return transforms along Shoulder lanes with approx given width.
+        Uses waypoints to align vehicles in driving direction.
+        """
+        amap = world.get_map()
+        # generate shoulder waypoints roughly every 2.5m (fine-grained)
+        waypoints = amap.generate_waypoints(2.5)
+        lane_utils = _LaneUtils(amap)
+        all_lanes = _BlockBuilder.collect_all_lanes_waypoints(waypoints)
+        shoulder_lanes = list(
+            filter(lambda l: (
+                        not l.is_junction and l.lane_type == carla.LaneType.Shoulder and l.lane_width >= min_width_m),
+                   all_lanes))
+        all_shoulder_lane_waypoints = list(
+            flatten(map(lambda l: map(lambda tupl: tupl[1], lane_utils.get_all_waypoints_for_lane(l)), shoulder_lanes)))
+        return list(map(lambda l: l.transform, all_shoulder_lane_waypoints))
 
 
 if __name__ == "__main__":

@@ -187,7 +187,7 @@ class CarlaAPIHelper:
                 am = at_loc_rx.search(line)
                 if am and recorded[current_id]["loc"] is None:
                     try:
-                        x, y, z = float(am.group(1)), float(am.group(2)), float(am.group(3))
+                        x, y, z = float(am.group(1)) / 100, float(am.group(2)) / 100, float(am.group(3)) / 100
                         recorded[current_id]["loc"] = (x, y, z)
                     except Exception:
                         pass
@@ -223,7 +223,7 @@ class CarlaAPIHelper:
                 am = at_loc_rx.search(line)
                 if am:
                     try:
-                        x, y, z = float(am.group(1)), float(am.group(2)), float(am.group(3))
+                        x, y, z = float(am.group(1)) / 100, float(am.group(2)) / 100, float(am.group(3)) / 100
                         recorded[current_id]["loc"] = (x, y, z)
                     except Exception:
                         pass
@@ -231,7 +231,7 @@ class CarlaAPIHelper:
                     p = loc_rx.search(line)
                     if p:
                         try:
-                            x, y, z = float(p.group(1)), float(p.group(2)), float(p.group(3))
+                            x, y, z = float(p.group(1)) / 100, float(p.group(2)) / 100, float(p.group(3)) / 100
                             recorded[current_id]["loc"] = (x, y, z)
                         except Exception:
                             pass
@@ -257,19 +257,37 @@ class CarlaAPIHelper:
         mapping: dict[int, int] = {}
         used_sim_ids: set[int] = set()
 
-        # A) role_name + type_id exact
+        # A) role_name + type_id exact (tie-break by nearest position if multiple)
         for rid, rinfo in recorded.items():
             r_role = (rinfo["role_name"] or "").lower()
             r_type = (rinfo["type_id"] or "").lower()
             if not r_role and not r_type:
                 continue
+
             candidates = [s for s in sim_pool
                           if s["id"] not in used_sim_ids
                           and (s["type_id"] or "").lower() == r_type
                           and (s["role_name"] or "").lower() == r_role]
+
+            if not candidates:
+                continue
+
             if len(candidates) == 1:
+                # unique match ⇒ accept
                 mapping[rid] = candidates[0]["id"]
                 used_sim_ids.add(candidates[0]["id"])
+                continue
+
+            # multiple matches ⇒ if we have a recorded location, pick the nearest within tolerance
+            r_loc = rinfo.get("loc")
+            if r_loc is not None:
+                best = min(candidates, key=lambda s: dist_xy(r_loc, s["loc"]))
+                if dist_xy(r_loc, best["loc"]) <= position_tolerance_m:
+                    mapping[rid] = best["id"]
+                    used_sim_ids.add(best["id"])
+                    continue
+                # If we get here, we had multiple role+type matches but no location (or none within tolerance).
+                # Leave unresolved for later stages (B/C/D) to handle.
 
         # B) type_id + nearest position (within tolerance)
         for rid, rinfo in recorded.items():

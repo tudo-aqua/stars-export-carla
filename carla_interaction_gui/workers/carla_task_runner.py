@@ -229,7 +229,8 @@ def run_recgen_once(args):
         generationw=args.generationw,
         candidate_maps=candidate_maps,
         output_dir=args.output,
-        no_rendering=args.offscreen,  # align with parent setting
+        no_rendering=args.offscreen,
+        number_of_parked=args.number_of_parked,
     )
     print(f">> [RecGen-Once] seed {args.seed} finished")
 
@@ -264,6 +265,7 @@ def run_recgen(args):
         "--generationv", args.generationv,
         "--filterw", args.filterw,
         "--generationw", args.generationw,
+        "--number-of-parked", str(args.number_of_parked),
     ]
     if args.offscreen:
         base_cmd.append("--offscreen")
@@ -316,6 +318,7 @@ def run_recgen(args):
     print(">> [RecGen] All scenarios finished.")
     if last_error:
         raise last_error
+
 
 def main():
     p = argparse.ArgumentParser("carla_task_runner")
@@ -384,6 +387,8 @@ def main():
     pr.add_argument("--generationv", default="All")
     pr.add_argument("--filterw", default="walker.pedestrian.*")
     pr.add_argument("--generationw", default="2")
+    pr.add_argument("--number-of-parked", type=int, default=0,
+                    help="Number of parked vehicles to spawn on shoulder lanes")
 
     pr1 = sub.add_parser("recgen-once", help="Run a single recording generation (expects server to be running)")
     # NOTE: do NOT call add_common(pr1) here; child must not require --carla-exe
@@ -399,6 +404,8 @@ def main():
     pr1.add_argument("--filterw", default="walker.pedestrian.*")
     pr1.add_argument("--generationw", default="2")
     pr1.add_argument("--length-of-run", type=float, default=5.0)
+    pr1.add_argument("--number-of-parked", type=int, default=0)
+
     pr1.set_defaults(_fn=run_recgen_once)
 
     # Duration (minutes)
@@ -406,6 +413,7 @@ def main():
 
     args = p.parse_args()
     return args._fn(args)
+
 
 if __name__ == "__main__":
     sys.exit(main() or 0)
