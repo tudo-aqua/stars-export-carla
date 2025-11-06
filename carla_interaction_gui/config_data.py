@@ -36,6 +36,18 @@ class Config:
     agent_vehicle_filter: str = "vehicle.tesla.model3"
     agent_target_speed_kph: float = 35.0
 
+    recgen_seed_start: int = 0
+    recgen_num_scenarios: int = 1
+    recgen_selected_maps: list[str] | None = None  # persisted as JSON list
+    recgen_num_vehicles: int = 200
+    recgen_num_walkers: int = 30
+    recgen_filter_vehicles: str = "vehicle.*"
+    recgen_generation_vehicles: str = "All"  # "1" | "2" | "All"
+    recgen_filter_walkers: str = "walker.pedestrian.*"
+    recgen_generation_walkers: str = "2"  # "1" | "2" | "All"
+    recgen_length_minutes: float = 5.0
+    recgen_output_dir: str = ""
+
 
 def load() -> Config:
     """
@@ -48,14 +60,14 @@ def load() -> Config:
         Config: The loaded Config object or a default object if no file
         exists or an error occurs during loading.
     """
-    if not _CONFIG_PATH.exists():
-        return Config()
     try:
         raw = json.loads(_CONFIG_PATH.read_text())
         allowed_fields = {field.name for field in fields(Config)}
         filtered = {field: value for field, value in raw.items() if field in allowed_fields}
-        return Config(**filtered)
+        cfg = Config(**filtered)
+        return cfg
     except Exception:
+        # On any error, return defaults
         return Config()
 
 

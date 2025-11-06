@@ -1,13 +1,12 @@
 import argparse
 import logging
-import math
 import random
 import time
-from datetime import datetime
-from typing import List
+from types import SimpleNamespace
+from typing import List, Optional
 
 import carla
-from carla import World, Client, WeatherParameters, Actor
+from carla import World, Client, WeatherParameters
 
 from carla_data_classes.dynamic import DataWeatherParameters
 from carla_data_classes.enums.DataWeatherParametersType import DataWeatherParametersType
@@ -28,14 +27,6 @@ class CarlaDataGenerator:
         self.client = carla_client
         self.world: World = carla_client.get_world()
         self.map = self.world.get_map()
-
-    @staticmethod
-    def start_recording(client: Client, file_name: str, map_name: str, additional_infos=False) -> str:
-        recording_dir = JSONHelper.get_file_path_for_name(name=file_name, map_name=map_name,
-                                                          folder=JSONHelper.RECORDINGS_RUNS_FOLDER, file_ending="log")
-        print(f"Recording location: {recording_dir}")
-        client.start_recorder(recording_dir, additional_infos)
-        return recording_dir
 
     def get_actor_blueprints(self, world, filter, generation):
         bps = world.get_blueprint_library().filter(filter)
@@ -248,16 +239,180 @@ class CarlaDataGenerator:
 
         return vehicles_list
 
-    @staticmethod
-    def change_map(client: Client) -> str:
-        maps = CarlaAPIHelper.get_usable_maps(client)
-        map = random.choice(maps)
-        if map == "/Game/Carla/Maps/Town10HD_Opt":
-            print(f"Map '{map}' is already loaded.")
-            return map
-        print(f"Load map '{map}'")
-        client.load_world(map)
-        return map
+    def _to_asset_path(self, name: str) -> str:
+        """Accepts 'Town05' or a full asset path and returns the asset path."""
+        name = (name or "").strip()
+        if not name:
+            return ""
+        if name.startswith("/Game/Carla/Maps/"):
+            return name
+        if name == "Town10HD":
+            return "/Game/Carla/Maps/Town10HD_Opt"
+        return f"/Game/Carla/Maps/{name}"
+
+    def _load_map_by_seed(self, client: Client, candidates: Optional[list[str]], seed: int) -> str:
+        """Pick a map deterministically from candidates using the seed; fall back to usable maps."""
+        if candidates:
+            pool = sorted({self._to_asset_path(m) for m in candidates if m})
+        else:
+            pool = sorted({m for m in CarlaAPIHelper.get_usable_maps(client)})
+        if not pool:
+            raise RuntimeError("No candidate maps available to choose from.")
+
+        rng = random.Random(seed)
+        chosen = rng.choice(pool)
+
+        current = client.get_world().get_map().name
+        if chosen in current:
+            print(f"Map '{chosen}' is already loaded.")
+            return chosen
+
+        print(f"Load map '{chosen}'")
+        client.load_world(chosen)
+        return chosen
+
+    def run_recording_generation(self,
+                                 client: Client,
+                                 *,
+                                 seed: int,
+                                 length_minutes: float,
+                                 number_of_vehicles: int,
+                                 number_of_walkers: int,
+                                 filterv: str = "vehicle.*",
+                                 generationv: str = "All",
+                                 filterw: str = "walker.pedestrian.*",
+                                 generationw: str = "2",
+                                 candidate_maps: Optional[list[str]] = None,
+                                 output_dir: Optional[str] = None,
+                                 no_rendering: bool = False,
+                                 ) -> None:
+        """
+        Perform a single recording run in the already-connected CARLA server.
+        - Deterministically selects a map from candidate_maps using 'seed'
+        - Changes weather
+        - Spawns traffic
+        - Records for 'length_minutes'
+        - Stores outputs under 'output_dir' (if provided)
+        """
+        # Allow overriding output directory used by JSONHelper
+        if output_dir:
+            import os
+            os.makedirs(output_dir, exist_ok=True)
+            JSONHelper.RECORDINGS_RUNS_FOLDER = output_dir  # redirect all outputs
+
+        # Build an 'args' namespace expected by the existing helper methods in this module
+        args = SimpleNamespace(
+            # seeded determinism
+            seed=int(seed),
+
+            # sim/traffic manager settings expected by generate_traffic()
+            tm_port=8000,  # CARLA default TM port
+            respawn=False,  # only if you want dormant respawn
+            hybrid=False,  # TrafficManager hybrid physics
+            asynch=False,  # we run in synchronous mode
+            hero=False,  # no hero vehicle
+            car_lights_on=False,  # leave lights off globally
+
+            # rendering toggle
+            no_rendering=bool(no_rendering),
+
+            # actor counts and filters
+            number_of_vehicles=int(number_of_vehicles),
+            number_of_walkers=int(number_of_walkers),
+            filterv=str(filterv or "vehicle.*"),
+            generationv=str(generationv or "All"),
+            filterw=str(filterw or "walker.pedestrian.*"),
+            generationw=str(generationw or "2"),
+
+            # duration (minutes -> used later)
+            length_of_run=float(length_minutes),
+        )
+
+        # Deterministic RNG for this run
+        print("Seed:", args.seed)
+        random.seed(args.seed)
+
+        print("Connect to carla simulator (reusing existing client)")
+        world: World = client.get_world()
+        print("Connected to Carla")
+
+        data_generator = CarlaDataGenerator(client)
+
+        # Weather first (weather gets logged later)
+        data_weather = data_generator.change_weather(world=world)
+
+        # Choose and load a map deterministically by seed
+        map_name = self._load_map_by_seed(client=client, candidates=candidate_maps, seed=args.seed)
+        time.sleep(5)  # give CARLA some breaths after map load
+
+        # Build the recording log file path
+        file_name = f"seed_{args.seed}"
+        recording_dir = JSONHelper.get_file_path_for_name(
+            name=file_name,
+            map_name=map_name,
+            file_ending="log",
+            folder=JSONHelper.RECORDINGS_RUNS_FOLDER,
+            # NOTE: Use your existing constant here if it differs:
+            prefix=getattr(JSONHelper, "RECORDING_FILE_NAME_PREFIX", "recording"),
+        )
+
+        # Switch world settings (sync/no_rendering) inside your generate_traffic() already,
+        # but we still start the recorder here before spawning traffic (like your main).
+        client.start_recorder(recording_dir, True)
+        try:
+            # Spawn traffic (your existing function configures TM/sync etc.)
+            data_generator.generate_traffic(args, client, world)
+
+            # Record for the requested duration
+            end_time = time.time() + args.length_of_run * 60.0
+            while time.time() < end_time:
+                # In synchronous mode generate_traffic already toggled, so use tick
+                try:
+                    world.tick()
+                except Exception:
+                    time.sleep(0.05)
+
+        finally:
+            # Stop and zip recorder log
+            try:
+                client.stop_recorder()
+            except Exception:
+                pass
+
+        # Zip and remove raw recorder log (matches your pattern at the bottom of file)
+        try:
+            JSONHelper.zip_and_delete_file(recording_dir)
+        except Exception as e:
+            print("Warning: failed to zip recording:", e)
+
+        # Save weather json next to recording
+        try:
+            weather_path = JSONHelper.get_file_path_for_name(
+                name=file_name,
+                map_name=map_name,
+                file_ending="json",
+                folder=JSONHelper.RECORDINGS_RUNS_FOLDER,
+                prefix=JSONHelper.WEATHER_FILE_NAME_PREFIX,
+            )
+            print("Save weather information to file", weather_path)
+            JSONHelper.log_weather(data_weather, weather_path)
+            JSONHelper.zip_and_delete_file(weather_path)
+        except Exception as e:
+            print("Warning: failed to save weather info:", e)
+
+        # Reset world and clean up actors (same as your main tail)
+        settings = world.get_settings()
+        settings.synchronous_mode = False
+        settings.no_rendering_mode = False
+        settings.fixed_delta_seconds = None
+        world.apply_settings(settings)
+
+        actors = world.get_actors()
+        print(f"Destroy {len(actors)} actors")
+        client.apply_batch([carla.command.DestroyActor(x) for x in actors])
+
+        time.sleep(0.5)
+        print(f"Generation of recording with seed {args.seed} complete")
 
     @staticmethod
     def change_weather(world: World) -> DataWeatherParameters:
@@ -307,209 +462,45 @@ class CarlaDataGenerator:
         return DataWeatherParameters.from_weather(new_weather, new_weather_enum)
 
 
-if __name__ == '__main__':
-    abort = False
-    argparser = argparse.ArgumentParser(
-        description=__doc__)
-    argparser.add_argument(
-        '--host',
-        metavar='H',
-        default='127.0.0.1',
-        help='IP of the host server (default: 127.0.0.1)')
-    argparser.add_argument(
-        '-p', '--port',
-        metavar='P',
-        default=2000,
-        type=int,
-        help='TCP port to listen to (default: 2000)')
-    argparser.add_argument(
-        '-n', '--number-of-vehicles',
-        metavar='N',
-        default=200,
-        type=int,
-        help='Number of vehicles (default: 30)')
-    argparser.add_argument(
-        '-w', '--number-of-walkers',
-        metavar='W',
-        default=30,
-        type=int,
-        help='Number of walkers (default: 10)')
-    argparser.add_argument(
-        '--filterv',
-        metavar='PATTERN',
-        default='vehicle.*',
-        help='Filter vehicle model (default: "vehicle.*")')
-    argparser.add_argument(
-        '--generationv',
-        metavar='G',
-        default='All',
-        help='restrict to certain vehicle generation (values: "1","2","All" - default: "All")')
-    argparser.add_argument(
-        '--filterw',
-        metavar='PATTERN',
-        default='walker.pedestrian.*',
-        help='Filter pedestrian type (default: "walker.pedestrian.*")')
-    argparser.add_argument(
-        '--generationw',
-        metavar='G',
-        default='2',
-        help='restrict to certain pedestrian generation (values: "1","2","All" - default: "2")')
-    argparser.add_argument(
-        '--tm-port',
-        metavar='P',
-        default=8000,
-        type=int,
-        help='Port to communicate with TM (default: 8000)')
-    argparser.add_argument(
-        '--asynch',
-        action='store_true',
-        help='Activate asynchronous mode execution')
-    argparser.add_argument(
-        '--hybrid',
-        action='store_true',
-        help='Activate hybrid mode for Traffic Manager')
-    argparser.add_argument(
-        '-s', '--seed',
-        metavar='S',
-        type=int,
-        default=0,
-        help='Set random device seed and deterministic mode for Traffic Manager')
-    argparser.add_argument(
-        '--car-lights-on',
-        action='store_true',
-        default=False,
-        help='Enable automatic car light management')
-    argparser.add_argument(
-        '--hero',
-        action='store_true',
-        default=False,
-        help='Set one of the vehicles as hero')
-    argparser.add_argument(
-        '--respawn',
-        action='store_true',
-        default=False,
-        help='Automatically respawn dormant vehicles (only in large maps)')
-    argparser.add_argument(
-        '--no-rendering',
-        action='store_true',
-        default=False,
-        help='Activate no rendering mode')
-    argparser.add_argument(
-        '-l', '--length-of-run',
-        metavar='L',
-        default=5,
-        type=float,
-        help='Length of the run in minutes (default: 5')
+if __name__ == "__main__":
+    argparser = argparse.ArgumentParser()
+    argparser.add_argument('--seed', type=int, default=0)
+    argparser.add_argument('--length-of-run', type=float, default=5.0)
+    argparser.add_argument('--number-of-vehicles', type=int, default=200)
+    argparser.add_argument('--number-of-walkers', type=int, default=30)
+    argparser.add_argument('--filterv', default="vehicle.*")
+    argparser.add_argument('--generationv', default="All")
+    argparser.add_argument('--filterw', default="walker.pedestrian.*")
+    argparser.add_argument('--generationw', default="2")
+    argparser.add_argument('--no-rendering', action='store_true')
+
+    # Repeatable map candidates; the chosen map is seed-deterministic
+    argparser.add_argument('--map', dest='maps', action='append', default=None,
+                           help='Candidate map (repeatable). If omitted, server-usable maps are used.')
+
+    # Optional output folder override
+    argparser.add_argument('--output-dir', default='', help='Override JSONHelper.RECORDINGS_RUNS_FOLDER')
 
     args = argparser.parse_args()
-    print("Seed:", args.seed)
-    random.seed(args.seed)
+
     print("Connect to carla simulator")
-    # Find carla simulator at localhost on port 2000
     client = carla.Client('localhost', 2000)
-    # Try to connect for 10 seconds. Fail if not successful
     client.set_timeout(20.0)
-    world: World = client.get_world()
     print("Connected to Carla")
-    data_generator = CarlaDataGenerator(client)
-    print("Generate traffic")
-    # Change weather to one of the predefined ones
-    data_weather = data_generator.change_weather(world=world)
-    map_name = data_generator.change_map(client=client)
-    time.sleep(5)
 
-    world = client.get_world()
-    data_generator.world = world
+    generator = CarlaDataGenerator(client)
 
-    file_name = map_name + "_seed" + str(args.seed)
-    recording_dir = data_generator.start_recording(client=client, file_name=file_name, map_name=map_name)
-
-    spawned_vehicle_ids = data_generator.generate_traffic(args, client, world)
-
-    try:
-        target_length_of_run_in_minutes = args.length_of_run
-        print("Record", target_length_of_run_in_minutes, "minutes.")
-        target_length_of_run = target_length_of_run_in_minutes * 60
-        first_tick_timestamp = datetime.now()
-        print("Current time:", first_tick_timestamp)
-        length_of_current_run = 0.0
-
-        actors: List[Actor] = list(world.get_actors())
-        # Decide which vehicle should be used as ego for later reference
-        ego_id: int = spawned_vehicle_ids[0]
-        # Get the actual actor based on the ego_id
-        actor = list(filter(lambda ac: ac.id == ego_id, actors))[0]
-        # Save position data to later check if the vehicles have moved
-        # Sometimes CARLA does not compute the movement of vehicles such that
-        # the simulation data is unusable
-        actor_x = actor.get_location().x
-        actor_y = actor.get_location().y
-        checked_for_moving_vehicles = False
-
-        # Loop until the simulation time as reached the desired length of run time
-        while length_of_current_run < target_length_of_run:
-            # Calculate next simulation step
-            world.tick()
-            # Calculate new time stamps and length of current run
-            current_tick_timestamp = datetime.now()
-            length_of_current_run += CarlaDataGenerator.SIMULATOR_FIXED_TICK_DELTA
-
-            # Sometimes the vehicles do not start moving in the simulation. Check and abort if so
-            if length_of_current_run >= 10 and not checked_for_moving_vehicles:
-                print("Check for non-moving vehicles")
-                # Get the current actors
-                new_actors: List[Actor] = list(world.get_actors())
-                new_actor = list(filter(lambda ac: ac.id == ego_id, new_actors))[0]
-                # Get the current position of the current ego vehicle
-                new_actor_x = new_actor.get_location().x
-                new_actor_y = new_actor.get_location().y
-                # Calculate distance for each axis
-                dist_x = pow(new_actor_x - actor_x, 2)
-                dist_y = pow(new_actor_y - actor_y, 2)
-                # Combine distance of both axes
-                dist = math.sqrt(dist_x + dist_y)
-                print(f"Distance: {dist}")
-                checked_for_moving_vehicles = True
-
-                # Check if the vehicles have moved
-                if dist < 0.5:
-                    abort = True
-                    print("The vehicles have not moved. Abort")
-                    # Something in the simulation has gone wrong. Log for later analysis
-                    JSONHelper.log_aborted_run(file_name)
-                    raise KeyboardInterrupt
-
-        print("Total elapsed seconds:", (datetime.now() - first_tick_timestamp).total_seconds(), "s")
-        print("Total elapsed simulation seconds:", length_of_current_run, "s")
-    except KeyboardInterrupt:
-        pass
-    finally:
-        if not abort:
-            # Stop the recorder
-            client.stop_recorder()
-            # Zip and delete log file
-            JSONHelper.zip_and_delete_file(recording_dir)
-            # Log the collected data into a json file
-            file_path = JSONHelper.get_file_path_for_name(name=file_name, map_name=map_name, file_ending="json",
-                                                          folder=JSONHelper.RECORDINGS_RUNS_FOLDER,
-                                                          prefix=JSONHelper.WEATHER_FILE_NAME_PREFIX)
-            print("Save weather information to file", file_path)
-            JSONHelper.log_weather(data_weather, file_path)
-            # Zip and delete weather file
-            JSONHelper.zip_and_delete_file(file_path)
-
-        # Reset the world settings to default values
-        settings = world.get_settings()
-        settings.synchronous_mode = False
-        settings.no_rendering_mode = False
-        settings.fixed_delta_seconds = None
-        world.apply_settings(settings)
-
-        # Remove all remaining actors from the simulation
-        actors = world.get_actors()
-
-        print(f"Destroy {len(actors)} actors")
-        client.apply_batch([carla.command.DestroyActor(x) for x in actors])
-
-        time.sleep(0.5)
-        print(f"Generation of recording with seed {args.seed} complete")
+    generator.run_recording_generation(
+        client,
+        seed=args.seed,
+        length_minutes=args.length_of_run,
+        number_of_vehicles=args.number_of_vehicles,
+        number_of_walkers=args.number_of_walkers,
+        filterv=args.filterv,
+        generationv=args.generationv,
+        filterw=args.filterw,
+        generationw=args.generationw,
+        candidate_maps=args.maps,
+        output_dir=(args.output_dir or None),
+        no_rendering=bool(args.no_rendering),
+    )

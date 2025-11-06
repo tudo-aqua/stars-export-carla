@@ -12,6 +12,7 @@ from carla_interaction_gui.config_data import Config, load, save
 from carla_interaction_gui.workers.CarlaServerWorker import CarlaServerWorker
 from carla_interaction_gui.workers.ManualControlWorker import ManualControlWorker
 from carla_interaction_gui.workers.MoveLatestRecordingWorker import MoveLatestRecordingWorker
+from carla_interaction_gui.workers.RecGenRunner import RecGenRunner
 from carla_interaction_gui.workers.RecordVideoWorker import RecordVideoWorker
 from carla_interaction_gui.workers.ThreadWorker import ThreadWorker
 from carla_interaction_gui.workers.TransformRecordingWorker import TransformRecordingWorker
@@ -88,7 +89,26 @@ class UnifiedCarlaGUI(tk.Tk):
         else:
             default_map = ALLOWED_CARLA_MAPS[0]
         self.selected_map_variable = tk.StringVar(value=default_map)
-        self._map_combos: list[ttk.Combobox] = []
+        self._map_combos: list[ttk.Combobox] = []  # --- RecGen variables (load here so they are available early) ---
+        self.recgen_seed_start_var = tk.IntVar(value=getattr(self.config, "recgen_seed_start", 0))
+        self.recgen_num_scenarios_var = tk.IntVar(value=getattr(self.config, "recgen_num_scenarios", 1))
+
+        self.recgen_num_vehicles_var = tk.IntVar(value=getattr(self.config, "recgen_num_vehicles", 200))
+        self.recgen_num_walkers_var = tk.IntVar(value=getattr(self.config, "recgen_num_walkers", 30))
+        self.recgen_filter_vehicles_var = tk.StringVar(
+            value=getattr(self.config, "recgen_filter_vehicles", "vehicle.*"))
+        self.recgen_generation_vehicles_var = tk.StringVar(
+            value=getattr(self.config, "recgen_generation_vehicles", "All"))
+        self.recgen_filter_walkers_var = tk.StringVar(
+            value=getattr(self.config, "recgen_filter_walkers", "walker.pedestrian.*"))
+        self.recgen_generation_walkers_var = tk.StringVar(value=getattr(self.config, "recgen_generation_walkers", "2"))
+
+        self.recgen_length_minutes_var = tk.DoubleVar(value=getattr(self.config, "recgen_length_minutes", 5.0))
+        self.recgen_output_dir_variable = tk.StringVar(value=getattr(self.config, "recgen_output_dir", ""))
+
+        # Selected maps: None in config means default to ALLOWED_NON_LAYERED_MAPS
+        _saved = getattr(self.config, "recgen_selected_maps", None)
+        self._recgen_selected_maps_default = list(_saved) if _saved else list(ALLOWED_NON_LAYERED_MAPS)
 
         self._active_worker = None
         self._carla_worker = None
@@ -104,6 +124,7 @@ class UnifiedCarlaGUI(tk.Tk):
         self._tab_video(notebook)
         self._tab_generate_maps(notebook)
         self._tab_agent(notebook)
+        self._tab_recording_generator(notebook)
 
         # log pane
         self.log = scrolledtext.ScrolledText(self, height=30, state="disabled")
@@ -490,6 +511,87 @@ class UnifiedCarlaGUI(tk.Tk):
         w = _Runner(cfg, self._log)
         self._attach_worker(w, stop_button=self.stop_btn_agent)
 
+    def _tab_recording_generator(self, notebook: ttk.Notebook):
+        """
+        Build the Recording Generator tab:
+          - Seeds (start, #scenarios)
+          - Maps (checkboxes)
+          - Traffic params (vehicles/walkers/filters/generations)
+          - Run settings (length per run, output dir)
+          - Start/Stop buttons
+        """
+        frame = ttk.Frame(notebook)
+        notebook.add(frame, text="Recording Generator")
+
+        tk.Label(frame, text="Generate CARLA recordings across seed ranges and selected maps.").pack(pady=5)
+
+        # Carla EXE in this tab as well
+        self._entry_row(frame, "CARLA executable:", self.carla_executable_variable,
+                        lambda: self._open_file_dialog(self.carla_executable_variable))
+        # Render options (same global flag used by other tabs)
+        render_row = tk.Frame(frame)
+        render_row.pack(fill="x", padx=4, pady=(2, 8))
+        tk.Checkbutton(
+            render_row,
+            text="Render off screen",
+            variable=self.render_off_screen_variable
+        ).pack(side="left", padx=4)
+
+        # ── Seeds
+        seed_frame = ttk.LabelFrame(frame, text="Seeds")
+        seed_frame.pack(fill="x", padx=4, pady=6)
+        self._entry_row(seed_frame, "Seed start:", self.recgen_seed_start_var, width=12)
+        self._entry_row(seed_frame, "# scenarios:", self.recgen_num_scenarios_var, width=12)
+
+        # ── Maps (checkboxes)
+        maps_frame = ttk.LabelFrame(frame, text="Maps (select one or more)")
+        maps_frame.pack(fill="x", padx=4, pady=6)
+
+        previously = set(self._recgen_selected_maps_default)
+        self._recgen_map_vars = {}
+        row = tk.Frame(maps_frame);
+        row.pack(fill="x", pady=2)
+
+        for i, m in enumerate(ALLOWED_CARLA_MAPS):
+            var = tk.BooleanVar(value=m in previously)
+            self._recgen_map_vars[m] = var
+            tk.Checkbutton(row, text=m, variable=var, anchor="w").pack(side="left", padx=6)
+
+            if (i + 1) % 4 == 0 and i != len(ALLOWED_CARLA_MAPS) - 1:
+                row = tk.Frame(maps_frame);
+                row.pack(fill="x", pady=2)
+
+        # ── Traffic parameters
+        tp = ttk.LabelFrame(frame, text="Traffic parameters")
+        tp.pack(fill="x", padx=4, pady=6)
+        self._entry_row(tp, "Vehicles (N):", self.recgen_num_vehicles_var, width=12)
+        self._entry_row(tp, "Walkers (W):", self.recgen_num_walkers_var, width=12)
+        self._entry_row(tp, "Vehicle filter:", self.recgen_filter_vehicles_var)
+        self._entry_row(tp, "Vehicle generation:", self.recgen_generation_vehicles_var, width=12)
+        self._entry_row(tp, "Walker filter:", self.recgen_filter_walkers_var)
+        self._entry_row(tp, "Walker generation:", self.recgen_generation_walkers_var, width=12)
+
+        # ── Run settings
+        rs = ttk.LabelFrame(frame, text="Run settings")
+        rs.pack(fill="x", padx=4, pady=6)
+        self._entry_row(rs, "Length per run (min):", self.recgen_length_minutes_var, width=12)
+
+        # Output directory
+        self._entry_row(
+            frame,
+            "Output directory:",
+            self.recgen_output_dir_variable,
+            lambda: self._open_directory_dialog(self.recgen_output_dir_variable)
+        )
+
+        # ── Controls
+        row_btns = tk.Frame(frame);
+        row_btns.pack(fill="x", pady=8)
+        tk.Button(row_btns, text="Run generator", width=18, command=self._start_recgen).pack(side="left", padx=2)
+        self.stop_btn_recgen = tk.Button(row_btns, text="Stop", width=8,
+                                         command=self._stop_worker, state="disabled")
+        self.stop_btn_recgen.pack(side="left", padx=4)
+
     def _validate_number(self, proposed: str) -> bool:
         """
         Entry validator: allow empty, integers, or floats (with optional leading '-').
@@ -699,6 +801,57 @@ class UnifiedCarlaGUI(tk.Tk):
             stop_button=self.stop_btn_generate
         )
 
+    def _start_recgen(self):
+        """
+        Start the recording generator across a seed range.
+        The generator receives all selected maps via --map and picks one deterministically using the seed.
+        """
+        if not self._validate_paths([
+            ("CARLA executable", self.carla_executable_variable, "file"),
+            ("Output directory", self.recgen_output_dir_variable, "dir"),
+        ]):
+            return
+
+        # Collect + persist config first (updates self.config)
+        cfg = self._collect_cfg()
+
+        # Gather selected maps
+        selected_maps = [m for m, v in getattr(self, "_recgen_map_vars", {}).items() if v.get()]
+        if not selected_maps:
+            return messagebox.showerror("Missing", "Select at least one map.")
+
+        # Build seeds from (start, count)
+        try:
+            seed_start = int(self.recgen_seed_start_var.get())
+        except Exception:
+            seed_start = 0
+        try:
+            num_scenarios = max(1, int(self.recgen_num_scenarios_var.get()))
+        except Exception:
+            num_scenarios = 1
+        seeds = list(range(seed_start, seed_start + num_scenarios))
+
+        # Clear log and attach worker
+        self._clear_log()
+        runner = RecGenRunner(cfg, self._log, selected_maps=selected_maps, seeds=seeds)
+        self._attach_worker(runner, stop_button=getattr(self, "stop_btn_recgen", None))
+
+    # allow resolving arbitrary script in the project next to runner files
+    def _resolve_script(self_inner, name: str) -> str | None:
+        # Reuse the same discovery the ThreadWorker uses for "carla_task_runner.py"
+        here = os.path.dirname(os.path.abspath(__file__))
+        candidates = [
+            os.path.join(here, name),
+            os.path.join(os.path.dirname(here), name),
+            os.path.join(os.getcwd(), name),
+        ]
+        for c in candidates:
+            if os.path.isfile(c):
+                return c
+        return None
+        self._clear_log()
+        self._attach_worker(_RecGenRunner(cfg, self._log), stop_button=getattr(self, "stop_btn_recgen", None))
+
     def _stop_worker(self):
         """
         Stops any active exclusive worker, stops all manual_control workers,
@@ -782,8 +935,23 @@ class UnifiedCarlaGUI(tk.Tk):
                 self.agent_target_speed_variable,
                 self.only_track_at_specific_interval_variable,
                 self.specific_track_interval_variable,
+                self.recgen_seed_start_var,
+                self.recgen_num_scenarios_var,
+                self.recgen_num_vehicles_var,
+                self.recgen_num_walkers_var,
+                self.recgen_filter_vehicles_var,
+                self.recgen_generation_vehicles_var,
+                self.recgen_filter_walkers_var,
+                self.recgen_generation_walkers_var,
+                self.recgen_length_minutes_var,
+                self.recgen_output_dir_variable
         ):
-            variable.trace_add("write", self._auto_save)
+            if variable is not None:
+                variable.trace_add("write", self._auto_save)
+
+        # Map checkboxes also need to trigger a save
+        for var in getattr(self, "_recgen_map_vars", {}).values():
+            var.trace_add("write", self._auto_save)
 
     def _auto_save(self, *_):
         """
@@ -833,6 +1001,43 @@ class UnifiedCarlaGUI(tk.Tk):
             config.agent_target_speed_kph = float(self.agent_target_speed_variable.get())
         except Exception:
             config.agent_target_speed_kph = 35.0
+        # ── Recording generator (persist UI -> config)
+        if hasattr(self, "recgen_seed_start_var"):
+            self.config.recgen_seed_start = int(self.recgen_seed_start_var.get())
+
+        if hasattr(self, "recgen_num_scenarios_var"):
+            self.config.recgen_num_scenarios = max(1, int(self.recgen_num_scenarios_var.get()))
+
+        if hasattr(self, "_recgen_map_vars"):
+            self.config.recgen_selected_maps = [m for m, v in self._recgen_map_vars.items() if v.get()]
+
+        if hasattr(self, "recgen_num_vehicles_var"):
+            self.config.recgen_num_vehicles = int(self.recgen_num_vehicles_var.get())
+
+        if hasattr(self, "recgen_num_walkers_var"):
+            self.config.recgen_num_walkers = int(self.recgen_num_walkers_var.get())
+
+        if hasattr(self, "recgen_filter_vehicles_var"):
+            self.config.recgen_filter_vehicles = (self.recgen_filter_vehicles_var.get() or "vehicle.*").strip()
+
+        if hasattr(self, "recgen_generation_vehicles_var"):
+            self.config.recgen_generation_vehicles = (self.recgen_generation_vehicles_var.get() or "All").strip()
+
+        if hasattr(self, "recgen_filter_walkers_var"):
+            self.config.recgen_filter_walkers = (self.recgen_filter_walkers_var.get() or "walker.pedestrian.*").strip()
+
+        if hasattr(self, "recgen_generation_walkers_var"):
+            self.config.recgen_generation_walkers = (self.recgen_generation_walkers_var.get() or "2").strip()
+
+        if hasattr(self, "recgen_length_minutes_var"):
+            try:
+                self.config.recgen_length_minutes = float(self.recgen_length_minutes_var.get())
+            except Exception:
+                self.config.recgen_length_minutes = 5.0
+
+        # Output directory for the recording generator
+        if hasattr(self, "recgen_output_dir_variable"):
+            self.config.recgen_output_dir = self.recgen_output_dir_variable.get().strip()
 
         def _parse_var_as_float(var, default: float) -> float:
             try:
@@ -925,10 +1130,13 @@ class UnifiedCarlaGUI(tk.Tk):
 
         class _TextOutputHandler:
             def __init__(self, gui): self.gui = gui
+
             def write(self, txt):
                 for lines in txt.rstrip().splitlines():
                     self.gui._log(lines)
+
             def flush(self): pass
+
         sys.stdout = sys.stderr = _TextOutputHandler(self)
 
     def _log(self, txt: str):

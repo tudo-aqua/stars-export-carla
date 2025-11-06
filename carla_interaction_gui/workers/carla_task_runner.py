@@ -192,6 +192,131 @@ def run_manual_agent(args):
             pass
 
 
+def run_recgen_once(args):
+    """
+    Connect to an already-running CARLA server and run one recording
+    via CarlaDataGenerator.run_recording_generation(...). This is intended
+    to be launched by the parent 'recgen' task as a child process (per seed).
+    """
+    import time
+    import carla
+    from helpers.carla_recording_generator import CarlaDataGenerator  # keep your existing import layout
+
+    # Connect to the existing server the parent has started
+    client = carla.Client('localhost', 2000)
+    client.set_timeout(20.0)
+
+    # Make sure the world is ticking (server may need a breath)
+    try:
+        world = client.get_world()
+        _ = world.wait_for_tick(10.0)
+    except Exception:
+        time.sleep(1.0)
+
+    generator = CarlaDataGenerator(client)
+    candidate_maps = list(args.map) if args.map else None
+
+    print(f">> [RecGen-Once] seed {args.seed} start")
+    generator.run_recording_generation(
+        client,
+        seed=int(args.seed),
+        length_minutes=args.length_of_run,
+        number_of_vehicles=args.number_of_vehicles,
+        number_of_walkers=args.number_of_walkers,
+        filterv=args.filterv,
+        generationv=args.generationv,
+        filterw=args.filterw,
+        generationw=args.generationw,
+        candidate_maps=candidate_maps,
+        output_dir=args.output,
+        no_rendering=args.offscreen,  # align with parent setting
+    )
+    print(f">> [RecGen-Once] seed {args.seed} finished")
+
+
+def run_recgen(args):
+    """
+    For each seed:
+      - start fresh CARLA,
+      - spawn a child process: `python carla_task_runner.py recgen-once --seed <s> ...`
+      - stream its output,
+      - kill CARLA,
+      - continue to next seed.
+    """
+    import os
+    import sys
+    import time
+    import subprocess
+    import traceback
+
+    # Build the static part of the child command (everything except --seed)
+    # We call the same script (this file) with subcommand 'recgen-once'.
+    runner_path = os.path.abspath(__file__)
+    base_cmd = [
+        sys.executable or "python",
+        runner_path,
+        "recgen-once",
+        "--output", args.output,
+        "--length-of-run", str(args.length_of_run),
+        "--number-of-vehicles", str(args.number_of_vehicles),
+        "--number-of-walkers", str(args.number_of_walkers),
+        "--filterv", args.filterv,
+        "--generationv", args.generationv,
+        "--filterw", args.filterw,
+        "--generationw", args.generationw,
+    ]
+    if args.offscreen:
+        base_cmd.append("--offscreen")
+    for m in (args.map or []):
+        base_cmd += ["--map", m]
+
+    seed_start = int(args.seed_start)
+    num_scenarios = max(1, int(args.num_scenarios))
+    last_error = None
+
+    for s in range(seed_start, seed_start + num_scenarios):
+        print(f">> [RecGen] seed {s}")
+        try:
+            # Start a fresh server
+            _client = restart_and_connect(
+                exe=args.carla_exe,
+                render_off_screen=args.offscreen,
+                render_quality_low=args.quality_low,
+                map_name=None,  # child will load maps as needed
+                log=print,
+            )
+            # Spawn the child that does ONE generation, streaming output
+            cmd = base_cmd + ["--seed", str(s)]
+            print(">> [Runner-Child] " + " ".join(cmd))
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                print(line.rstrip())
+            proc.wait()
+            if proc.returncode != 0:
+                raise RuntimeError(f"recgen-once child exited with code {proc.returncode}")
+            print(f">> [RecGen] seed {s} finished")
+        except Exception as e:
+            last_error = e
+            print(f">> [RecGen] seed {s} FAILED:")
+            traceback.print_exc()
+        finally:
+            # Always stop CARLA before the next seed
+            try:
+                kill_carla(log=print)
+            except Exception:
+                pass
+            time.sleep(1.0)  # small cool-down
+
+    print(">> [RecGen] All scenarios finished.")
+    if last_error:
+        raise last_error
+
 def main():
     p = argparse.ArgumentParser("carla_task_runner")
     sub = p.add_subparsers(dest="task", required=True)
@@ -239,9 +364,48 @@ def main():
     pm.add_argument("--sync", action="store_true", help="Run viewer in synchronous mode")
     pm.set_defaults(_fn=run_manual_agent)
 
+    # recording generator (recgen)
+    pr = sub.add_parser("recgen", help="Generate recordings over a seed range (deterministic map per seed)")
+    add_common(pr)
+    pr.add_argument("--output", required=True, help="Output folder for recordings")
+
+    # Map candidates (repeatable). If omitted, the generator will use server-usable maps.
+    pr.add_argument("--map", action="append", help="Candidate map name (repeatable), e.g. Town01")
+
+    # Seed range
+    pr.add_argument("--seed-start", type=int, default=0, help="First seed (inclusive)")
+    pr.add_argument("--num-scenarios", type=int, default=1, help="Number of seeds to run")
+    pr.set_defaults(_fn=run_recgen)
+
+    # Traffic parameters & filters (names match generator CLI)
+    pr.add_argument("--number-of-vehicles", type=int, default=200)
+    pr.add_argument("--number-of-walkers", type=int, default=30)
+    pr.add_argument("--filterv", default="vehicle.*")
+    pr.add_argument("--generationv", default="All")
+    pr.add_argument("--filterw", default="walker.pedestrian.*")
+    pr.add_argument("--generationw", default="2")
+
+    pr1 = sub.add_parser("recgen-once", help="Run a single recording generation (expects server to be running)")
+    # NOTE: do NOT call add_common(pr1) here; child must not require --carla-exe
+    pr1.add_argument("--offscreen", action="store_true", default=False)  # we keep this for parity
+    pr1.add_argument("--quality-low", action="store_true", default=False)  # not used, but harmless if passed
+    pr1.add_argument("--output", required=True, help="Output folder for recordings")
+    pr1.add_argument("--seed", type=int, required=True, help="Seed for this single run")
+    pr1.add_argument("--map", action="append", help="Candidate map name (repeatable), e.g. Town01")
+    pr1.add_argument("--number-of-vehicles", type=int, default=200)
+    pr1.add_argument("--number-of-walkers", type=int, default=30)
+    pr1.add_argument("--filterv", default="vehicle.*")
+    pr1.add_argument("--generationv", default="All")
+    pr1.add_argument("--filterw", default="walker.pedestrian.*")
+    pr1.add_argument("--generationw", default="2")
+    pr1.add_argument("--length-of-run", type=float, default=5.0)
+    pr1.set_defaults(_fn=run_recgen_once)
+
+    # Duration (minutes)
+    pr.add_argument("--length-of-run", type=float, default=5.0)
+
     args = p.parse_args()
     return args._fn(args)
-
 
 if __name__ == "__main__":
     sys.exit(main() or 0)
