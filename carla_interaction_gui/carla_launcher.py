@@ -134,7 +134,7 @@ def restart_and_connect(
         exe: str,
         host: str = "localhost",
         port: int = 2000,
-        timeout: float = 60,
+        timeout: float = 600,
         *,
         render_off_screen: bool = True,
         render_quality_low: bool = True,

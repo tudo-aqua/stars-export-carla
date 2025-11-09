@@ -518,7 +518,7 @@ class CarlaDataGenerator:
 
             # Switch world settings (sync/no_rendering) inside your generate_traffic() already,
             # but we still start the recorder here before spawning traffic (like your main).
-            client.start_recorder(recording_dir, True)
+            client.start_recorder(recording_dir, False)
 
             # Record for the requested duration
             end_time = time.time() + args.length_of_run * 60.0

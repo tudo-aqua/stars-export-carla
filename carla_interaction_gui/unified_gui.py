@@ -291,8 +291,30 @@ class UnifiedCarlaGUI(tk.Tk):
         tk.Label(frame, text="Replay a recording and dump processed data.").pack(pady=5)
 
         self._entry_row(frame, "Recording extension:", self.recording_extension_variable)
-        self._entry_row(frame, "Input recording:", self.transform_input_file_variable,
-                        lambda: self._open_file_selection_with_specified_extension(self.transform_input_file_variable))
+        # --- Input: allow either a single file or a root folder ---
+        row = tk.Frame(frame)
+        row.pack(fill="x", pady=2)
+        tk.Label(row, text="Input recording / root folder:", width=26, anchor="w").pack(side="left")
+
+        tk.Entry(
+            row,
+            textvariable=self.transform_input_file_variable,
+            width=45
+        ).pack(side="left", fill="x", expand=True)
+
+        # Choose a single recording file (old behaviour)
+        tk.Button(
+            row,
+            text="File...",
+            command=lambda: self._open_file_selection_with_specified_extension(self.transform_input_file_variable)
+        ).pack(side="left", padx=2)
+
+        # Choose a folder that contains Town* subfolders
+        tk.Button(
+            row,
+            text="Folder...",
+            command=lambda: self._open_directory_dialog(self.transform_input_file_variable)
+        ).pack(side="left", padx=2)
         self._entry_row(frame, "Output folder:", self.transformer_output_path_variable,
                         lambda: self._open_directory_dialog(self.transformer_output_path_variable))
 
@@ -738,7 +760,7 @@ class UnifiedCarlaGUI(tk.Tk):
         """
         if not self._validate_paths([
             ("CARLA executable", self.carla_executable_variable, "file"),
-            ("Input recording", self.transform_input_file_variable, "file"),
+            ("Input recording", self.transform_input_file_variable, ("dir", "file")),
             ("Output folder", self.transformer_output_path_variable, "dir"),
         ]):
             return
@@ -1237,6 +1259,11 @@ class UnifiedCarlaGUI(tk.Tk):
             if not value:
                 messagebox.showerror("Missing", f"{label} required.")
                 return False
+
+            if "file" in kind and "dir" in kind:
+                if not (os.path.isfile(value) or os.path.isdir(value)):
+                    messagebox.showerror("Invalid path", f"{label} does not exist as a file/folder:\n{value}")
+                    return False
 
             if kind == "file":
                 if not os.path.isfile(value):
