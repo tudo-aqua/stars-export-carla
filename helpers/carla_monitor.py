@@ -1,4 +1,3 @@
-import math
 import os
 import re
 from datetime import datetime
@@ -156,18 +155,18 @@ class CarlaMonitor:
             # time window for matching collisions to this tick (± half a tick by default)
             half_window = 0.5 * dt_nominal
 
-            while True:
-                snapshot: WorldSnapshot = world.get_snapshot()
-                sim_t = snapshot.timestamp.elapsed_seconds  # CARLA in-simulation clock
-                sim_dt = snapshot.timestamp.delta_seconds or dt_nominal
-                current_time = sim_t - base_sim_time  # time since replay start (in-sim)
+            current_tick = 0.0
+            actual_tick = 0
+            tick_step = specific_track_interval / settings.fixed_delta_seconds
 
-                # Optional sampling throttle (unchanged)
-                if only_track_at_specific_interval and math.fmod(
-                        round(current_time, 3), specific_track_interval) != 0:
+            while tick_count < replay_frames:
+                if only_track_at_specific_interval and (tick_count % tick_step != 0.0):
                     world.tick()
+                    tick_count += 1
+                    current_tick += settings.fixed_delta_seconds
                     continue
 
+                actual_tick += 1
                 vehicles = api_helper.get_vehicles()
                 if len(vehicles) == 0:
                     # Skip monitoring, as there are no vehicles to monitor
@@ -177,14 +176,14 @@ class CarlaMonitor:
 
                 elapsed_time = (datetime.now() - start_wall).total_seconds()  # wall clock (print only)
                 print(
-                    f">> [CARLA] Simulation tick {tick_count} at {current_time:05f}s of {replay_duration}s; Elapsed time: {elapsed_time:3f}s")
+                    f">> [CARLA] Simulation tick {actual_tick} at {current_tick:05f}s of {replay_duration}s; Elapsed time: {elapsed_time:3f}s")
 
                 # Collisions for this tick: take all recorder frames within ± half_window around current_time
                 per_actor_collisions = collisions_for_time_window(
                     rec_idx=rec_idx,
                     mapper=mapper,
                     world=world,
-                    sim_time_rel=current_time,
+                    sim_time_rel=current_tick,
                     half_window=half_window
                 )
 
@@ -233,16 +232,14 @@ class CarlaMonitor:
                     ))
 
                 ticks.append(TickData(
-                    current_tick=current_time,
+                    current_tick=current_tick,
                     actor_positions=actor_positions,
                     weather_parameters=weather_parameters
                 ))
 
-                if current_time >= replay_duration:
-                    break
-
                 world.tick()
                 tick_count += 1
+                current_tick += settings.fixed_delta_seconds
 
             print(">> [Data-AV Transformer] Calculate velocity and acceleration for actors")
             compute_vel_acc_for_ticks(ticks)

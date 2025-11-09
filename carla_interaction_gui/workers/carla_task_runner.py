@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 import time
 import traceback
+import zipfile
 from typing import List
 
 from carla_interaction_gui.carla_launcher import restart_and_connect, kill_carla
@@ -14,6 +16,21 @@ from helpers.carla_monitor import CarlaMonitor
 
 
 def run_transform(args):
+    """
+    Transform a single recording, or – if --input is a directory – transform
+    all recording/weather pairs found in Town* subfolders.
+
+    Folder mode:
+      <input_root>/
+        Town01_.../
+          recording_seed_0.zip
+          weather_data_seed_0.zip
+          recording_seed_1.zip
+          weather_data_seed_1.zip
+          ...
+        Town02_.../
+          ...
+    """
     client = None
     try:
         client = restart_and_connect(
@@ -24,24 +41,83 @@ def run_transform(args):
             log=print,
         )
         mon = CarlaMonitor(carla_client=client)
-        print(f">> [Runner] Transform '{args.input}' -> '{args.output}'")
 
-        if args.only_track_at_specific_interval:
-            # Pass kwargs ONLY when the toggle is enabled
-            mon.monitor_simulation_run(
-                file_path=args.input,
-                weather_file_path="",
-                result_file_path=args.output,
-                only_track_at_specific_interval=True,
-                specific_track_interval=args.specific_track_interval,
-            )
+        # Helper to run a single transform (keeps your existing behaviour/flags)
+        def _run_single(recording_path: str, weather_path: str = ""):
+            print(f">> [Runner] Transform '{recording_path}' -> '{args.output}'")
+            if args.only_track_at_specific_interval:
+                mon.monitor_simulation_run(
+                    file_path=recording_path,
+                    weather_file_path=weather_path,
+                    result_file_path=args.output,
+                    only_track_at_specific_interval=True,
+                    specific_track_interval=args.specific_track_interval,
+                )
+            else:
+                mon.monitor_simulation_run(
+                    file_path=recording_path,
+                    weather_file_path=weather_path,
+                    result_file_path=args.output,
+                )
+
+        # ── Check if we are in "single-file" or "folder" mode ──────────────
+        in_path = args.input
+
+        if os.path.isdir(in_path):
+            print(f">> [Runner] Batch transform from root folder: {in_path}")
+
+            # Iterate over Town* subfolders
+            for entry in sorted(os.listdir(in_path)):
+                sub = os.path.join(in_path, entry)
+                if not os.path.isdir(sub):
+                    continue
+                if "Town" not in entry:
+                    continue
+
+                print(f">> [Runner] Searching in subfolder: {sub}")
+
+                # Build pairs of recording_seed_n.zip ↔ weather_data_seed_n.zip
+                names = set(os.listdir(sub))
+                for fname in sorted(names):
+                    m = re.match(r"recording_seed_(\d+)\.zip$", fname)
+                    if not m:
+                        continue
+                    seed = m.group(1)
+
+                    recording_path = os.path.join(sub, fname)
+                    weather_name = f"weather_data_seed_{seed}.zip"
+                    weather_path = os.path.join(sub, weather_name)
+
+                    if not os.path.exists(weather_path):
+                        print(f">> [Runner] WARNING: No weather file for seed {seed} in '{sub}' "
+                              f"(expected '{weather_name}'). Skipping this seed.")
+                        continue
+
+                    print(f">> [Runner] Found pair for seed {seed}:")
+                    print(f"              recording = {recording_path}")
+                    print(f"              weather   = {weather_path}")
+
+                    # Unzip files
+                    with zipfile.ZipFile(recording_path, 'r') as zip_ref:
+                        zip_ref.extractall(os.path.dirname(recording_path))
+                    with zipfile.ZipFile(weather_path, 'r') as zip_ref:
+                        zip_ref.extractall(os.path.dirname(weather_path))
+
+                    unzipped_recording_path = recording_path.replace(".zip", ".log")
+                    unzipped_weather_path = weather_path.replace(".zip", ".json")
+
+                    _run_single(unzipped_recording_path, unzipped_weather_path)
+
+                    os.remove(unzipped_recording_path)
+                    os.remove(unzipped_weather_path)
+
+            print(">> [Runner] Batch transform finished.")
+
         else:
-            # Do not pass the parameters at all
-            mon.monitor_simulation_run(
-                file_path=args.input,
-                weather_file_path="",
-                result_file_path=args.output,
-            )
+            # Original single-file behaviour (still supported)
+            print(f">> [Runner] Transform single file: '{in_path}' -> '{args.output}'")
+            # We keep weather_file_path empty here to retain existing behaviour
+            _run_single(in_path, "")
 
         print(">> [Runner] Transform finished.")
     except Exception:
@@ -52,7 +128,6 @@ def run_transform(args):
             kill_carla(log=print)
         except Exception:
             pass
-
 
 def run_record_video(args):
     # Choose correct recorder class based on --with-bboxes
