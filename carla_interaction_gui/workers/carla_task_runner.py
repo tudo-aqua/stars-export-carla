@@ -108,9 +108,6 @@ def run_transform(args):
 
                     _run_single(unzipped_recording_path, unzipped_weather_path)
 
-                    os.remove(unzipped_recording_path)
-                    os.remove(unzipped_weather_path)
-
             print(">> [Runner] Batch transform finished.")
 
         else:
