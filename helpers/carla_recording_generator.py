@@ -518,13 +518,13 @@ class CarlaDataGenerator:
             client.start_recorder(recording_dir, False)
 
             # Record for the requested duration
-            end_time = time.time() + args.length_of_run * 60.0
-            while time.time() < end_time:
-                # In synchronous mode generate_traffic already toggled, so use tick
-                try:
-                    world.tick()
-                except Exception:
-                    time.sleep(0.05)
+            snapshot = world.get_snapshot()
+            start_timestamp = snapshot.timestamp.elapsed_seconds
+            end_timestamp = start_timestamp + (args.length_of_run * 60)
+            current_timestamp = start_timestamp
+            while current_timestamp < end_timestamp:
+                world.tick()
+                current_timestamp = world.get_snapshot().timestamp.elapsed_seconds
 
         finally:
             # Stop and zip recorder log
@@ -627,7 +627,7 @@ class CarlaDataGenerator:
         all_lanes = _BlockBuilder.collect_all_lanes_waypoints(waypoints)
         shoulder_lanes = list(
             filter(lambda l: (
-                        not l.is_junction and l.lane_type == carla.LaneType.Shoulder and l.lane_width >= min_width_m),
+                    not l.is_junction and l.lane_type == carla.LaneType.Shoulder and l.lane_width >= min_width_m),
                    all_lanes))
         all_shoulder_lane_waypoints = list(
             flatten(map(lambda l: map(lambda tupl: tupl[1], lane_utils.get_all_waypoints_for_lane(l)), shoulder_lanes)))
