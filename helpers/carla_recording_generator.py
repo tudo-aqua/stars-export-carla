@@ -383,21 +383,18 @@ class CarlaDataGenerator:
         print(f"Spawned {len(spawned)} parked vehicles (requested {count}).")
         return spawned
 
-    def _to_asset_path(self, name: str) -> str:
+    def _to_asset_path(self, client: Client, name: str) -> str:
         """Accepts 'Town05' or a full asset path and returns the asset path."""
+        availableMaps = client.get_available_maps()
         name = (name or "").strip()
         if not name:
             return ""
-        if name.startswith("/Game/Carla/Maps/"):
-            return name
-        if name == "Town10HD":
-            return "/Game/Carla/Maps/Town10HD_Opt"
-        return f"/Game/Carla/Maps/{name}"
+        return next(map for map in availableMaps if name in map)
 
     def _load_map_by_seed(self, client: Client, candidates: Optional[list[str]], seed: int) -> str:
         """Pick a map deterministically from candidates using the seed; fall back to usable maps."""
         if candidates:
-            pool = sorted({self._to_asset_path(m) for m in candidates if m})
+            pool = sorted({self._to_asset_path(client, map) for map in candidates if map})
         else:
             pool = sorted({m for m in CarlaAPIHelper.get_usable_maps(client)})
         if not pool:
