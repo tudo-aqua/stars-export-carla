@@ -328,13 +328,6 @@ class UnifiedCarlaGUI(tk.Tk):
             variable=self.render_off_screen_variable,
             anchor="w",
         ).pack(fill="x", padx=6, pady=2)
-
-        tk.Checkbutton(
-            rendering_options,
-            text="Render quality low",
-            variable=self.render_quality_low_variable,
-            anchor="w",
-        ).pack(fill="x", padx=6, pady=2)
         # ─────────────────────────────────────────────────────────────────────
 
         # ── Tracking interval options ───────────────────────────────────
