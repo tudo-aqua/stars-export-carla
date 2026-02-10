@@ -121,6 +121,18 @@ class _LaneUtils:
         @return: List of all predecessor lanes
         """
         predecessor_lanes = self.get_predecessor_lanes(lane)
+
+        # Extend global list of Waypoints by newly found waypoints
+        existing: set[Tuple[int, int]] = self.ctx.waypoint_identifiers
+        new_predecessors: List[Waypoint] = []
+        for pre in predecessor_lanes:
+            key = (int(pre.road_id), int(pre.lane_id))
+            if key in existing:
+                continue
+            self.ctx.waypoint_identifiers.add(key)
+            new_predecessors.append(pre)
+        self.ctx.waypoints.extend(new_predecessors)
+
         data_contact_lane_infos = []
         for pre_lane in predecessor_lanes:
             data_contact_lane_info = DataContactLaneInfo(lane_id=pre_lane.lane_id, road_id=pre_lane.road_id)
@@ -134,6 +146,18 @@ class _LaneUtils:
         @return: List of all successor lanes
         """
         successor_lanes = self.get_successor_lanes(lane)
+
+        # Extend global list of Waypoints by newly found waypoints
+        existing: set[Tuple[int, int]] = self.ctx.waypoint_identifiers
+        new_successors: List[Waypoint] = []
+        for pre in successor_lanes:
+            key = (int(pre.road_id), int(pre.lane_id))
+            if key in existing:
+                continue
+            self.ctx.waypoint_identifiers.add(key)
+            new_successors.append(pre)
+        self.ctx.waypoints.extend(new_successors)
+
         data_contact_lane_infos = []
         for pre_lane in successor_lanes:
             data_contact_lane_info = DataContactLaneInfo(lane_id=pre_lane.lane_id, road_id=pre_lane.road_id)

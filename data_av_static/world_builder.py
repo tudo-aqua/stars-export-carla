@@ -60,8 +60,9 @@ class _BlockBuilder:
         """
         landmarks = self.ctx.map.get_all_landmarks()
         data_blocks: List[DataBlock] = []
-        waypoint_list: List[Waypoint] = self.ctx.map.generate_waypoints(distance)
-        for waypoint in waypoint_list:
+        self.ctx.waypoints = self.ctx.map.generate_waypoints(distance)
+        self.ctx.waypoint_identifiers = {(wp.road_id, wp.lane_id) for wp in self.ctx.waypoints}
+        for waypoint in self.ctx.waypoints:
             already_processed = False
             for data_block in data_blocks:
                 if self.block_contains_waypoint(data_block, waypoint):
@@ -115,7 +116,10 @@ class _BlockBuilder:
                 lane_to_wp[wp.lane_id] = wp
 
         road_lanes = list(lane_to_wp.values())
-        lanes = self.collect_all_lanes_waypoints(road_lanes)
+        if len(road_lanes) == 0:
+            lanes = self.collect_all_lanes_waypoints([waypoint])
+        else:
+            lanes = self.collect_all_lanes_waypoints(road_lanes)
         data_lanes = [
             self.ctx.get_data_lane_for_waypoint(wp, landmarks)
             for wp in lanes
