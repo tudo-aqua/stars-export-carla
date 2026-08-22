@@ -27,8 +27,15 @@ def register(name: str):
 def build_all_traces(store, visible_layers: List[str], size_cfg: Dict[str, int]) -> Tuple[
     List[go.BaseTraceType], Dict[str, List[int]], List[dict]]:
     """
-    Iterate over every registered layer, let it build its traces (and shapes),
-    and return (list_of_traces, layer_map, list_of_shapes).
+    Build traces (and shapes) only for the requested layers, and return
+    (list_of_traces, layer_map, list_of_shapes).
+
+    Layers not in visible_layers are skipped entirely rather than built-and-hidden:
+    with thousands of lanes on a map like Town04, materializing every registered
+    layer's traces regardless of what's actually checked bloats the figure Plotly
+    has to manage (and recompute on every pan/zoom) even though most of it is never
+    shown. Callers rely on this: toggle_layers() in viewer.py lazily builds a layer
+    the first time it's checked and simply flips `visible` on repeat toggles.
 
     layer_map maps:
       - layer_name -> list[trace_index]
@@ -39,13 +46,16 @@ def build_all_traces(store, visible_layers: List[str], size_cfg: Dict[str, int])
     layer_map: Dict[str, List[int]] = {}
     shapes: List[dict] = []
 
+    visible_set = set(visible_layers)
     for name, LayerCls in LAYER_REGISTRY.items():
+        if name not in visible_set:
+            continue
         layer_obj = LayerCls(store, size_cfg)
 
         # ---- traces ---------------------------------------------------
         layer_traces = layer_obj.traces()
         for tr in layer_traces:
-            tr.visible = name in visible_layers
+            tr.visible = True
         start_idx = len(traces)
         traces.extend(layer_traces)
         layer_map[name] = list(range(start_idx, len(traces)))
@@ -55,9 +65,8 @@ def build_all_traces(store, visible_layers: List[str], size_cfg: Dict[str, int])
         if callable(sh_fn):
             layer_shapes = sh_fn() or []
             if layer_shapes:
-                init_vis = name in visible_layers  # ← NEW
-                for s in layer_shapes:  # ← NEW
-                    s["visible"] = init_vis
+                for s in layer_shapes:
+                    s["visible"] = True
                     s0 = len(shapes)
                 shapes.extend(layer_shapes)
                 s1 = len(shapes) - 1

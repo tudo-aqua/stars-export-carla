@@ -1,7 +1,9 @@
+from .DataBlock import DataBlock
 from .DataContactArea import DataContactArea
 from .DataContactLaneInfo import DataContactLaneInfo
 from .DataLandmark import DataLandmark
 from .DataLane import DataLane
+from .DataLaneMarking import DataLaneMarking
 from .DataLaneMidpoint import DataLaneMidpoint
 from .DataLocation import DataLocation
 from .DataRoad import DataRoad
@@ -9,4 +11,3 @@ from .DataRotation import DataRotation
 from .DataSpeedLimit import DataSpeedLimit
 from .DataStaticTrafficLight import DataStaticTrafficLight
 from .DataVector3D import DataVector3D
-from .DataBlock import DataBlock

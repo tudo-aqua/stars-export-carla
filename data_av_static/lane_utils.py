@@ -4,7 +4,8 @@ from carla import Waypoint, Actor, Location, Landmark
 from shapely import LineString
 
 from carla_data_classes.enums.DataLaneType import DataLaneType
-from carla_data_classes.static import DataLaneMidpoint, DataLocation, DataLane, DataContactLaneInfo, DataRotation
+from carla_data_classes.static import DataLaneMidpoint, DataLocation, DataLane, DataContactLaneInfo, DataRotation, \
+    DataLaneMarking
 
 if TYPE_CHECKING:
     pass
@@ -85,11 +86,17 @@ class _LaneUtils:
                 all_waypoints))
 
         # Build and return DataLane
+        left_lane_marking = DataLaneMarking.from_lane_marking(waypoint.left_lane_marking)
+        right_lane_marking = DataLaneMarking.from_lane_marking(waypoint.right_lane_marking)
+        left_lane = self.get_neighbor_contact_info(waypoint.get_left_lane())
+        right_lane = self.get_neighbor_contact_info(waypoint.get_right_lane())
         data_lane = DataLane(road_id=waypoint.road_id, lane_id=waypoint.lane_id,
                              lane_type=DataLaneType(int(waypoint.lane_type)), lane_width=waypoint.lane_width,
                              lane_length=lane_length, s=waypoint.s, predecessor_lanes=predecessor_lanes,
                              successor_lanes=successor_lanes, intersecting_lanes=[], lane_midpoints=lane_midpoints,
-                             speed_limits=[], landmarks=[], contact_areas=[], traffic_lights=[])
+                             speed_limits=[], landmarks=[], contact_areas=[], traffic_lights=[],
+                             left_lane_marking=left_lane_marking, right_lane_marking=right_lane_marking,
+                             left_lane=left_lane, right_lane=right_lane)
 
         coords = [(m.location.x, m.location.y) for m in lane_midpoints if m is not None]
         fallback_xy = (waypoint.transform.location.x, waypoint.transform.location.y)
@@ -103,6 +110,18 @@ class _LaneUtils:
         #     lane_length=lane_length
         # )
         return data_lane
+
+    @staticmethod
+    def get_neighbor_contact_info(neighbor: Optional[Waypoint]) -> Optional[DataContactLaneInfo]:
+        """
+        Wraps the waypoint returned by waypoint.get_left_lane()/get_right_lane() (CARLA's own
+        adjacency resolution, rather than assuming lane_id +/- 1) into a DataContactLaneInfo.
+        @param neighbor: The neighboring waypoint, or None if there is no lane on that side
+        @return: DataContactLaneInfo for the neighbor lane, or None
+        """
+        if neighbor is None:
+            return None
+        return DataContactLaneInfo(road_id=neighbor.road_id, lane_id=neighbor.lane_id)
 
     def get_length_of_lane(self, lane: Waypoint, precision: float = 2.0) -> float:
         """

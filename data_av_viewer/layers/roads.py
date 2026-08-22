@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 from shapely.geometry import LineString, Polygon, MultiPolygon
 
 from .base_layer import register, BaseLayer
-from .utils import rgba, color_for_road
+from .utils import rgba, color_for_road, LineTraceMerger
 
 
 def _safe_linestring_from_coords(
@@ -61,12 +61,22 @@ class RoadLayer(BaseLayer):
         df = pd.concat([df_junctions, df_straights])
 
         max_abs_lane = df.lane_id.abs().max() or 1
-        traces: List[go.Scatter] = []
+        filled = LineTraceMerger()
+        fallback_lines = LineTraceMerger()
 
         for _, row in df.iterrows():
             base_color = color_for_road(row.road_id)
             opacity = max(0.15, 1 - abs(row.lane_id) / max_abs_lane)
             fill_color = rgba(base_color, opacity)
+
+            hover_text = (
+                f"Road: {row.road_id}<br>"
+                f"Lane: {row.lane_id}<br>"
+                "───────────────<br>"
+                f"Type: {row.lane_type}<br>"
+                f"Width: {row.width:.2f} m<br>"
+                f"Length: {row.length:.2f} m<br>"
+            )
 
             # row.poly -> robust centerline
             poly = np.asarray(row.poly)  # (N,2)
@@ -85,24 +95,7 @@ class RoadLayer(BaseLayer):
             if corridor.is_empty:
                 # As a fallback, draw just the centerline
                 xs, ys = map(np.asarray, line.xy)
-                traces.append(
-                    go.Scatter(
-                        x=xs,
-                        y=ys,
-                        mode="lines",
-                        name=f"Road: {row.road_id} Lane: {row.lane_id}",
-                        text=(
-                            f"Road: {row.road_id}<br>"
-                            f"Lane: {row.lane_id}<br>"
-                            "───────────────<br>"
-                            f"Type: {row.lane_type}<br>"
-                            f"Width: {width:.2f} m<br>"
-                            f"Length: {row.length:.2f} m<br>"
-                        ),
-                        line=dict(width=1.5, color=base_color),
-                        hoverinfo="text",
-                    )
-                )
+                fallback_lines.add(base_color, xs, ys, hover_text)
                 continue
 
             # Corridor can be Polygon or MultiPolygon
@@ -119,26 +112,29 @@ class RoadLayer(BaseLayer):
                 if geom.is_empty or geom.exterior is None or geom.exterior.is_empty:
                     continue
                 xs, ys = map(np.asarray, geom.exterior.xy)
-                traces.append(
-                    go.Scatter(
-                        x=xs,
-                        y=ys,
-                        mode="lines",
-                        name=f"Road: {row.road_id} Lane: {row.lane_id}",
-                        text=(
-                            f"Road: {row.road_id}<br>"
-                            f"Lane: {row.lane_id}<br>"
-                            "───────────────<br>"
-                            f"Type: {row.lane_type}<br>"
-                            f"Width: {width:.2f} m<br>"
-                            f"Length: {row.length:.2f} m<br>"
-                        ),
-                        line=dict(width=1.5, color=base_color),
-                        fill="toself",
-                        fillcolor=fill_color,
-                        hoveron="fills",
-                        hoverlabel=dict(bgcolor=base_color, namelength=0),
-                    )
-                )
+                filled.add((base_color, fill_color), xs, ys, hover_text)
+
+        traces: List[go.Scattergl] = []
+        for base_color, xs, ys, text in fallback_lines.items():
+            traces.append(go.Scattergl(
+                x=xs, y=ys, mode="lines",
+                name="Roads",
+                text=text,
+                hoverinfo="text",
+                line=dict(width=1.5, color=base_color),
+                showlegend=False,
+            ))
+        for (base_color, fill_color), xs, ys, text in filled.items():
+            traces.append(go.Scattergl(
+                x=xs, y=ys, mode="lines",
+                name="Roads",
+                text=text,
+                hoverinfo="text",
+                line=dict(width=1.5, color=base_color),
+                fill="toself",
+                fillcolor=fill_color,
+                hoverlabel=dict(bgcolor=base_color, namelength=0),
+                showlegend=False,
+            ))
 
         return traces

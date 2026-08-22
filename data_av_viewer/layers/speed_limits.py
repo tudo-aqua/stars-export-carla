@@ -102,9 +102,12 @@ class SpeedLimitsLayer(BaseLayer):
             return []
 
         width = self.size.get(self.layer_name, self.default_size)
-        traces: List[go.Scattergl] = []
 
-        # One trace per segment keeps colors discrete and hover simple
+        # Merge segments sharing the same color band into one trace each
+        # (color bands are discrete, so this is typically ~9 traces instead of
+        # one per segment) — Plotly.js carries a meaningful fixed cost per trace
+        # on every pan/zoom, so trace count dominates over point count.
+        by_color: dict = {}
         for _, row in df.iterrows():
             speed_ms = float(row["speed"])  # <-- stored in m/s
             kmh = _ms_to_kmh(speed_ms)
@@ -117,21 +120,26 @@ class SpeedLimitsLayer(BaseLayer):
 
             xs = row["xs"]
             ys = row["ys"]
-            n = len(xs)
+            color = _speed_to_color(kmh)
 
-            # one customdata row per plotted point:
-            # [m/s, km/h, mph, road_id, lane_id, start, end]
-            customdata = [[speed_ms, kmh, mph, road_id, lane_id, start, end] for _ in range(n)]
+            bucket = by_color.setdefault(color, dict(x=[], y=[], customdata=[]))
+            if bucket["x"]:
+                bucket["x"].append(float("nan"))
+                bucket["y"].append(float("nan"))
+                bucket["customdata"].append([None] * 7)
+            row_cd = [speed_ms, kmh, mph, road_id, lane_id, start, end]
+            bucket["x"].extend(xs)
+            bucket["y"].extend(ys)
+            bucket["customdata"].extend([row_cd] * len(xs))
 
+        traces: List[go.Scattergl] = []
+        for color, b in by_color.items():
             traces.append(
                 go.Scattergl(
-                    x=xs,
-                    y=ys,
+                    x=b["x"],
+                    y=b["y"],
                     mode="lines",
-                    line=dict(
-                        width=width,
-                        color=_speed_to_color(kmh)  # keep your color bands in km/h
-                    ),
+                    line=dict(width=width, color=color),
                     name="Speed limits",
                     showlegend=False,
                     hovertemplate=(
@@ -141,7 +149,7 @@ class SpeedLimitsLayer(BaseLayer):
                         "<br>From: %{customdata[5]:.0f} m  To: %{customdata[6]:.0f} m"
                         "<extra></extra>"
                     ),
-                    customdata=customdata,
+                    customdata=b["customdata"],
                 )
             )
         return traces

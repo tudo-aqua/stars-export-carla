@@ -37,23 +37,32 @@ class ContactAreaLayer(BaseLayer):
         if df.empty:
             return []
 
-        traces = []
+        # Merge all points sharing the same color into one marker trace instead
+        # of one trace per point (Plotly.js carries a meaningful fixed cost per
+        # trace on every pan/zoom, so trace count dominates over point count).
+        by_color: dict = {}
         for _, row in df.iterrows():
             color = color_for_road(row.lane_1_road_id)
             hover = (f"ID: {row.id}<br>"
                      f"Lane 1: Road {row.lane_1_road_id} Lane {row.lane_1_lane_id}<br>"
                      f"Lane 2: Road {row.lane_2_road_id} Lane {row.lane_2_lane_id}<br>"
                      f"X: {row.x:.2f} Y: {row.y:.2f}<extra></extra>")
+            bucket = by_color.setdefault(color, dict(x=[], y=[], hover=[]))
+            bucket["x"].append(row.x)
+            bucket["y"].append(row.y)
+            bucket["hover"].append(hover)
 
+        traces = []
+        for color, b in by_color.items():
             traces.append(
                 go.Scattergl(
-                    x=[row.x], y=[row.y],  # one point
+                    x=b["x"], y=b["y"],
                     mode="markers",
-                    name=str(row.id),  # shows in legend
+                    name="Contact Areas",
                     marker=dict(size=self.size["contact_areas"], symbol="x", color=color),
-                    hovertemplate=hover,
+                    hovertemplate=b["hover"],
                     hoverlabel=dict(bgcolor=color),
-                    showlegend=True
+                    showlegend=False,
                 )
             )
         return traces

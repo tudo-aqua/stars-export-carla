@@ -47,9 +47,31 @@ def _extract_road_lane(actor_position) -> tuple[str, str]:
     return (str(rid) if rid is not None else "n/a",
             str(lid) if lid is not None else "n/a")
 
+
+BLINKER_COLOR = "#ffb020"
+
+
+def _blinker_color(actor: DataVehicle) -> str:
+    if getattr(actor, "left_blinker", False) or getattr(actor, "right_blinker", False):
+        return BLINKER_COLOR
+    return "black"
+
+
+def _blinker_text(actor: DataVehicle) -> str:
+    left = getattr(actor, "left_blinker", False)
+    right = getattr(actor, "right_blinker", False)
+    if left and right:
+        return "Both"
+    if left:
+        return "Left"
+    if right:
+        return "Right"
+    return "None"
+
+
 @register("square_bbox")
 class VehicleRenderer(BaseRenderer):
-    """Render Vehicles as filled bounding‐boxes in black on top."""
+    """Render Vehicles as filled bounding‐boxes in black on top (amber while a blinker is active)."""
 
     @classmethod
     def matches(cls, actor: DataActor) -> bool:
@@ -63,6 +85,7 @@ class VehicleRenderer(BaseRenderer):
             xs = np.array([x - 0.5, x + 0.5, x + 0.5, x - 0.5, x - 0.5])
             ys = np.array([y - 0.5, y - 0.5, y + 0.5, y + 0.5, y - 0.5])
 
+        color = _blinker_color(actor)
         return go.Scatter(
             x=xs,
             y=ys,
@@ -70,8 +93,8 @@ class VehicleRenderer(BaseRenderer):
             fill="toself",
             hoveron="fills",
             hoverinfo="text",
-            line=dict(width=1.0, color="black"),
-            fillcolor="black",
+            line=dict(width=1.0, color=color),
+            fillcolor=color,
             name=f"Vehicle {actor.id}",
         )
 
@@ -100,6 +123,7 @@ class VehicleRenderer(BaseRenderer):
             f"Vehicle Id: {actor.id}",
             f"{actor.type}: {actor.type_id}",
             f"Road: {road_str}  Lane: {lane_str}",
+            f"Blinkers: {_blinker_text(actor)}",
         ]
 
         if getattr(actor, "attributes", None):
@@ -117,4 +141,6 @@ class VehicleRenderer(BaseRenderer):
         lines.append(f"X: {actor.location.x:.2f} Y: {actor.location.y:.2f} Z: {actor.location.z:.2f}")
 
         txt = "<br>".join(lines) + "<br>"
-        return xs, ys, txt, {}
+        color = _blinker_color(actor)
+        style = {"line.color": color, "fillcolor": color}
+        return xs, ys, txt, style

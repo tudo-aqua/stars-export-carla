@@ -197,12 +197,30 @@ def run_gen_maps(args):
             print("!! No maps provided to gen_maps; nothing to do.")
             return
 
+        # Skip maps that aren't installed on this CARLA server (e.g. Town06/Town07 ship
+        # separately in CARLA's Additional Maps package) instead of crashing the whole batch.
+        available = client.get_available_maps()
+        resolved_maps = []
+        for map_name in maps:
+            if any(map_name in available_map for available_map in available):
+                resolved_maps.append(map_name)
+            else:
+                print(f"!! [GenerateMaps] Map '{map_name}' is not installed on this CARLA server; skipping.")
+        if not resolved_maps:
+            print("!! [GenerateMaps] None of the requested maps are available on this server; nothing to do.")
+            return
+        maps = resolved_maps
+
         # Ensure output folder exists
         os.makedirs(args.output, exist_ok=True)
 
         for map_name in maps:
             print(f">> [GenerateMaps] Loading map: {map_name}")
-            client.load_world(map_name)
+            try:
+                client.load_world(map_name)
+            except RuntimeError as err:
+                print(f">> [GenerateMaps] Failed to load map '{map_name}': {err}. Skipping.")
+                continue
             time.sleep(3)
             world = client.get_world()
             current_map_name = world.get_map().name

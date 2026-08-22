@@ -8,7 +8,7 @@ from shapely.geometry import LineString, Polygon, MultiPolygon
 
 from carla_data_classes.static.DataWorld import DataWorld
 from .base_layer import register, BaseLayer
-from .utils import rgba, color_for_road
+from .utils import rgba, color_for_road, marking_type_name, marking_color_name, neighbor_label, LineTraceMerger
 
 
 def _safe_linestring_from_coords(
@@ -95,6 +95,12 @@ class StraightLayer(BaseLayer):
                     length=ln.lane_length,
                     intersection_lanes_html=intersections_html,
                     intersection_lanes_count=len(pairs),
+                    left_marking_type=marking_type_name(ln.left_lane_marking),
+                    left_marking_color=marking_color_name(ln.left_lane_marking),
+                    right_marking_type=marking_type_name(ln.right_lane_marking),
+                    right_marking_color=marking_color_name(ln.right_lane_marking),
+                    left_neighbor=neighbor_label(ln.left_lane),
+                    right_neighbor=neighbor_label(ln.right_lane),
                 ))
         return pd.DataFrame(rows)
 
@@ -104,7 +110,8 @@ class StraightLayer(BaseLayer):
             return []
 
         max_abs_lane = df.lane_id.abs().max() or 1
-        traces: List[go.Scatter] = []
+        filled = LineTraceMerger()
+        fallback_lines = LineTraceMerger()
 
         for _, row in df.iterrows():
             base_color = color_for_road(row.road_id)
@@ -126,26 +133,17 @@ class StraightLayer(BaseLayer):
             if corridor.is_empty:
                 # As a fallback, draw just the centerline
                 xs, ys = map(np.asarray, line.xy)
-                traces.append(
-                    go.Scatter(
-                        x=xs,
-                        y=ys,
-                        mode="lines",
-                        name=f"Road: {row.road_id} Lane: {row.lane_id}",
-                        text=(
-                            f"Junction: {row.junction_id}<br>"
-                            f"Road: {row.road_id}<br>"
-                            f"Lane: {row.lane_id}<br>"
-                            "───────────────<br>"
-                            f"Type: {row.lane_type}<br>"
-                            f"Width: {row.width:.2f} m<br>"
-                            f"Length: {row.length:.2f} m<br>"
-                            f"Intersections:{row.intersection_lanes_html}<br>"
-                        ),
-                        line=dict(width=1.5, color=base_color),
-                        hoverinfo="text",
-                    )
-                )
+                fallback_lines.add(base_color, xs, ys, (
+                    f"Road: {row.road_id}<br>"
+                    f"Lane: {row.lane_id}<br>"
+                    "───────────────<br>"
+                    f"Type: {row.lane_type}<br>"
+                    f"Width: {row.width:.2f} m<br>"
+                    f"Length: {row.length:.2f} m<br>"
+                    f"Left Lane: {row.left_neighbor}<br>"
+                    f"Right Lane: {row.right_neighbor}<br>"
+                    f"Intersections:{row.intersection_lanes_html}<br>"
+                ))
                 continue
 
             # buffer to corridor and draw
@@ -163,26 +161,38 @@ class StraightLayer(BaseLayer):
                 if geom.is_empty or geom.exterior is None or geom.exterior.is_empty:
                     continue
                 xs, ys = map(np.asarray, geom.exterior.xy)
-                traces.append(
-                    go.Scatter(
-                        x=xs,
-                        y=ys,
-                        mode="lines",
-                        name=f"Road: {row.road_id} Lane: {row.lane_id}",
-                        text=(
-                            f"Road: {row.road_id}<br>"
-                            f"Lane: {row.lane_id}<br>"
-                            "───────────────<br>"
-                            f"Type: {row.lane_type}<br>"
-                            f"Width: {row.width:.2f} m<br>"
-                            f"Length: {row.length:.2f} m<br>"
-                        ),
-                        line=dict(width=1.5, color=base_color),
-                        fill="toself",
-                        fillcolor=fill_color,
-                        hoveron="fills",
-                        hoverlabel=dict(bgcolor=base_color, namelength=0),
-                    )
-                )
+                filled.add((base_color, fill_color), xs, ys, (
+                    f"Road: {row.road_id}<br>"
+                    f"Lane: {row.lane_id}<br>"
+                    "───────────────<br>"
+                    f"Type: {row.lane_type}<br>"
+                    f"Width: {row.width:.2f} m<br>"
+                    f"Length: {row.length:.2f} m<br>"
+                    f"Left Lane: {row.left_neighbor}<br>"
+                    f"Right Lane: {row.right_neighbor}<br>"
+                ))
+
+        traces: List[go.Scattergl] = []
+        for base_color, xs, ys, text in fallback_lines.items():
+            traces.append(go.Scattergl(
+                x=xs, y=ys, mode="lines",
+                name="Straights",
+                text=text,
+                hoverinfo="text",
+                line=dict(width=1.5, color=base_color),
+                showlegend=False,
+            ))
+        for (base_color, fill_color), xs, ys, text in filled.items():
+            traces.append(go.Scattergl(
+                x=xs, y=ys, mode="lines",
+                name="Straights",
+                text=text,
+                hoverinfo="text",
+                line=dict(width=1.5, color=base_color),
+                fill="toself",
+                fillcolor=fill_color,
+                hoverlabel=dict(bgcolor=base_color, namelength=0),
+                showlegend=False,
+            ))
 
         return traces

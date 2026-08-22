@@ -1,7 +1,7 @@
 # layers/lanes.py  (only the traces() method changes)
 
 from .base_layer import register, BaseLayer
-from .utils import color_for_road, rgba
+from .utils import color_for_road, rgba, LineTraceMerger
 
 
 @register("lanes")
@@ -27,7 +27,7 @@ class LaneLayer(BaseLayer):
         df = pd.concat([df_junctions, df_straights], ignore_index=True)
 
         max_abs_lane = df.lane_id.abs().max() or 1
-        traces = []
+        merger = LineTraceMerger()
 
         for _, row in df.iterrows():
             base = color_for_road(row.road_id)
@@ -40,7 +40,6 @@ class LaneLayer(BaseLayer):
             xs, ys = poly[:, 0], poly[:, 1]
 
             distances = np.asarray(row.distance_to_start, dtype=float)
-            custom = distances.reshape(-1, 1)  # (N,1) for %{customdata[0]}
 
             # --- intersections: prefer new DF fields; fallback to legacy computation if missing ---
             if "intersection_lanes_html" in row:
@@ -80,25 +79,35 @@ class LaneLayer(BaseLayer):
             else:
                 intersections_block = ""
 
-            hover_tpl = (
+            header = (
                 f"Road: {row.road_id}<br>"
                 f"Lane: {row.lane_id}<br>"
                 "───────────────<br>"
                 f"Type: {row.lane_type}<br>"
                 f"Width: {row.width:.2f} m<br>"
                 f"Length: {row.length:.2f} m<br>"
+                f"Left Lane: {row.get('left_neighbor', '—')}<br>"
+                f"Right Lane: {row.get('right_neighbor', '—')}<br>"
                 f"{intersections_block}"
-                "Distance: %{customdata[0]:.2f} m<br>"
-                "X:%{x:.2f} Y:%{y:.2f}<extra></extra>"
             )
+            # per-vertex text: distance-along-lane and coordinates differ at each point
+            vertex_text = [
+                f"{header}Distance: {d:.2f} m<br>X:{x:.2f} Y:{y:.2f}"
+                for d, x, y in zip(distances, xs, ys)
+            ]
 
+            merger.add(color, xs, ys, vertex_text)
+
+        traces = []
+        for color, xs, ys, text in merger.items():
             traces.append(go.Scattergl(
                 x=xs, y=ys, mode="lines",
-                name=f"Lane {row.lane_id} on road {row.road_id}",
+                name="Lanes",
                 line=dict(width=self.size["lanes"], color=color),
-                customdata=custom,
-                hovertemplate=hover_tpl,
+                text=text,
+                hoverinfo="text",
                 hoverlabel=dict(bgcolor=color),
+                showlegend=False,
             ))
 
         return traces

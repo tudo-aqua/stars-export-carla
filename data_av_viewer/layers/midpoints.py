@@ -41,44 +41,47 @@ class MidpointLayer(BaseLayer):
             "X:%{x:.2f} Y:%{y:.2f}<extra></extra>"
         )
 
-        traces = []
-        # group by lane so each gets its own legend entry & color
+        # Merge across all lanes sharing the same color into one marker trace and
+        # one arrow trace per color, instead of one lane -> two traces (which was
+        # thousands of traces on a large map): Plotly.js carries a meaningful
+        # fixed cost per trace on every pan/zoom regardless of trace content, so
+        # trace *count* is what makes interaction slow, not point count. Hover
+        # still works per-point via customdata, which already varies per point.
+        by_color = {}  # color -> dict(pt_x, pt_y, pt_cd, arr_x, arr_y, arr_cd)
         for (road_id, lane_id), grp in df.groupby(["road_id", "lane_id"], sort=False):
             color = color_for_road(road_id)
-            legend_name = f"Lane {lane_id} of Road {road_id}"
+            bucket = by_color.setdefault(color, dict(pt_x=[], pt_y=[], pt_cd=[], arr_x=[], arr_y=[], arr_cd=[]))
 
-            # -- markers (visible in legend) -----------------------
-            pt = go.Scattergl(
-                x=grp.x, y=grp.y, mode="markers",
-                marker=dict(size=self.size["midpoints"], color=color),
-                customdata=grp[["road_id", "lane_id", "dist", "yaw"]].to_numpy(),
-                hovertemplate=tpl,
-                hoverlabel=dict(bgcolor=color),
-                name=legend_name,
-                legendgroup=legend_name,
-                showlegend=True
-            )
+            cd = grp[["road_id", "lane_id", "dist", "yaw"]].to_numpy()
+            bucket["pt_x"].append(grp.x.to_numpy())
+            bucket["pt_y"].append(grp.y.to_numpy())
+            bucket["pt_cd"].append(cd)
 
-            # -- arrows (same group, hidden in legend) -------------
             yaw_rad = np.deg2rad(grp.yaw.to_numpy())
             x2 = grp.x.to_numpy() + np.cos(yaw_rad)
             y2 = grp.y.to_numpy() + np.sin(yaw_rad)
+            bucket["arr_x"].append(np.column_stack([grp.x, x2, np.full(len(grp), np.nan)]).ravel())
+            bucket["arr_y"].append(np.column_stack([grp.y, y2, np.full(len(grp), np.nan)]).ravel())
+            bucket["arr_cd"].append(np.repeat(cd, 3, axis=0))
 
-            seg_x = np.column_stack([grp.x, x2, np.full(len(grp), np.nan)]).ravel()
-            seg_y = np.column_stack([grp.y, y2, np.full(len(grp), np.nan)]).ravel()
-
-            arr = go.Scattergl(
-                x=seg_x, y=seg_y, mode="lines",
-                line=dict(width=1, color=color),
-                customdata=np.repeat(
-                    grp[["road_id", "lane_id", "dist", "yaw"]].to_numpy(), 3, axis=0
-                ),
+        traces = []
+        for color, b in by_color.items():
+            traces.append(go.Scattergl(
+                x=np.concatenate(b["pt_x"]), y=np.concatenate(b["pt_y"]), mode="markers",
+                marker=dict(size=self.size["midpoints"], color=color),
+                customdata=np.concatenate(b["pt_cd"]),
                 hovertemplate=tpl,
                 hoverlabel=dict(bgcolor=color),
-                legendgroup=legend_name,
-                showlegend=False
-            )
-
-            traces.extend([pt, arr])
+                name="Midpoints",
+                showlegend=False,
+            ))
+            traces.append(go.Scattergl(
+                x=np.concatenate(b["arr_x"]), y=np.concatenate(b["arr_y"]), mode="lines",
+                line=dict(width=1, color=color),
+                customdata=np.concatenate(b["arr_cd"]),
+                hovertemplate=tpl,
+                hoverlabel=dict(bgcolor=color),
+                showlegend=False,
+            ))
 
         return traces

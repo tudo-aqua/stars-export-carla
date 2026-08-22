@@ -411,7 +411,7 @@ def build_fig(json_data, dyn_raw, visible_layers):
 def toggle_layers(sel, layer_map, store_json, cur_fig):
     """
     Fast path: if all selected layers already exist in the figure, just patch visibility.
-    Lazy path: if a selected layer (e.g., 'midpoints') is missing, build it now and append.
+    Lazy path: any selected layer not yet built (i.e. not in layer_map) is built now and appended.
     """
     if not layer_map:
         return no_update, layer_map, no_update
@@ -424,57 +424,55 @@ def toggle_layers(sel, layer_map, store_json, cur_fig):
     }
     missing = [lname for lname in sel if lname not in present]
 
-    # --- Lazy build for midpoints (and any other future heavy layers) ---
+    # --- Lazy build: a layer is only ever built the first time it's checked ---
     if store_json and missing:
-        # Only bother rebuilding if the missing ones include 'midpoints'
-        if "midpoints" in missing:
-            # Build only the missing layers as static traces
-            store = ViewerStore.from_json(store_json)
-            new_traces, new_map, new_shapes = build_all_traces(
-                store, missing, DEFAULT_SIZES
-            )
+        # Build only the missing layers as static traces
+        store = ViewerStore.from_json(store_json)
+        new_traces, new_map, new_shapes = build_all_traces(
+            store, missing, DEFAULT_SIZES
+        )
 
-            # Start from current figure and append
-            fig = go.Figure(cur_fig)  # copy existing data/layout
+        # Start from current figure and append
+        fig = go.Figure(cur_fig)  # copy existing data/layout
 
-            # append new static traces
-            start_idx = len(fig.data)
-            for tr in new_traces:
-                fig.add_trace(tr)
+        # append new static traces
+        start_idx = len(fig.data)
+        for tr in new_traces:
+            fig.add_trace(tr)
 
-            # append shapes, if any (with index offset)
-            if new_shapes:
-                old_shapes = list(fig.layout.shapes) if fig.layout.shapes else []
-                s0 = len(old_shapes)
-                old_shapes.extend(new_shapes)
-                fig.layout.shapes = tuple(old_shapes)
+        # append shapes, if any (with index offset)
+        if new_shapes:
+            old_shapes = list(fig.layout.shapes) if fig.layout.shapes else []
+            s0 = len(old_shapes)
+            old_shapes.extend(new_shapes)
+            fig.layout.shapes = tuple(old_shapes)
 
-                # bring across any *_shapes_range and *_shape_xy entries
-                for lname, idxs in new_map.items():
-                    if lname.endswith("_shapes_range"):
-                        # offset range by existing shapes count
-                        layer_map[lname] = [s0 + idxs[0], s0 + idxs[1]]
-                    elif lname.endswith("_shape_xy"):
-                        # these are coords, no offset
-                        layer_map[lname] = idxs
+            # bring across any *_shapes_range and *_shape_xy entries
+            for lname, idxs in new_map.items():
+                if lname.endswith("_shapes_range"):
+                    # offset range by existing shapes count
+                    layer_map[lname] = [s0 + idxs[0], s0 + idxs[1]]
+                elif lname.endswith("_shape_xy"):
+                    # these are coords, no offset
+                    layer_map[lname] = idxs
 
-            # record absolute trace indices for each newly built layer
-            for lname, rel_idxs in new_map.items():
-                if lname.endswith("_shapes_range") or lname.endswith("_shape_xy"):
-                    continue
-                layer_map[lname] = [start_idx + i for i in rel_idxs]
+        # record absolute trace indices for each newly built layer
+        for lname, rel_idxs in new_map.items():
+            if lname.endswith("_shapes_range") or lname.endswith("_shape_xy"):
+                continue
+            layer_map[lname] = [start_idx + i for i in rel_idxs]
 
-            # set visibility according to current selection
-            for lname, idxs in layer_map.items():
-                if lname == "dynamic" or lname.endswith("_shapes_range") or lname.endswith("_shape_xy"):
-                    continue
-                vis = lname in sel
-                for i in idxs:
-                    fig.data[i].visible = vis
+        # set visibility according to current selection
+        for lname, idxs in layer_map.items():
+            if lname == "dynamic" or lname.endswith("_shapes_range") or lname.endswith("_shape_xy"):
+                continue
+            vis = lname in sel
+            for i in idxs:
+                fig.data[i].visible = vis
 
-            # refresh hover template store to include appended traces
-            tmpl = {i: t.hovertemplate for i, t in enumerate(fig.data)}
-            return fig, layer_map, tmpl
+        # refresh hover template store to include appended traces
+        tmpl = {i: t.hovertemplate for i, t in enumerate(fig.data)}
+        return fig, layer_map, tmpl
 
     # --- Fast path: just toggle visibility for layers we already have ---
     patch = Patch()

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 from shapely import LineString
 
@@ -7,6 +7,7 @@ from carla_data_classes.enums.DataLaneType import DataLaneType
 from carla_data_classes.static.DataContactArea import DataContactArea
 from carla_data_classes.static.DataContactLaneInfo import DataContactLaneInfo
 from carla_data_classes.static.DataLandmark import DataLandmark
+from carla_data_classes.static.DataLaneMarking import DataLaneMarking
 from carla_data_classes.static.DataLaneMidpoint import DataLaneMidpoint
 from carla_data_classes.static.DataSpeedLimit import DataSpeedLimit
 from carla_data_classes.static.DataStaticTrafficLight import DataStaticTrafficLight
@@ -31,6 +32,10 @@ class DataLane:
     landmarks: List["DataLandmark"]
     contact_areas: List["DataContactArea"]
     traffic_lights: List["DataStaticTrafficLight"]
+    left_lane_marking: Optional["DataLaneMarking"]
+    right_lane_marking: Optional["DataLaneMarking"]
+    left_lane: Optional["DataContactLaneInfo"]
+    right_lane: Optional["DataContactLaneInfo"]
 
     def get_linestring(self) -> LineString:
         """Return (and cache) a Shapely LineString for the lane."""

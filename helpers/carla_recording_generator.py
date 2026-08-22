@@ -383,18 +383,27 @@ class CarlaDataGenerator:
         print(f"Spawned {len(spawned)} parked vehicles (requested {count}).")
         return spawned
 
-    def _to_asset_path(self, client: Client, name: str) -> str:
-        """Accepts 'Town05' or a full asset path and returns the asset path."""
+    def _to_asset_path(self, client: Client, name: str) -> Optional[str]:
+        """Accepts 'Town05' or a full asset path and returns the asset path, or None if not installed."""
         availableMaps = client.get_available_maps()
         name = (name or "").strip()
         if not name:
-            return ""
-        return next(map for map in availableMaps if name in map)
+            return None
+        return next((map for map in availableMaps if name in map), None)
 
     def _load_map_by_seed(self, client: Client, candidates: Optional[list[str]], seed: int) -> str:
         """Pick a map deterministically from candidates using the seed; fall back to usable maps."""
         if candidates:
-            pool = sorted({self._to_asset_path(client, map) for map in candidates if map})
+            pool_set = set()
+            for name in candidates:
+                if not name:
+                    continue
+                asset = self._to_asset_path(client, name)
+                if asset is None:
+                    print(f"!! Map '{name}' is not installed on this CARLA server; skipping.")
+                    continue
+                pool_set.add(asset)
+            pool = sorted(pool_set)
         else:
             pool = sorted({m for m in CarlaAPIHelper.get_usable_maps(client)})
         if not pool:

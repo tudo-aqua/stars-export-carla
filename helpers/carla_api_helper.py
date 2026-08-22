@@ -11,7 +11,7 @@ from data_av_static import MapRasterizer
 from helpers.json_helper import JSONHelper
 
 ACTOR_BLOCK_FILTERING_SWITCH = True
-USABLE_MAPS = ["Town01", "Town02", "Town10"]
+USABLE_MAPS = ["Town01", "Town02", "Town10", "Town04", "Town06"]
 
 
 class CarlaAPIHelper:

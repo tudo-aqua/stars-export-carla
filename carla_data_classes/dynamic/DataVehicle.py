@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from carla import Vehicle
+from carla import Vehicle, VehicleLightState
 from dataclass_wizard import JSONWizard
 
 # top of the file (before the @dataclass)
@@ -25,11 +25,14 @@ class DataVehicle(DataActor):
     acceleration: "DataVector3D"
     forward_vector: "DataVector3D"
     angular_velocity: "DataVector3D"
+    left_blinker: bool
+    right_blinker: bool
 
     @staticmethod
     def from_vehicle(actor: Vehicle, ego_vehicle: bool = False) -> "DataVehicle":
         base = DataActor.from_actor(actor).__dict__.copy()
         base["type"] = "Vehicle"
+        light_state = actor.get_light_state()
         return DataVehicle(
             **base,
             ego_vehicle=ego_vehicle,
@@ -39,4 +42,6 @@ class DataVehicle(DataActor):
             forward_vector=DataVector3D.from_vector3d(
                 actor.get_transform().get_forward_vector()
             ),
+            left_blinker=bool(light_state & VehicleLightState.LeftBlinker),
+            right_blinker=bool(light_state & VehicleLightState.RightBlinker),
         )
