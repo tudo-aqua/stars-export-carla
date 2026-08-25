@@ -1,7 +1,7 @@
 # layers/lanes.py  (only the traces() method changes)
 
 from .base_layer import register, BaseLayer
-from .utils import color_for_road, rgba, LineTraceMerger
+from .utils import color_for_road, rgba, topology_highlight_color, LineTraceMerger
 
 
 @register("lanes")
@@ -28,11 +28,16 @@ class LaneLayer(BaseLayer):
 
         max_abs_lane = df.lane_id.abs().max() or 1
         merger = LineTraceMerger()
+        highlighted = LineTraceMerger()
 
         for _, row in df.iterrows():
             base = color_for_road(row.road_id)
             opacity = max(0.15, 1 - abs(row.lane_id) / max_abs_lane)
             color = rgba(base, opacity)
+
+            topology = row.get("lane_topology", "")
+            highlight_color = topology_highlight_color(topology)
+            topology_line = f"⚠ {topology} Lane<br>" if topology else ""
 
             poly = np.asarray(row.poly, dtype=float)
             if poly.ndim != 2 or poly.shape[0] < 2:
@@ -84,10 +89,14 @@ class LaneLayer(BaseLayer):
                 f"Lane: {row.lane_id}<br>"
                 "───────────────<br>"
                 f"Type: {row.lane_type}<br>"
+                f"{topology_line}"
                 f"Width: {row.width:.2f} m<br>"
                 f"Length: {row.length:.2f} m<br>"
                 f"Left Lane: {row.get('left_neighbor', '—')}<br>"
                 f"Right Lane: {row.get('right_neighbor', '—')}<br>"
+                f"Preceding Lane(s): {row.get('predecessor_lanes', '—')}<br>"
+                f"Following Lane(s): {row.get('successor_lanes', '—')}<br>"
+                f"{'Overlapping Lane(s): ' + row.get('overlapping_lanes', '—') + '<br>' if topology else ''}"
                 f"{intersections_block}"
             )
             # per-vertex text: distance-along-lane and coordinates differ at each point
@@ -96,7 +105,9 @@ class LaneLayer(BaseLayer):
                 for d, x, y in zip(distances, xs, ys)
             ]
 
-            merger.add(color, xs, ys, vertex_text)
+            (highlighted if highlight_color else merger).add(
+                highlight_color or color, xs, ys, vertex_text
+            )
 
         traces = []
         for color, xs, ys, text in merger.items():
@@ -104,6 +115,16 @@ class LaneLayer(BaseLayer):
                 x=xs, y=ys, mode="lines",
                 name="Lanes",
                 line=dict(width=self.size["lanes"], color=color),
+                text=text,
+                hoverinfo="text",
+                hoverlabel=dict(bgcolor=color),
+                showlegend=False,
+            ))
+        for color, xs, ys, text in highlighted.items():
+            traces.append(go.Scattergl(
+                x=xs, y=ys, mode="lines",
+                name="Lanes (merge/diverge)",
+                line=dict(width=max(self.size["lanes"], 4), color=color),
                 text=text,
                 hoverinfo="text",
                 hoverlabel=dict(bgcolor=color),

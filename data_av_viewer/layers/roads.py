@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 from shapely.geometry import LineString, Polygon, MultiPolygon
 
 from .base_layer import register, BaseLayer
-from .utils import rgba, color_for_road, LineTraceMerger
+from .utils import rgba, color_for_road, topology_highlight_color, LineTraceMerger
 
 
 def _safe_linestring_from_coords(
@@ -63,19 +63,41 @@ class RoadLayer(BaseLayer):
         max_abs_lane = df.lane_id.abs().max() or 1
         filled = LineTraceMerger()
         fallback_lines = LineTraceMerger()
+        highlighted = LineTraceMerger()
+        highlighted_fallback = LineTraceMerger()
 
         for _, row in df.iterrows():
             base_color = color_for_road(row.road_id)
             opacity = max(0.15, 1 - abs(row.lane_id) / max_abs_lane)
             fill_color = rgba(base_color, opacity)
 
+            topology = row.get("lane_topology", "")
+            highlight_color = topology_highlight_color(topology)
+            outline_color = highlight_color or base_color
+            topology_line = f"⚠ {topology} Lane<br>" if topology else ""
+
+            if row.get("intersection_lanes_count", 0) and row.get("intersection_lanes_html"):
+                intersections_block = (
+                    f"Intersections ({int(row.intersection_lanes_count)}):"
+                    f"{row.intersection_lanes_html}<br>"
+                )
+            else:
+                intersections_block = ""
+
             hover_text = (
                 f"Road: {row.road_id}<br>"
                 f"Lane: {row.lane_id}<br>"
                 "───────────────<br>"
                 f"Type: {row.lane_type}<br>"
+                f"{topology_line}"
                 f"Width: {row.width:.2f} m<br>"
                 f"Length: {row.length:.2f} m<br>"
+                f"Left Lane: {row.get('left_neighbor', '—')}<br>"
+                f"Right Lane: {row.get('right_neighbor', '—')}<br>"
+                f"Preceding Lane(s): {row.get('predecessor_lanes', '—')}<br>"
+                f"Following Lane(s): {row.get('successor_lanes', '—')}<br>"
+                f"{'Overlapping Lane(s): ' + row.get('overlapping_lanes', '—') + '<br>' if topology else ''}"
+                f"{intersections_block}"
             )
 
             # row.poly -> robust centerline
@@ -95,7 +117,7 @@ class RoadLayer(BaseLayer):
             if corridor.is_empty:
                 # As a fallback, draw just the centerline
                 xs, ys = map(np.asarray, line.xy)
-                fallback_lines.add(base_color, xs, ys, hover_text)
+                (highlighted_fallback if highlight_color else fallback_lines).add(outline_color, xs, ys, hover_text)
                 continue
 
             # Corridor can be Polygon or MultiPolygon
@@ -112,7 +134,7 @@ class RoadLayer(BaseLayer):
                 if geom.is_empty or geom.exterior is None or geom.exterior.is_empty:
                     continue
                 xs, ys = map(np.asarray, geom.exterior.xy)
-                filled.add((base_color, fill_color), xs, ys, hover_text)
+                (highlighted if highlight_color else filled).add((outline_color, fill_color), xs, ys, hover_text)
 
         traces: List[go.Scattergl] = []
         for base_color, xs, ys, text in fallback_lines.items():
@@ -131,6 +153,27 @@ class RoadLayer(BaseLayer):
                 text=text,
                 hoverinfo="text",
                 line=dict(width=1.5, color=base_color),
+                fill="toself",
+                fillcolor=fill_color,
+                hoverlabel=dict(bgcolor=base_color, namelength=0),
+                showlegend=False,
+            ))
+        for base_color, xs, ys, text in highlighted_fallback.items():
+            traces.append(go.Scattergl(
+                x=xs, y=ys, mode="lines",
+                name="Roads (merge/diverge)",
+                text=text,
+                hoverinfo="text",
+                line=dict(width=3.5, color=base_color),
+                showlegend=False,
+            ))
+        for (base_color, fill_color), xs, ys, text in highlighted.items():
+            traces.append(go.Scattergl(
+                x=xs, y=ys, mode="lines",
+                name="Roads (merge/diverge)",
+                text=text,
+                hoverinfo="text",
+                line=dict(width=3.5, color=base_color),
                 fill="toself",
                 fillcolor=fill_color,
                 hoverlabel=dict(bgcolor=base_color, namelength=0),

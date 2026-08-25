@@ -1,5 +1,5 @@
 # layers/utils.py
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 
 class LineTraceMerger:
@@ -108,3 +108,33 @@ def neighbor_label(info) -> str:
     if info is None:
         return "—"
     return f"Road {info.road_id}, Lane {info.lane_id}"
+
+
+def lane_list_label(infos) -> str:
+    """infos is a List[DataContactLaneInfo]; returns '—' when the list is empty."""
+    if not infos:
+        return "—"
+    return ", ".join(f"Road {info.road_id}, Lane {info.lane_id}" for info in infos)
+
+
+MERGE_COLOR = "#ff9800"  # orange
+DIVERGE_COLOR = "#e91e63"  # magenta
+MERGE_DIVERGE_COLOR = "#d50000"  # red
+OVERLAP_COLOR = "#00bcd4"  # teal
+
+
+def topology_highlight_color(label: str) -> Optional[str]:
+    """
+    Distinct outline color for a lane's `lane_topology` value (computed at export time by
+    MapRasterizer.compute_lane_overlaps from actual overlapping lane geometry — see DataLane),
+    or None for a lane with no physical overlap.
+    """
+    if label == "Merging":
+        return MERGE_COLOR
+    if label == "Diverging":
+        return DIVERGE_COLOR
+    if label == "Merging & Diverging":
+        return MERGE_DIVERGE_COLOR
+    if label == "Overlapping":
+        return OVERLAP_COLOR
+    return None
