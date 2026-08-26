@@ -50,7 +50,7 @@ def game_loop():
 
         hud = HUD(display_size[0], display_size[1])
         world = World(client.get_world(), hud)
-        controller = DualControl(world)
+        controller = DualControl(world, client)
 
         clock = pygame.time.Clock()
         while True:

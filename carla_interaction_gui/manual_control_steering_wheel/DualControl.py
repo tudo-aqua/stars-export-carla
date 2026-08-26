@@ -1,8 +1,10 @@
 import math
+import time
 from configparser import ConfigParser
 
 import carla
 import pygame
+from carla.libcarla import Client
 from pygame.locals import KMOD_CTRL
 from pygame.locals import KMOD_SHIFT
 from pygame.locals import K_DOWN
@@ -17,10 +19,15 @@ from pygame.locals import K_q
 from pygame.locals import K_s
 from pygame.locals import K_w
 
+from carla_interaction_gui.manual_control_steering_wheel.World import World
+
 
 class DualControl(object):
-    def __init__(self, world):
+    def __init__(self, world : World, client: Client):
         self._autopilot_enabled = False
+        self._recording = False
+        self._client = client
+        self._hud = world.hud
         if isinstance(world.player, carla.Vehicle):
             self._control = carla.VehicleControl()
             world.player.set_autopilot(self._autopilot_enabled)
@@ -72,7 +79,15 @@ class DualControl(object):
                 elif event.button == self._btn_park:
                     self._control.gear = 1 if self._control.reverse else -1
                 elif event.button == self._btn_horn:
-                    world.camera_manager.toggle_recording()
+                    if not self._recording:
+                        file = f'/home/carla/recordings/recording{time.time()}.log'
+                        self._client.start_recorder(file, True)
+                        self._hud.notification(f'Recording into file {file}')
+                        self._recording = True
+                    else:
+                        self._client.stop_recorder()
+                        self._hud.notification('Recording Off')
+                        self._recording = False
                 elif event.button == self._btn_flasher_left:
                     if world.player.get_light_state() == carla.VehicleLightState.LeftBlinker:
                         world.player.set_light_state(carla.VehicleLightState.NONE)
