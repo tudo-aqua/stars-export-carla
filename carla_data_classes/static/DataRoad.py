@@ -3,7 +3,7 @@ from typing import List, Optional
 
 from dataclass_wizard import JSONWizard
 
-from carla_data_classes.static import DataLane
+from carla_data_classes.static.DataLane import DataLane
 
 
 @dataclass

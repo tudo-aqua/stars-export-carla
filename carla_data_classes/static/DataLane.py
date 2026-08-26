@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Optional
 
 from shapely import LineString
@@ -36,6 +36,16 @@ class DataLane:
     right_lane_marking: Optional["DataLaneMarking"]
     left_lane: Optional["DataContactLaneInfo"]
     right_lane: Optional["DataContactLaneInfo"]
+    # Other Driving lanes whose centerline runs within a small distance of this lane's for a
+    # significant portion of its length — i.e. lanes that physically share the same road surface
+    # for a stretch, such as a highway on-/off-ramp's acceleration/deceleration lane running
+    # alongside the mainline lane. Populated by MapRasterizer.compute_lane_overlaps().
+    overlapping_lanes: List["DataContactLaneInfo"] = field(default_factory=list)
+    # "Merging" (this lane's centerline converges into an overlapping lane toward its end),
+    # "Diverging" (splits away from an overlapping lane after its start), "Merging & Diverging"
+    # (both, via different overlap partners), "Overlapping" (no clear directional trend), or ""
+    # (no physical overlap detected).
+    lane_topology: str = ""
 
     def get_linestring(self) -> LineString:
         """Return (and cache) a Shapely LineString for the lane."""

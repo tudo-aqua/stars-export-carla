@@ -7,6 +7,7 @@ from shapely import Point, LineString, STRtree
 from shapely.ops import nearest_points
 
 from carla_data_classes.enums.DataLandmarkType import DataLandmarkType
+from carla_data_classes.enums.DataLaneType import DataLaneType
 from carla_data_classes.static import DataRoad, DataLandmark, DataLane, DataLocation, DataContactArea, \
     DataContactLaneInfo
 from carla_data_classes.static.DataBlock import DataBlock
@@ -91,8 +92,184 @@ class _BlockBuilder:
         crosswalks = self._collect_crosswalks()
         data_world = self._build_data_world(blocks=data_blocks, crosswalks=crosswalks)
 
+        print(">> [Data-AV Transformer] Repairing lanes referenced but missing from the map data")
+        self._repair_missing_referenced_lanes(data_world, landmarks)
+
+        print(">> [Data-AV Transformer] Detecting merging/diverging lane overlaps")
+        self.compute_lane_overlaps(data_world)
+
         self.ctx.data_world = data_world
         return data_world
+
+    def _repair_missing_referenced_lanes(self, data_world: DataWorld, landmarks: List[Landmark]) -> None:
+        """
+        CARLA's `junction.get_waypoints()` enumeration (used in get_data_roads_for_junction) can
+        skip some lanes that other lanes still reference via left_lane/right_lane/predecessor/
+        successor — e.g. a narrow junction-internal lane whose own waypoint never got surfaced by
+        that enumeration. Recover those by explicitly querying CARLA for the missing
+        (road_id, lane_id) via get_waypoint_xodr and building their DataLane the normal way, so
+        every referenced lane actually exists in the exported data.
+        """
+        index: Dict[Tuple[int, int], DataLane] = {
+            (ln.road_id, ln.lane_id): ln for ln in data_world.get_all_lanes()
+        }
+
+        missing: Dict[Tuple[int, int], float] = {}
+
+        def note(info: Optional[DataContactLaneInfo], s_hint: float) -> None:
+            if info is None:
+                return
+            key = (info.road_id, info.lane_id)
+            if key not in index and key not in missing:
+                missing[key] = s_hint
+
+        for ln in list(index.values()):
+            note(ln.left_lane, ln.s)
+            note(ln.right_lane, ln.s)
+            for pred in ln.predecessor_lanes:
+                note(pred, 0.0)
+            for succ in ln.successor_lanes:
+                note(succ, ln.lane_length)
+
+        if not missing:
+            print(">> [Data-AV Transformer]   No missing referenced lanes found")
+            return
+
+        print(f">> [Data-AV Transformer]   Found {len(missing)} referenced lane(s) missing from the map data")
+
+        road_lookup: Dict[int, DataRoad] = {straight.road_id: straight for straight in data_world.straights}
+        for junction in data_world.junctions:
+            for road in junction.roads:
+                road_lookup[road.road_id] = road
+
+        recovered_count = 0
+        for (road_id, lane_id), s_hint in missing.items():
+            try:
+                waypoint = self.ctx.map.get_waypoint_xodr(road_id, lane_id, max(s_hint, 0.0))
+            except Exception:
+                waypoint = None
+            if waypoint is None:
+                print(f">> [Data-AV Transformer]   Could not recover referenced lane "
+                      f"Road {road_id}, Lane {lane_id} (missing from CARLA's own map data)")
+                continue
+
+            road = road_lookup.get(road_id)
+            if road is None:
+                print(f">> [Data-AV Transformer]   Could not recover referenced lane "
+                      f"Road {road_id}, Lane {lane_id} (its road was never captured either)")
+                continue
+
+            recovered_lane = self.ctx.get_data_lane_for_waypoint(waypoint, landmarks)
+            road.lanes.append(recovered_lane)
+            index[(road_id, lane_id)] = recovered_lane
+            recovered_count += 1
+            print(f">> [Data-AV Transformer]   Recovered referenced lane Road {road_id}, Lane {lane_id}")
+
+        print(f">> [Data-AV Transformer]   Recovered {recovered_count}/{len(missing)} missing referenced lane(s)")
+
+    @staticmethod
+    def compute_lane_overlaps(data_world: DataWorld, distance_threshold: float = 1.0,
+                              end_window_m: float = 5.0, direction_margin: float = 0.3) -> None:
+        """
+        Flags pairs of Driving lanes (on different roads) whose centerlines coincide near one of
+        their ends — i.e. the last (or first) `end_window_m` meters of one lane sit within
+        `distance_threshold` meters of the other lane's centerline. A highway on-/off-ramp's
+        acceleration/deceleration lane physically joins (or splits from) the mainline lane at a
+        single gore point; checking a fixed-distance window there — rather than requiring a
+        minimum fraction of the *whole* lane's length to be close — finds that regardless of how
+        long the lane is overall. A whole-lane-fraction check misses exactly this on longer
+        connector lanes whose taper is short relative to their total length (e.g. one arm of a
+        wide junction gets flagged while a longer arm of the very same junction doesn't, even
+        though both have the same physical gore).
+
+        Sets `overlapping_lanes` and `lane_topology` ("Merging" / "Diverging" /
+        "Merging & Diverging" / "Overlapping") directly on the DataLane objects in `data_world`.
+        Ordinary same-road neighbor lanes are skipped since they're always a constant lane-width
+        apart, never physically coincident.
+        """
+        lanes = [ln for ln in data_world.get_all_lanes()
+                 if ln.lane_type == DataLaneType.Driving and ln.lane_midpoints]
+        print(f">> [Data-AV Transformer]   Checking {len(lanes)} driving lane(s) for physical overlaps")
+        if len(lanes) < 2:
+            return
+
+        geoms = [ln.get_linestring() for ln in lanes]
+        strtree = STRtree(geoms)
+
+        def end_points(lane: DataLane, from_start: bool) -> List["DataLaneMidpoint"]:
+            pts = lane.lane_midpoints
+            if from_start:
+                window = [p for p in pts if p.distance_to_start <= end_window_m]
+                return window or pts[:1]
+            cutoff = lane.lane_length - end_window_m
+            window = [p for p in pts if p.distance_to_start >= cutoff]
+            return window or pts[-1:]
+
+        def avg_gap(points: List["DataLaneMidpoint"], other_geom: LineString) -> float:
+            dists = [Point(p.location.x, p.location.y).distance(other_geom) for p in points]
+            return sum(dists) / len(dists)
+
+        def classify(gap_start: float, gap_end: float) -> Optional[str]:
+            close_start = gap_start <= distance_threshold
+            close_end = gap_end <= distance_threshold
+            if not (close_start or close_end):
+                return None
+            if close_end and (not close_start or gap_end <= gap_start - direction_margin):
+                return "Merging"
+            if close_start and (not close_end or gap_start <= gap_end - direction_margin):
+                return "Diverging"
+            return "Overlapping"
+
+        def combine(existing: str, new: str) -> str:
+            if not existing or existing == new:
+                return new
+            labels = {existing, new} - {"Overlapping"}
+            if labels == {"Merging", "Diverging"}:
+                return "Merging & Diverging"
+            return "Merging" if "Merging" in labels else ("Diverging" if "Diverging" in labels else new)
+
+        processed: Set[frozenset] = set()
+        pair_count = 0
+        flagged_lanes: Set[Tuple[int, int]] = set()
+        for i, geom_a in enumerate(geoms):
+            lane_a = lanes[i]
+            for idx in strtree.query(geom_a.buffer(distance_threshold)):
+                j = int(idx)
+                if j == i:
+                    continue
+                key = frozenset((i, j))
+                if key in processed:
+                    continue
+                processed.add(key)
+
+                lane_b = lanes[j]
+                if lane_a.road_id == lane_b.road_id:
+                    continue  # ordinary same-road neighbors, not a physical overlap
+
+                geom_b = geoms[j]
+                gs_a = avg_gap(end_points(lane_a, True), geom_b)
+                ge_a = avg_gap(end_points(lane_a, False), geom_b)
+                gs_b = avg_gap(end_points(lane_b, True), geom_a)
+                ge_b = avg_gap(end_points(lane_b, False), geom_a)
+
+                label_a = classify(gs_a, ge_a)
+                label_b = classify(gs_b, ge_b)
+                if label_a is None or label_b is None:
+                    continue  # not actually close at either lane's own end
+
+                lane_a.overlapping_lanes.append(DataContactLaneInfo(road_id=lane_b.road_id, lane_id=lane_b.lane_id))
+                lane_b.overlapping_lanes.append(DataContactLaneInfo(road_id=lane_a.road_id, lane_id=lane_a.lane_id))
+                lane_a.lane_topology = combine(lane_a.lane_topology, label_a)
+                lane_b.lane_topology = combine(lane_b.lane_topology, label_b)
+
+                pair_count += 1
+                flagged_lanes.add((lane_a.road_id, lane_a.lane_id))
+                flagged_lanes.add((lane_b.road_id, lane_b.lane_id))
+                print(f">> [Data-AV Transformer]   Overlap found: Road {lane_a.road_id}, Lane {lane_a.lane_id} "
+                      f"({label_a}) <-> Road {lane_b.road_id}, Lane {lane_b.lane_id} ({label_b})")
+
+        print(f">> [Data-AV Transformer]   Found {pair_count} overlapping lane pair(s), "
+              f"flagging {len(flagged_lanes)} lane(s) total")
 
     def get_data_road_for_waypoints(self, waypoint: Waypoint, landmarks: List[Landmark]) -> DataRoad:
         """
