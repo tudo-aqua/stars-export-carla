@@ -60,7 +60,8 @@ def start_carla(
     if sys.platform.startswith("win"):
         kwargs = dict(creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
     else:
-        kwargs = dict(preexec_fn=os.setsid)
+        kwargs = {}#dict(preexec_fn=os.setsid)
+        pass
 
     subprocess.Popen(cmd, **kwargs)
 

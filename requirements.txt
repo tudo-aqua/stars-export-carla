@@ -1,4 +1,4 @@
-carla~=0.9.15
+carla~=0.9.16
 numpy~=2.2.6
 dash-extensions~=1.0.20
 dataclass-wizard~=0.30.1
