@@ -20,6 +20,7 @@ from helpers.carla_api_helper import CarlaAPIHelper
 from helpers.collisions import RecorderIndex, IdMapper, collisions_for_time_window
 from helpers.json_helper import JSONHelper
 from helpers.kinematics import compute_acceleration_for_ticks, compute_recorded_velocities, velocity_at_time
+from helpers.lane_marking_contacts import compute_lane_marking_contacts
 
 
 class CarlaMonitor:
@@ -115,6 +116,7 @@ class CarlaMonitor:
             # Initialize helpers
             rasterizer = MapRasterizer(world)
             api_helper = CarlaAPIHelper(self.client, world, rasterizer)
+            carla_map = world.get_map()
 
             print(">> [Data-AV Transformer] Load or calculate map data.")
             rasterizer.load_or_calculate_data_world(log_file_path=result_file_path, map_name=map_name)
@@ -229,6 +231,10 @@ class CarlaMonitor:
 
                     # Attach collisions for this runtime actor id (if any for this frame)
                     data_actor.collisions = per_actor_collisions.get(data_actor.id, [])
+
+                    # Attach lane markings this actor's bounding box is touching
+                    # this frame (empty when it lies within its lane).
+                    data_actor.lane_marking_contacts = compute_lane_marking_contacts(actor, carla_map)
 
                     data_actors.append(data_actor)
 

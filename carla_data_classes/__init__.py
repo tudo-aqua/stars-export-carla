@@ -6,6 +6,7 @@ def ensure_core_types(ns: dict) -> None:
     module globals. Safe to call from any dynamic actor module (no circular imports).
     """
     from .dynamic.DataBoundingBox import DataBoundingBox
+    from .static.DataLaneMarkingContact import DataLaneMarkingContact
     from .static.DataLocation import DataLocation
     from .static.DataRotation import DataRotation
     from typing import Optional
@@ -17,6 +18,7 @@ def ensure_core_types(ns: dict) -> None:
 
     for name, val in [
         ("DataBoundingBox", DataBoundingBox),
+        ("DataLaneMarkingContact", DataLaneMarkingContact),
         ("DataLocation", DataLocation),
         ("DataRotation", DataRotation),
         ("DataVector3D", DataVector3D),

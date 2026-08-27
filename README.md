@@ -145,6 +145,8 @@ The functions in this repository generate three kinds of data types:
     - DataPedestrian
     - DataTrafficSign
     - DataVehicle
+    - DataLaneMarkingContact (per-actor `lane_marking_contacts`: which lane markings the
+      bounding box is touching/crossing this tick; empty when it lies within its lane)
    </details>
 3. **Weather**: In here, the weather parameters of a scenario is stored
    <details><summary>Class details</summary>

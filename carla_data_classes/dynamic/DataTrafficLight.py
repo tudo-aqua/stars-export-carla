@@ -53,7 +53,8 @@ class DataTrafficLight(DataActor):
                 rotation=DataRotation(-1, -1, -1),
                 state=4,  # unknown
                 related_open_drive_id=static_tl.open_drive_id,
-                collisions=[]
+                collisions=[],
+                lane_marking_contacts=[]
             )
 
         # live traffic‑light → base fields

@@ -4,6 +4,7 @@ from .DataContactLaneInfo import DataContactLaneInfo
 from .DataLandmark import DataLandmark
 from .DataLane import DataLane
 from .DataLaneMarking import DataLaneMarking
+from .DataLaneMarkingContact import DataLaneMarkingContact
 from .DataLaneMidpoint import DataLaneMidpoint
 from .DataLocation import DataLocation
 from .DataRoad import DataRoad
