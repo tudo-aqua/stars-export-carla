@@ -524,7 +524,10 @@ class CarlaDataGenerator:
 
             # Switch world settings (sync/no_rendering) inside your generate_traffic() already,
             # but we still start the recorder here before spawning traffic (like your main).
-            client.start_recorder(recording_dir, False)
+            # additional_data=True is required so the log includes the "Dynamic actors"
+            # ground-truth linear_velocity/angular_velocity block - see
+            # helpers.kinematics.compute_recorded_velocities.
+            client.start_recorder(recording_dir, True)
 
             # Record for the requested duration
             snapshot = world.get_snapshot()
