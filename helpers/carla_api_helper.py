@@ -6,7 +6,7 @@ from typing import List, Optional
 from carla import *
 
 from carla_data_classes.dynamic import TickData, DataActor, DataVehicle, DataTrafficSign, DataPedestrian
-from carla_data_classes.static import DataLocation, DataBlock
+from carla_data_classes.static import DataLocation, DataBlock, DataVector3D
 from data_av_static import MapRasterizer
 from helpers.json_helper import JSONHelper
 
@@ -158,14 +158,19 @@ class CarlaAPIHelper:
         )
         role_rx = re.compile(r"role_name\s*[=:]\s*([^\s,)\]]+)", re.IGNORECASE)
 
+        # CARLA prints very small values in scientific notation (e.g. "8.24296e-05"); a plain
+        # "-?\d+(?:\.\d+)?" stops at the "e" and the whole match fails, silently dropping the
+        # location for that actor.
+        _FLOAT = r"-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?"
+
         # Prefer 'at (x, y, z)' to avoid matching rotation tuples
         at_loc_rx = re.compile(
-            r"at\s*\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)",
+            rf"at\s*\(\s*({_FLOAT})\s*,\s*({_FLOAT})\s*,\s*({_FLOAT})\s*\)",
             re.IGNORECASE
         )
         # Generic first tuple as a fallback
         loc_rx = re.compile(
-            r"\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)"
+            rf"\(\s*({_FLOAT})\s*,\s*({_FLOAT})\s*,\s*({_FLOAT})\s*\)"
         )
 
         def _norm_type(tok: str | None) -> str | None:
@@ -362,27 +367,35 @@ class CarlaAPIHelper:
         return usable_maps
 
     @staticmethod
-    def get_data_actor_from_actor(actor: Actor, ego_vehicle: bool = False) -> Optional[DataActor]:
+    def get_data_actor_from_actor(
+            actor: Actor,
+            ego_vehicle: bool = False,
+            velocity: Optional["DataVector3D"] = None,
+            angular_velocity: Optional["DataVector3D"] = None,
+    ) -> Optional[DataActor]:
         """
         Returns the filled DataActor from the carla Actor
         :param actor: The actor which should be transformed into the DataActor class
+        :param velocity: Linear velocity to use instead of the (during replay, always-zero)
+            live actor.get_velocity(); see helpers.kinematics.compute_recorded_velocities.
+        :param angular_velocity: Same as velocity, for actor.get_angular_velocity().
         :return: Filled DataActor object
         """
         data_actor: Optional[DataActor] = None
         # Check of which type the given actor is and transform it into the correct dataclass
         if type(actor) is Vehicle:
-            data_actor = DataVehicle.from_vehicle(actor, ego_vehicle)
+            data_actor = DataVehicle.from_vehicle(actor, ego_vehicle, velocity, angular_velocity)
         elif type(actor) is TrafficSign:
             data_actor = DataTrafficSign.from_traffic_sign(actor)
         elif type(actor) is TrafficLight:
             data_actor = None
         elif type(actor) is Walker:
-            data_actor = DataPedestrian.from_walker(actor)
+            data_actor = DataPedestrian.from_walker(actor, velocity, angular_velocity)
         else:
             if actor.type_id == "spectator":
                 return None
             elif "pedestrian" in actor.type_id:
-                data_actor = DataPedestrian.from_walker(actor)
+                data_actor = DataPedestrian.from_walker(actor, velocity, angular_velocity)
             # TODO: If an actor of another type is tracked
         if data_actor:
             data_actor.location = DataLocation.from_location(location=actor.get_location())

@@ -8,6 +8,11 @@ import carla
 # Recorder "world" sentinel
 WORLD_REC_ID = 0xFFFFFFFF  # 4294967295
 
+# CARLA prints very small values (e.g. a near-zero roll) in scientific notation, like
+# "8.24296e-05" - a plain "-?[0-9.]+" pattern stops at the "e" and the whole line fails to
+# match, silently dropping that actor. Use this everywhere a recorder-dump float is parsed.
+_FLOAT = r"-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?"
+
 
 class RecorderIndex:
     """
@@ -16,6 +21,11 @@ class RecorderIndex:
       - frame_times[i] = time (s) of recorder Frame (i+1)
       - creates_by_recid[rec_id] = (type_id, create_loc, role_name, created_frame)
       - collisions_by_frame[frame] = [(rec_id_a, rec_id_b), ...]
+      - positions_by_frame[frame][rec_id] = (location, rotation), from each frame's "Positions:" block
+      - velocities_by_frame[frame][rec_id] = (linear_velocity, angular_velocity), from each
+        frame's "Dynamic actors:" block. Only present when the recording was started with
+        additional_data=True (client.start_recorder(name, True)); ground-truth physics
+        velocity, not derived from position deltas.
     """
 
     def __init__(self):
@@ -24,6 +34,8 @@ class RecorderIndex:
         self.frame_times: List[float] = []
         self.creates_by_recid: Dict[int, Tuple[str, carla.Location, Optional[str], int]] = {}
         self.collisions_by_frame: Dict[int, List[Tuple[int, int]]] = defaultdict(list)
+        self.positions_by_frame: Dict[int, Dict[int, Tuple[carla.Location, carla.Rotation]]] = defaultdict(dict)
+        self.velocities_by_frame: Dict[int, Dict[int, Tuple[carla.Vector3D, carla.Vector3D]]] = defaultdict(dict)
 
     @staticmethod
     def parse(info: str) -> "RecorderIndex":
@@ -32,18 +44,31 @@ class RecorderIndex:
         # Frames / Duration
         m_frames = re.search(r"^Frames:\s+(\d+)", info, re.MULTILINE)
         idx.frames = int(m_frames.group(1)) if m_frames else 0
-        m_dur = re.search(r"^Duration:\s+([0-9.]+)\s+seconds", info, re.MULTILINE)
+        m_dur = re.search(rf"^Duration:\s+({_FLOAT})\s+seconds", info, re.MULTILINE)
         idx.duration = float(m_dur.group(1)) if m_dur else 0.0
 
         # Patterns
-        frame_hdr = re.compile(r"^Frame\s+(\d+)\s+at\s+([0-9.]+)\s+seconds$")
+        frame_hdr = re.compile(rf"^Frame\s+(\d+)\s+at\s+({_FLOAT})\s+seconds$")
         create_re = re.compile(
-            r"^\s*Create\s+(\d+):\s+([A-Za-z0-9_.]+)\s+\(\d+\)\s+at\s+\((-?[0-9.]+),\s*(-?[0-9.]+),\s*(-?[0-9.]+)\)\s*$"
+            rf"^\s*Create\s+(\d+):\s+([A-Za-z0-9_.]+)\s+\(\d+\)\s+at\s+\(({_FLOAT}),\s*({_FLOAT}),\s*({_FLOAT})\)\s*$"
         )
         role_re = re.compile(r"^\s*role_name\s*=\s*(.+)$")
         # allow optional "(hero)" (or similar) after both IDs
         coll_re = re.compile(
             r"^\s*Collision\s+id\s+(?:\d+)\s+between\s+(\d+)(?:\s+\([^)]*\))?\s+with\s+(\d+)(?:\s+\([^)]*\))?\s*$"
+        )
+        # "  Id: 47 Location: (9865.4, 2708.58, -0.589614) Rotation: (-0.000457765, 0.363694, 90.9712)"
+        # NOTE: the printed Rotation triple is (roll, pitch, yaw), NOT (pitch, yaw, roll) -
+        # verified against live actor.get_transform().rotation for a known frame/actor.
+        pos_re = re.compile(
+            rf"^\s*Id:\s+(\d+)\s+Location:\s+\(({_FLOAT}),\s*({_FLOAT}),\s*({_FLOAT})\)\s+"
+            rf"Rotation:\s+\(({_FLOAT}),\s*({_FLOAT}),\s*({_FLOAT})\)\s*$"
+        )
+        # "  Id: 47 linear_velocity: (-0.0973904, 13.1679, -3.26157e-06) angular_velocity: (-0.0787992, -0.000707775, -0.00361435)"
+        # Only present when the recording was made with additional_data=True.
+        dyn_re = re.compile(
+            rf"^\s*Id:\s+(\d+)\s+linear_velocity:\s+\(({_FLOAT}),\s*({_FLOAT}),\s*({_FLOAT})\)\s+"
+            rf"angular_velocity:\s+\(({_FLOAT}),\s*({_FLOAT}),\s*({_FLOAT})\)\s*$"
         )
 
         lines = info.splitlines()
@@ -83,6 +108,28 @@ class RecorderIndex:
             if m and curr_frame is not None:
                 a, b = int(m.group(1)), int(m.group(2))
                 idx.collisions_by_frame[curr_frame].append((a, b))
+                continue
+
+            m = pos_re.match(s)
+            if m and curr_frame is not None:
+                rec_id = int(m.group(1))
+                lx, ly, lz = float(m.group(2)), float(m.group(3)), float(m.group(4))
+                roll, pitch, yaw = float(m.group(5)), float(m.group(6)), float(m.group(7))
+                idx.positions_by_frame[curr_frame][rec_id] = (
+                    carla.Location(x=lx, y=ly, z=lz),
+                    carla.Rotation(pitch=pitch, yaw=yaw, roll=roll),
+                )
+                continue
+
+            m = dyn_re.match(s)
+            if m and curr_frame is not None:
+                rec_id = int(m.group(1))
+                lvx, lvy, lvz = float(m.group(2)), float(m.group(3)), float(m.group(4))
+                avx, avy, avz = float(m.group(5)), float(m.group(6)), float(m.group(7))
+                idx.velocities_by_frame[curr_frame][rec_id] = (
+                    carla.Vector3D(x=lvx, y=lvy, z=lvz),
+                    carla.Vector3D(x=avx, y=avy, z=avz),
+                )
                 continue
 
         # Build frame_times[0..frames-1]

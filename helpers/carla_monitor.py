@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import List
 
 from carla import World, Client
-from carla import WorldSnapshot, Vehicle, WeatherParameters
+from carla import WorldSnapshot, Vehicle, Walker, WeatherParameters
 from carla.libcarla import TrafficLight
 
 from carla_data_classes.dynamic import (
@@ -19,7 +19,7 @@ from data_av_static import MapRasterizer
 from helpers.carla_api_helper import CarlaAPIHelper
 from helpers.collisions import RecorderIndex, IdMapper, collisions_for_time_window
 from helpers.json_helper import JSONHelper
-from helpers.kinematics import compute_vel_acc_for_ticks
+from helpers.kinematics import compute_acceleration_for_ticks, compute_recorded_velocities, velocity_at_time
 
 
 class CarlaMonitor:
@@ -90,6 +90,10 @@ class CarlaMonitor:
                 return
 
             rec_idx = RecorderIndex.parse(info)
+            # Linear/angular velocity per recorder id, finite-differenced from the log's own
+            # per-frame Location/Rotation - see helpers.kinematics.compute_recorded_velocities
+            # for why this is needed instead of querying the replayed actors directly.
+            vel_idx = compute_recorded_velocities(rec_idx)
             map_name, replay_duration, replay_frames = self._parse_map_and_duration(info)
 
             print(f">> [CARLA] Recording duration: {replay_duration:.3f}s")
@@ -139,6 +143,14 @@ class CarlaMonitor:
             if len(vehicle_id_mapping) != len(vehicles):
                 print(">> [CARLA] The vehicle id mapping is not equal to the vehicle id")
                 return
+
+            # Best-effort only (unlike vehicles above): used solely to look up recorded
+            # velocity for pedestrians, so a mismatch here just means those walkers get 0
+            # velocity instead of aborting the whole run.
+            walker_id_mapping = CarlaAPIHelper.create_recorder_to_sim_id_map(world, info,
+                                                                             actor_filters=("walker.*",),
+                                                                             position_tolerance_m=1)
+            reverse_walker_id_mapping = {v: k for k, v in walker_id_mapping.items()}
 
             snapshot: WorldSnapshot = world.get_snapshot()
             base_sim_time = snapshot.timestamp.elapsed_seconds
@@ -195,13 +207,25 @@ class CarlaMonitor:
 
                 for actor in actors:
                     is_ego = isinstance(actor, Vehicle) and (actor.attributes.get("role_name") == "hero")
-                    data_actor = api_helper.get_data_actor_from_actor(actor, is_ego)
+
+                    # Recorder id, if this actor type has an id-mapping at all (vehicles/
+                    # walkers only) - used both to look up recorded velocity below and,
+                    # for vehicles, to relabel the exported id the same way as before.
+                    rec_id = None
+                    if isinstance(actor, Vehicle):
+                        rec_id = reverse_vehicle_id_mapping.get(actor.id)
+                    elif isinstance(actor, Walker):
+                        rec_id = reverse_walker_id_mapping.get(actor.id)
+
+                    linear_velocity, angular_velocity = velocity_at_time(vel_idx, rec_idx, rec_id, current_tick)
+
+                    data_actor = api_helper.get_data_actor_from_actor(actor, is_ego, linear_velocity,
+                                                                       angular_velocity)
                     if data_actor is None:
                         continue
 
-                    mapped_id = reverse_vehicle_id_mapping.get(data_actor.id)
-                    if mapped_id is not None:
-                        data_actor.id = mapped_id
+                    if isinstance(actor, Vehicle) and rec_id is not None:
+                        data_actor.id = rec_id
 
                     # Attach collisions for this runtime actor id (if any for this frame)
                     data_actor.collisions = per_actor_collisions.get(data_actor.id, [])
@@ -241,8 +265,8 @@ class CarlaMonitor:
                 tick_count += 1
                 current_tick += settings.fixed_delta_seconds
 
-            print(">> [Data-AV Transformer] Calculate velocity and acceleration for actors")
-            compute_vel_acc_for_ticks(ticks)
+            print(">> [Data-AV Transformer] Calculate acceleration for actors")
+            compute_acceleration_for_ticks(ticks)
 
             print(">> [Data-AV Transformer] Analysis complete.")
             print(">> [IO] Save data to disk.")
