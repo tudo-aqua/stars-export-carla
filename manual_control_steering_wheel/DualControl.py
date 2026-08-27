@@ -19,7 +19,7 @@ from pygame.locals import K_q
 from pygame.locals import K_s
 from pygame.locals import K_w
 
-from carla_interaction_gui.manual_control_steering_wheel.World import World
+from manual_control_steering_wheel.World import World
 
 
 class DualControl(object):
@@ -80,6 +80,9 @@ class DualControl(object):
                     self._control.gear = 1 if self._control.reverse else -1
                 elif event.button == self._btn_horn:
                     if not self._recording:
+                        # A bare filename (no directory) makes CARLA save it into the
+                        # server's own default recordings folder (e.g. CarlaUE4/Saved),
+                        # the same convention the GUI's "manual_recording" flow expects.
                         file = f'/home/carla/recordings/recording{time.time()}.log'
                         self._client.start_recorder(file, True)
                         self._hud.notification(f'Recording into file {file}')

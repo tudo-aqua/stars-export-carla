@@ -59,7 +59,7 @@ class ThreadWorker(threading.Thread):
                 return str(c)
         return None
 
-    def _start_and_stream(self, cmd: list[str]):
+    def _start_and_stream(self, cmd: list[str], *, cwd: str | None = None):
         creation = {}
         if sys.platform.startswith("win"):
             creation["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
@@ -73,6 +73,7 @@ class ThreadWorker(threading.Thread):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            cwd=cwd,
             **creation
         )
         try:

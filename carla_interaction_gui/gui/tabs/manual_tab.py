@@ -7,6 +7,7 @@ from carla_interaction_gui.gui.constants import ALLOWED_CARLA_MAPS
 from carla_interaction_gui.gui.widgets import entry_row
 from carla_interaction_gui.workers.ManualControlWorker import ManualControlWorker
 from carla_interaction_gui.workers.MoveLatestRecordingWorker import MoveLatestRecordingWorker
+from carla_interaction_gui.workers.SteeringWheelControlWorker import SteeringWheelControlWorker
 
 
 class ManualTab(ttk.Frame):
@@ -49,6 +50,8 @@ class ManualTab(ttk.Frame):
                        variable=app.render_quality_low_variable, anchor="w").pack(fill="x", padx=6, pady=2)
 
         tk.Button(self, text="Start manual driving", width=25, command=self._start_manual).pack(pady=8)
+        tk.Button(self, text="Start manual driving (Steering Wheel)",
+                  command=self._start_manual_steering_wheel).pack(pady=2)
 
         row2 = tk.Frame(self)
         row2.pack(fill="x", pady=4)
@@ -87,6 +90,25 @@ class ManualTab(ttk.Frame):
             app.log,
             vehicle_filter="vehicle.lincoln.mkz_2020",
             role_name=None,
+            restart_before=True,
+            kill_server_after=True,
+            exclusive=True,
+        )
+        app.manual_workers.append(w)
+        app.attach_worker(w, stop_button=self.stop_btn)
+
+    def _start_manual_steering_wheel(self):
+        """Start the primary manual driving (exclusive), reading input from a steering wheel/joystick."""
+        app = self.app
+        if not app.validate_paths([
+            ("CARLA executable", app.carla_executable_variable, "file"),
+        ]):
+            return
+        app.clear_log()
+
+        w = SteeringWheelControlWorker(
+            app.collect_cfg(),
+            app.log,
             restart_before=True,
             kill_server_after=True,
             exclusive=True,
