@@ -27,6 +27,7 @@ class DataVehicle(DataActor):
     angular_velocity: "DataVector3D"
     left_blinker: bool
     right_blinker: bool
+    steering_angle: float
 
     @staticmethod
     def from_vehicle(actor: Vehicle, ego_vehicle: bool = False) -> "DataVehicle":
@@ -44,4 +45,5 @@ class DataVehicle(DataActor):
             ),
             left_blinker=bool(light_state & VehicleLightState.LeftBlinker),
             right_blinker=bool(light_state & VehicleLightState.RightBlinker),
+            steering_angle=actor.get_control().steer,
         )

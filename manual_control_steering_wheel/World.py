@@ -1,10 +1,12 @@
 import random
 
+import carla
+
 from CollisionSensor import CollisionSensor
 from LaneInvasionSensor import LaneInvasionSensor
 from GnssSensor import GnssSensor
 from CameraManager import CameraManager
-from carla_interaction_gui.manual_control_steering_wheel.helpers import find_weather_presets, get_actor_display_name
+from manual_control_steering_wheel.helpers import find_weather_presets, get_actor_display_name
 
 
 class World(object):

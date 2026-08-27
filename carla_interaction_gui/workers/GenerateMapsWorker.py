@@ -1,5 +1,4 @@
 # workers/GenerateMapsWorker.py
-import subprocess
 import sys
 
 from carla_interaction_gui.config_data import Config
@@ -14,7 +13,6 @@ class GenerateMapsWorker(ThreadWorker):
 
     def __init__(self, cfg: Config, log_cb, allowed_maps: list[str]):
         super().__init__(cfg, log_cb)
-        self._proc: subprocess.Popen | None = None
         self._allowed_maps = allowed_maps
 
     def run(self):
@@ -39,7 +37,3 @@ class GenerateMapsWorker(ThreadWorker):
 
         self._start_and_stream(cmd)
         self.log(">> [GenerateMaps] All maps processed.")
-
-    def cancel(self):
-        super().cancel()
-        self._kill_tree()

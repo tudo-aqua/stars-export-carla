@@ -1,13 +1,7 @@
-# ManualControlWorker.py  (full diff-style patch)
-
 from __future__ import annotations
 
-import os
-import subprocess
 import sys
 from pathlib import Path
-
-import psutil
 
 from carla_interaction_gui.carla_launcher import restart_carla, kill_carla
 from carla_interaction_gui.config_data import Config
@@ -32,7 +26,6 @@ class ManualControlWorker(ThreadWorker):
         exclusive: bool = False,
     ):
         super().__init__(cfg, log_cb)
-        self._proc: subprocess.Popen | None = None
 
         # params for this instance
         self.vehicle_filter = vehicle_filter          # e.g. "vehicle.lincoln.mkz_2020"
@@ -71,62 +64,15 @@ class ManualControlWorker(ThreadWorker):
 
         cmd += ["--sync"]
 
-        # launch in separate process group so we can later kill the group
-        self.log(">> [CARLA] Launching manual_control.py  " + " ".join(cmd[2:]))
-        creation: dict[str, int | None] = {}
-        if sys.platform.startswith("win"):
-            creation["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-        else:
-            creation["preexec_fn"] = os.setsid
-
-        self._proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            **creation
-        )
-
-        # stream stdout to GUI log until we’re canceled or script ends
         try:
-            for line in self._proc.stdout:
-                if self.cancelled:
-                    break
-                self.log(line.rstrip())
+            self._start_and_stream(cmd)
         finally:
-            self._terminate_manual_control()
             if self.kill_server_after:
                 kill_carla()
             self.log(">> [CARLA] manual_control.py is shut down")
 
     def cancel(self):
         """Called by the GUI when the user presses *Stop* or on app close."""
-        super().cancel()
-        self._terminate_manual_control()
+        super().cancel()  # also force-kills the process tree, see ThreadWorker.cancel
         if self.kill_server_after:
             kill_carla()
-
-    def _terminate_manual_control(self):
-        """
-        Force-kill *manual_control.py* **and every child process**.
-        Uses psutil so it works the same on Windows, macOS, and Linux.
-        """
-        if not self._proc:
-            return
-
-        try:
-            parent = psutil.Process(self._proc.pid)
-        except psutil.NoSuchProcess:
-            self._proc = None
-            return
-
-        procs = [parent] + parent.children(recursive=True)
-
-        for p in procs:
-            try:
-                p.kill()
-            except psutil.NoSuchProcess:
-                pass
-
-        psutil.wait_procs(procs, timeout=3)
-        self._proc = None

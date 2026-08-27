@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 import time
@@ -60,8 +59,7 @@ def start_carla(
     if sys.platform.startswith("win"):
         kwargs = dict(creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
     else:
-        kwargs = {}#dict(preexec_fn=os.setsid)
-        pass
+        kwargs = {}
 
     subprocess.Popen(cmd, **kwargs)
 
@@ -187,22 +185,6 @@ def restart_and_connect(
     return client
 
 
-def _find_carla_config_py(exe: str) -> str | None:
-    """
-    Try to find CARLA's PythonAPI/util/config.py relative to the CARLA executable.
-    Returns an absolute path or None if not found.
-    """
-    exe_dir = os.path.dirname(os.path.realpath(exe))
-    candidates = [
-        os.path.join(exe_dir, "PythonAPI", "util", "config.py"),
-        os.path.join(os.path.dirname(exe_dir), "PythonAPI", "util", "config.py"),  # if exe is in a bin/ subdir
-    ]
-    for path in candidates:
-        if os.path.isfile(path):
-            return path
-    return None
-
-
 def set_map(
         map_name: str,
         *,
@@ -219,7 +201,7 @@ def set_map(
     _log(f">> [CARLA] Changing map to '{map_name}'")
     client = carla.Client(host=host, port=port)
     client.set_timeout(20.0)
-    world = client.load_world_if_different(map_name)
+    client.load_world_if_different(map_name)
     try:
         client.get_available_maps()
         _log(f">> [CARLA] Loaded map '{map_name}'")

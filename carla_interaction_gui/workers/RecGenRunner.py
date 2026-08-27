@@ -1,18 +1,19 @@
 # carla_interaction_gui/workers/RecGenRunner.py
 from __future__ import annotations
 
-import os
 import sys
-from typing import Callable, Iterable
+from typing import Callable
 
 from carla_interaction_gui.workers.ThreadWorker import ThreadWorker
 
 
 class RecGenRunner(ThreadWorker):
     """
-    Runs carla_recording_generator.py repeatedly for a list of seeds.
-    The generator itself chooses ONE map deterministically from the
-    candidate list passed with repeated --map flags (seeded choice).
+    Runs carla_recording_generator.py repeatedly for a seed range.
+    The seed range and candidate maps are forwarded to the 'recgen' subcommand
+    of carla_task_runner.py, which loops over the seeds itself (see
+    carla_task_runner.run_recgen). The generator chooses ONE map deterministically
+    per seed from the candidate list (seeded choice).
     """
 
     def __init__(
@@ -21,12 +22,9 @@ class RecGenRunner(ThreadWorker):
             log: Callable[[str], None],
             *,
             selected_maps: list[str],
-            seeds: Iterable[int],
     ):
-        super().__init__(cfg, log)  # no 'exclusive' kwarg in your ThreadWorker
-        self.exclusive = True  # keep the intent for any code that checks it
+        super().__init__(cfg, log)
         self._selected_maps = list(selected_maps)
-        self._seeds = list(seeds)
 
     def run(self):
         # Always use the standard runner (carla_task_runner.py) like other workers
@@ -78,29 +76,3 @@ class RecGenRunner(ThreadWorker):
         self._start_and_stream(cmd)
 
         self.log(">> [RecGen] Done.")
-
-    def _resolve_script(self, name: str) -> str | None:
-        """
-        Try hard to find a top-level runner like 'carla_recording_generator.py'
-        regardless of current working directory.
-        """
-        here = os.path.abspath(os.path.dirname(__file__))
-
-        # 1) Common absolute guesses
-        candidates = [
-            os.path.join(os.getcwd(), name),  # current working dir
-            os.path.join(here, name),  # workers/<name>
-            os.path.join(os.path.dirname(here), name),  # carla_interaction_gui/<name>
-            os.path.join(os.path.dirname(os.path.dirname(here)), name)  # <repo-root>/<name>  ← important
-        ]
-
-        # 2) Walk up to 5 parents from the worker folder and look for the file
-        parent = here
-        for _ in range(5):
-            parent = os.path.dirname(parent)
-            candidates.append(os.path.join(parent, name))
-
-        for c in candidates:
-            if os.path.isfile(c):
-                return os.path.abspath(c)
-        return None

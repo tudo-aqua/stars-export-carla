@@ -10,7 +10,6 @@ import zipfile
 from typing import List
 
 from carla_interaction_gui.carla_launcher import restart_and_connect, kill_carla
-from carla_interaction_gui.workers import manual_agent_control
 from data_av_static import MapRasterizer
 from helpers.carla_monitor import CarlaMonitor
 
@@ -226,7 +225,7 @@ def run_gen_maps(args):
             current_map_name = world.get_map().name
             if map_name not in current_map_name:
                 print(f">> [GenerateMaps] Warning: map name mismatch: {current_map_name} != {map_name}")
-                print(f">> [GenerateMaps] Wait 10 seconds and retry.")
+                print(">> [GenerateMaps] Wait 10 seconds and retry.")
                 time.sleep(10)
                 world = client.get_world()
                 current_map_name = world.get_map().name
@@ -244,37 +243,6 @@ def run_gen_maps(args):
 
         print(">> [GenerateMaps] All maps done.")
 
-    finally:
-        try:
-            kill_carla(log=print)
-        except Exception:
-            pass
-
-
-def run_manual_agent(args):
-    """
-    Start CARLA (if needed), then launch a pygame viewer that behaves like manual_control.py,
-    except that pressing 'P' toggles our Python carla_agent instead of Traffic Manager.
-    """
-    client = None
-    try:
-        client = restart_and_connect(
-            exe=args.carla_exe,
-            render_off_screen=args.offscreen,
-            render_quality_low=args.quality_low,
-            map_name=args.map_name or None,
-            log=print,
-        )
-        manual_agent_control.launch_from_runner(
-            host="127.0.0.1",
-            port=2000,
-            res=args.res,
-            sync=args.sync,
-            carla_exe=args.carla_exe
-        )
-    except Exception:
-        traceback.print_exc()
-        raise
     finally:
         try:
             kill_carla(log=print)
@@ -449,13 +417,6 @@ def main():
     pg.add_argument("--output", required=True, help="Output folder for generated map data")
     pg.add_argument("--map", action="append", help="Map name to generate (repeatable)")
     pg.set_defaults(_fn=run_gen_maps)
-
-    # carla_agent drive
-    pm = sub.add_parser("manual_agent", help="Manual drive viewer where 'P' toggles Python carla_agent")
-    add_common(pm)
-    pm.add_argument("--res", default="1280x720", help="Window resolution, e.g. 1280x720")
-    pm.add_argument("--sync", action="store_true", help="Run viewer in synchronous mode")
-    pm.set_defaults(_fn=run_manual_agent)
 
     # recording generator (recgen)
     pr = sub.add_parser("recgen", help="Generate recordings over a seed range (deterministic map per seed)")

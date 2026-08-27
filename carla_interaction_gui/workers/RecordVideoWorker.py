@@ -1,7 +1,5 @@
-import subprocess
 import sys
 
-from carla_interaction_gui.config_data import Config
 from carla_interaction_gui.workers.ThreadWorker import ThreadWorker
 
 
@@ -10,10 +8,6 @@ class RecordVideoWorker(ThreadWorker):
     Launches an isolated process that performs the replay + camera render to mp4,
     then kills the entire process tree on cancel/finish.
     """
-
-    def __init__(self, cfg: Config, log_cb):
-        super().__init__(cfg, log_cb)
-        self._proc: subprocess.Popen | None = None
 
     def run(self):
         runner = self._resolve_runner()
@@ -50,7 +44,3 @@ class RecordVideoWorker(ThreadWorker):
         self._start_and_stream(cmd)
         self.log(">> [Recorder] Finished video export")
         return None
-
-    def cancel(self):
-        super().cancel()
-        self._kill_tree()

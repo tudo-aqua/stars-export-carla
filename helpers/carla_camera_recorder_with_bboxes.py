@@ -143,7 +143,11 @@ class CarlaCameraRecorder:
 
         vehicle_id_mapping = CarlaAPIHelper.create_recorder_to_sim_id_map(world, info, position_tolerance_m=1)
         if len(vehicle_id_mapping) != len(vehicles):
+            mapped_sim_ids = set(vehicle_id_mapping.values())
+            unmapped_vehicles = [v.id for v in vehicles if v.id not in mapped_sim_ids]
             print(">> [CARLA] The vehicle id mapping is not equal to the vehicle id")
+            print(f">> [CARLA] Mapped {len(vehicle_id_mapping)} recorder id(s) to {len(vehicles)} live vehicle(s); "
+                 f"unmapped live vehicle id(s): {unmapped_vehicles}")
             return
 
         # Get the ego vehicle from the given vehicle id
@@ -388,6 +392,9 @@ class CarlaCameraRecorder:
 
         fourcc = cv2.VideoWriter_fourcc('m', 'p', '4', 'v')
         video = cv2.VideoWriter(video_path, fourcc, 20, (width, height))
+        if not video.isOpened():
+            raise RuntimeError(f"Could not open video writer for {video_path} - check that the mp4v/FFMPEG codec "
+                               f"is available in this OpenCV install.")
         print(f">> [IO] Save video to {video_path}")
 
         for image in images:

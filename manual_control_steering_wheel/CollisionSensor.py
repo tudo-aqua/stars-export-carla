@@ -4,7 +4,7 @@ import weakref
 
 import carla
 
-from carla_interaction_gui.manual_control_steering_wheel.helpers import get_actor_display_name
+from manual_control_steering_wheel.helpers import get_actor_display_name
 
 
 class CollisionSensor(object):
