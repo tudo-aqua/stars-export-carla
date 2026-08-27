@@ -115,8 +115,7 @@ class CarlaAPIHelper:
     @staticmethod
     def create_recorder_to_sim_id_map(world: World,
                                       info_text: str,
-                                      actor_filters: tuple[str, ...] = ("vehicle.*", "walker.*",
-                                                                        "traffic.traffic_light"),
+                                      actor_filters: tuple[str, ...] = ("vehicle.*",),
                                       position_tolerance_m: float = 5.0) -> dict[int, int]:
         """
         Build a mapping from *recorder* actor IDs (ground truth from the .log) to the
@@ -128,6 +127,13 @@ class CarlaAPIHelper:
           - This version preserves and uses the actor *type* parsed from "Create <id>: <type> ..."
             lines (e.g., spectator, vehicle.*, walker.*, traffic light) and prefers 'at (...)'
             locations to avoid picking up rotation tuples.
+          - Default actor_filters is vehicle-only on purpose. Traffic lights (and to a lesser
+            extent walkers) share the same type_id/role_name and are often clustered within a
+            few meters of each other, so the nearest-position fallback below can mis-assign them
+            depending on the map's exact layout. Callers that compare len(mapping) against a
+            vehicle count (e.g. carla_camera_recorder.py) will spuriously fail whenever a
+            non-vehicle actor happens to match, so only widen actor_filters if you actually
+            consume those extra mapped ids.
           - 'traffic light' is normalized to 'traffic.traffic_light'.
 
         Returns:
