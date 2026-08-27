@@ -2,6 +2,7 @@
 
 # virtualenv
 venv/
+.venv/
 ENV/
 
 .idea/
