@@ -269,6 +269,9 @@ class CarlaCameraRecorder:
 
         fourcc = cv2.VideoWriter_fourcc('m', 'p', '4', 'v')
         video = cv2.VideoWriter(video_path, fourcc, 20, (width, height))
+        if not video.isOpened():
+            raise RuntimeError(f"Could not open video writer for {video_path} - check that the mp4v/FFMPEG codec "
+                               f"is available in this OpenCV install.")
         print(f">> [IO] Save video to {video_path}")
 
         for image_name in images:
