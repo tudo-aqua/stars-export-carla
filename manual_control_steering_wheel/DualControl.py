@@ -1,6 +1,7 @@
 import math
 import time
 from configparser import ConfigParser
+from datetime import datetime
 
 import carla
 import pygame
@@ -83,7 +84,7 @@ class DualControl(object):
                         # A bare filename (no directory) makes CARLA save it into the
                         # server's own default recordings folder (e.g. CarlaUE4/Saved),
                         # the same convention the GUI's "manual_recording" flow expects.
-                        file = f'/home/carla/recordings/recording{time.time()}.log'
+                        file = f'/workspace/recordings/recording_{datetime.now().strftime("%m.%d.%Y-%H.%M.%S")}.log'
                         self._client.start_recorder(file, True)
                         self._hud.notification(f'Recording into file {file}')
                         self._recording = True
