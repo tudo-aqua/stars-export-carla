@@ -1,7 +1,7 @@
 import math
-import time
 from configparser import ConfigParser
 from datetime import datetime
+from pathlib import Path
 
 import carla
 import pygame
@@ -20,10 +20,10 @@ from pygame.locals import K_q
 from pygame.locals import K_s
 from pygame.locals import K_w
 
-from manual_control_steering_wheel.World import World
+from manual_control_steering_wheel.classes.World import World
 
 
-class DualControl(object):
+class SteeringWheelControl(object):
     def __init__(self, world : World, client: Client):
         self._autopilot_enabled = False
         self._recording = False
@@ -52,7 +52,7 @@ class DualControl(object):
         self._wheel.init()
 
         self._parser = ConfigParser()
-        self._parser.read('wheel_config.ini')
+        self._parser.read(str(Path(__file__).resolve().parent / 'wheel_config.ini'))
         self._steer_idx = int(self._parser.get('Fanatec', 'steering_wheel_axis'))
         self._throttle_idx = int(self._parser.get('Fanatec', 'throttle_axis'))
         self._brake_idx = int(self._parser.get('Fanatec', 'brake_axis'))

@@ -88,8 +88,6 @@ class ManualTab(ttk.Frame):
         w = ManualControlWorker(
             app.collect_cfg(),
             app.log,
-            vehicle_filter="vehicle.lincoln.mkz_2020",
-            role_name=None,
             restart_before=True,
             kill_server_after=True,
             exclusive=True,
@@ -118,7 +116,7 @@ class ManualTab(ttk.Frame):
 
     def _spawn_manual_extra(self, *, filter_str: str):
         """
-        Launch another manual_control.py instance with --rolename=manual_control and
+        Launch another manual_control_keyboard.py instance with --rolename=manual_control and
         the provided --filter, without rebooting/killing the CARLA server.
         """
         app = self.app

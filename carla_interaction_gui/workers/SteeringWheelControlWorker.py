@@ -13,7 +13,7 @@ SCRIPT_PATH = Path(__file__).resolve().parents[2] / "manual_control_steering_whe
 class SteeringWheelControlWorker(ThreadWorker):
     """
     Launches manual_control_steeringwheel.py, a pygame viewer that behaves like
-    CARLA's own manual_control.py but reads input from a steering wheel/joystick
+    CARLA's own manual_control_keyboard.py but reads input from a steering wheel/joystick
     instead of the keyboard. The script takes no CLI arguments of its own (it
     always connects to 127.0.0.1:2000 and spawns its own 'hero' vehicle), so this
     is a primary/exclusive drive method like the main "Start manual driving"

@@ -7,11 +7,12 @@ from carla_interaction_gui.carla_launcher import restart_carla, kill_carla
 from carla_interaction_gui.config_data import Config
 from carla_interaction_gui.workers.ThreadWorker import ThreadWorker
 
+SCRIPT_PATH = Path(__file__).resolve().parents[2] / "manual_control_steering_wheel" / "manual_control_keyboard.py"
 
 class ManualControlWorker(ThreadWorker):
     """
     Represents a worker responsible for manually driving in the CARLA simulator.
-    Can be used to launch multiple manual_control.py instances concurrently.
+    Can be used to launch multiple manual_control_keyboard.py instances concurrently.
     """
 
     def __init__(
@@ -23,19 +24,16 @@ class ManualControlWorker(ThreadWorker):
         role_name: str | None = None,
         restart_before: bool = True,
         kill_server_after: bool = True,
-        exclusive: bool = False,
+        exclusive: bool = True,
     ):
         super().__init__(cfg, log_cb)
-
-        # params for this instance
-        self.vehicle_filter = vehicle_filter          # e.g. "vehicle.lincoln.mkz_2020"
-        self.role_name = role_name                    # e.g. "manual_control"
-        self.restart_before = restart_before          # reboot CARLA before launching?
-        self.kill_server_after = kill_server_after    # kill CARLA server after exit?
-        self.exclusive = exclusive                    # let GUI gate this instance
+        self.vehicle_filter = vehicle_filter
+        self.role_name = role_name
+        self.restart_before = restart_before
+        self.kill_server_after = kill_server_after
+        self.exclusive = exclusive
 
     def run(self):
-        # optional reboot (only for the primary/manual one)
         if self.restart_before:
             self.log(">> [CARLA] Rebooting CARLA")
             restart_carla(
@@ -48,28 +46,23 @@ class ManualControlWorker(ThreadWorker):
             if self.cancelled:
                 return
 
-        # locate script
-        mc_py = (Path(self.cfg.carla_executable).parent /
-                 "PythonAPI" / "examples" / "manual_control.py")
-        if not mc_py.exists():
-            self.log(f"!! manual_control.py missing @ {mc_py}")
+        if not SCRIPT_PATH.exists():
+            self.log(f"!! manual_control_keyboard.py missing @ {SCRIPT_PATH}")
             return
 
-        # build command
-        cmd = [sys.executable, str(mc_py)]
-        if self.role_name:
-            cmd += ["--rolename", self.role_name]
+        cmd = [sys.executable, str(SCRIPT_PATH)]
         if self.vehicle_filter:
             cmd += ["--filter", self.vehicle_filter]
-
-        cmd += ["--sync"]
-
+        if self.role_name:
+            cmd += ["--rolename", self.role_name]
         try:
-            self._start_and_stream(cmd)
+            # wheel_config.ini is loaded via a path relative to the working directory,
+            # so this must run with the script's own folder as cwd.
+            self._start_and_stream(cmd, cwd=str(SCRIPT_PATH.parent))
         finally:
             if self.kill_server_after:
                 kill_carla()
-            self.log(">> [CARLA] manual_control.py is shut down")
+            self.log(">> [CARLA] manual_control_keyboard.py is shut down")
 
     def cancel(self):
         """Called by the GUI when the user presses *Stop* or on app close."""

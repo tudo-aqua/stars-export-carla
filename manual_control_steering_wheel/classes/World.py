@@ -2,15 +2,15 @@ import random
 
 import carla
 
-from CollisionSensor import CollisionSensor
-from LaneInvasionSensor import LaneInvasionSensor
-from GnssSensor import GnssSensor
-from CameraManager import CameraManager
+from manual_control_steering_wheel.classes.CollisionSensor import CollisionSensor
+from manual_control_steering_wheel.classes.LaneInvasionSensor import LaneInvasionSensor
+from manual_control_steering_wheel.classes.GnssSensor import GnssSensor
+from manual_control_steering_wheel.classes.CameraManager import CameraManager
 from manual_control_steering_wheel.helpers import find_weather_presets, get_actor_display_name
 
 
 class World(object):
-    def __init__(self, carla_world, hud):
+    def __init__(self, carla_world, hud, actor_filter='vehicle.lincoln.mkz_2017', role_name='hero'):
         self.world = carla_world
         self.hud = hud
         self.player = None
@@ -18,6 +18,8 @@ class World(object):
         self.lane_invasion_sensor = None
         self.gnss_sensor = None
         self.camera_manager = None
+        self._actor_filter = actor_filter
+        self._role_name = role_name
         self._weather_presets = find_weather_presets()
         self._weather_index = 0
         self.restart()
@@ -27,9 +29,13 @@ class World(object):
         # Keep same camera config if the camera manager exists.
         cam_index = self.camera_manager.index if self.camera_manager is not None else 0
         cam_pos_index = self.camera_manager.transform_index if self.camera_manager is not None else 0
-        # Get a random blueprint.
-        blueprint = self.world.get_blueprint_library().find('vehicle.lincoln.mkz_2017')
-        blueprint.set_attribute('role_name', 'hero')
+        # Get a random blueprint matching the actor filter (a filter like "walker.pedestrian.*"
+        # matches many blueprints; an exact id like "vehicle.lincoln.mkz_2017" matches one).
+        blueprint_list = self.world.get_blueprint_library().filter(self._actor_filter)
+        if not blueprint_list:
+            raise ValueError(f"Couldn't find any blueprints matching filter '{self._actor_filter}'")
+        blueprint = random.choice(blueprint_list)
+        blueprint.set_attribute('role_name', self._role_name)
         # if blueprint.has_attribute('color'):
         #     color = random.choice(blueprint.get_attribute('color').recommended_values)
         #     blueprint.set_attribute('color', color)

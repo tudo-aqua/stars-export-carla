@@ -7,7 +7,7 @@ import math
 
 
 
-from FadingText import FadingText
+from manual_control_steering_wheel.classes.FadingText import FadingText
 from manual_control_steering_wheel.helpers import get_actor_display_name
 
 
