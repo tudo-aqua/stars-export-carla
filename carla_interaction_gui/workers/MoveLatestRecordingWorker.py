@@ -21,12 +21,12 @@ class MoveLatestRecordingWorker(ThreadWorker):
         Moves a manually recorded file to a specified destination directory with a timestamped name.
         """
         ext = self.cfg.recording_extension
-        src = Path(self.cfg.manual_output_dir) / f"manual_recording.rec"
+        src = Path(self.cfg.manual_output_dir) / f"manual_recording{ext}"
         if not src.exists():
             return self.log(f"!! '{src.name}' not found in {src.parent}")
 
         ts = time.strftime("%Y_%m_%d-%H_%M_%S")
-        dst_dir = Path(self.cfg.default_recordings_folder) or src.parent
+        dst_dir = Path(self.cfg.default_recordings_folder) if self.cfg.default_recordings_folder else src.parent
         dst = dst_dir / f"{self._dst_name}_{ts}{ext}"
 
         self.log(f">> Moving {src.name} → {dst}")

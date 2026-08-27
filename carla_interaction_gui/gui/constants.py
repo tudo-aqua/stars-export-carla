@@ -5,7 +5,6 @@ ALLOWED_NON_LAYERED_MAPS = [
     "Town03",
     "Town04",
     "Town05",
-    "Town06",
     "Town10HD",
 ]
 ALLOWED_PARKED_MAPS = [

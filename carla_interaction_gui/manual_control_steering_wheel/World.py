@@ -1,5 +1,7 @@
 import random
 
+import carla
+
 from CollisionSensor import CollisionSensor
 from LaneInvasionSensor import LaneInvasionSensor
 from GnssSensor import GnssSensor

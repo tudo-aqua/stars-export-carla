@@ -25,9 +25,12 @@ class ThreadWorker(threading.Thread):
 
     def cancel(self):
         """
-        Cancels the current operation by setting the internal cancellation flag.
+        Cancels the current operation and force-kills the child process tree, if any,
+        so a blocked read on its stdout (which only checks `cancelled` between lines)
+        can't stall the stop.
         """
         self._cancel.set()
+        self._kill_tree()
 
     @property
     def cancelled(self):
@@ -98,15 +101,3 @@ class ThreadWorker(threading.Thread):
                 pass
         psutil.wait_procs(procs, timeout=5)
         self._proc = None
-
-    def send_command(self, text: str):
-        """
-        Send a single-line command to the child runner. No-op if process ended.
-        """
-        try:
-            if self._proc and self._proc.stdin:
-                self._proc.stdin.write(text.strip() + "\n")
-                self._proc.stdin.flush()
-        except Exception:
-            # don't crash UI if sending fails
-            pass

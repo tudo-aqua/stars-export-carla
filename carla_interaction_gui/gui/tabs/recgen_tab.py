@@ -102,18 +102,8 @@ class RecGenTab(ttk.Frame):
                 return messagebox.showerror("No valid maps",
                                             "With parked vehicles > 0, select maps from ALLOWED_PARKED_MAPS only.")
 
-        try:
-            seed_start = int(app.recgen_seed_start_var.get())
-        except Exception:
-            seed_start = 0
-        try:
-            num_scenarios = max(1, int(app.recgen_num_scenarios_var.get()))
-        except Exception:
-            num_scenarios = 1
-        seeds = list(range(seed_start, seed_start + num_scenarios))
-
         app.clear_log()
-        runner = RecGenRunner(cfg, app.log, selected_maps=selected_maps, seeds=seeds)
+        runner = RecGenRunner(cfg, app.log, selected_maps=selected_maps)
         app.attach_worker(runner, stop_button=self.stop_btn)
         self.refresh_map_filters()
 

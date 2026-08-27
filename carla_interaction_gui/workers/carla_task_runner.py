@@ -225,7 +225,7 @@ def run_gen_maps(args):
             current_map_name = world.get_map().name
             if map_name not in current_map_name:
                 print(f">> [GenerateMaps] Warning: map name mismatch: {current_map_name} != {map_name}")
-                print(f">> [GenerateMaps] Wait 10 seconds and retry.")
+                print(">> [GenerateMaps] Wait 10 seconds and retry.")
                 time.sleep(10)
                 world = client.get_world()
                 current_map_name = world.get_map().name
