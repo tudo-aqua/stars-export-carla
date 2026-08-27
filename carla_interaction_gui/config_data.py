@@ -33,9 +33,6 @@ class Config:
     end_at: float = float("inf")
     with_bboxes: bool = False
 
-    agent_vehicle_filter: str = "vehicle.tesla.model3"
-    agent_target_speed_kph: float = 35.0
-
     recgen_seed_start: int = 0
     recgen_num_scenarios: int = 1
     recgen_selected_maps: list[str] | None = None  # persisted as JSON list

@@ -9,7 +9,6 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext
 from carla_interaction_gui.carla_launcher import kill_carla
 from carla_interaction_gui.config_data import Config, load, save
 from carla_interaction_gui.gui.constants import ALLOWED_CARLA_MAPS
-from carla_interaction_gui.gui.tabs.agent_tab import AgentTab
 from carla_interaction_gui.gui.tabs.manual_tab import ManualTab
 from carla_interaction_gui.gui.tabs.maps_tab import MapsTab
 from carla_interaction_gui.gui.tabs.recgen_tab import RecGenTab
@@ -61,11 +60,6 @@ class CarlaInteractionGUI(tk.Tk):
         end_at_default = -1 if self.config.end_at == float("inf") else self.config.end_at
         self.end_at_variable = tk.StringVar(value=str(end_at_default))
 
-        self.agent_vehicle_filter_variable = tk.StringVar(
-            value=getattr(self.config, "agent_vehicle_filter", "vehicle.tesla.model3"))
-        self.agent_target_speed_variable = tk.DoubleVar(
-            value=getattr(self.config, "agent_target_speed_kph", 35.0))
-
         self.render_off_screen_variable = tk.BooleanVar(value=getattr(self.config, "render_off_screen", False))
         self.render_quality_low_variable = tk.BooleanVar(value=getattr(self.config, "render_quality_low", False))
 
@@ -108,7 +102,6 @@ class CarlaInteractionGUI(tk.Tk):
         self.transform_tab = TransformTab(notebook, self)
         self.video_tab = VideoTab(notebook, self)
         self.maps_tab = MapsTab(notebook, self)
-        self.agent_tab = AgentTab(notebook, self)
         self.recgen_tab = RecGenTab(notebook, self)
 
         # log pane
@@ -230,11 +223,6 @@ class CarlaInteractionGUI(tk.Tk):
         config.video_width = self.video_width_variable.get()
         config.video_height = self.video_height_variable.get()
         config.vehicle_id = self.vehicle_id_variable.get()
-        config.agent_vehicle_filter = self.agent_vehicle_filter_variable.get().strip()
-        try:
-            config.agent_target_speed_kph = float(self.agent_target_speed_variable.get())
-        except Exception:
-            config.agent_target_speed_kph = 35.0
 
         config.recgen_seed_start = int(self.recgen_seed_start_var.get())
         config.recgen_num_scenarios = max(1, int(self.recgen_num_scenarios_var.get()))
@@ -301,8 +289,6 @@ class CarlaInteractionGUI(tk.Tk):
                 self.end_at_variable,
                 self.render_off_screen_variable,
                 self.render_quality_low_variable,
-                self.agent_vehicle_filter_variable,
-                self.agent_target_speed_variable,
                 self.only_track_at_specific_interval_variable,
                 self.specific_track_interval_variable,
                 self.recgen_seed_start_var,
