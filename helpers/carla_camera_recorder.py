@@ -3,6 +3,7 @@ import argparse
 import math
 import os
 import sys
+import time
 
 import carla
 import cv2
@@ -185,7 +186,18 @@ class CarlaCameraRecorder:
             while CarlaCameraRecorder.COUNTER < tick:
                 pass
 
-        self.client.reload_world()
+        # Stop the camera and let every queued frame land on disk.
+        try:
+            ego_cam.stop()
+            ego_cam.destroy()
+        except Exception:
+            pass
+        CarlaCameraRecorder._wait_for_images(image_save_folder)
+
+        CarlaCameraRecorder.save_video(
+            recording_folder, filename_without_extension, vehicle_id,
+            begin_at, CarlaCameraRecorder.END_AT,
+        )
 
         if filename.endswith(".zip"):
             JSONHelper.delete_file(log_data_path)
@@ -208,6 +220,28 @@ class CarlaCameraRecorder:
     @staticmethod
     def get_video_save_folder(recording_folder: str) -> os.path:
         return os.path.join(recording_folder, JSONHelper.VIDEO_FOLDER)
+
+    @staticmethod
+    def _wait_for_images(image_folder: str, timeout_s: float = 20.0):
+        """Block until the asynchronous image.save_to_disk() writes settle (or timeout)."""
+
+        def _count():
+            if not os.path.isdir(image_folder):
+                return 0
+            return len([f for f in os.listdir(image_folder) if f.endswith(".jpg")])
+
+        deadline = time.time() + timeout_s
+        last = -1
+        stable_since = time.time()
+        while time.time() < deadline:
+            have = _count()
+            if have != last:
+                last = have
+                stable_since = time.time()
+            elif have > 0 and time.time() - stable_since > 1.5:
+                break
+            time.sleep(0.25)
+        print(f">> [IO] {_count()} frame(s) flushed to disk at {image_folder}")
 
     @staticmethod
     def save_image_data(image, recording_folder: str, filename_without_extension: str, vehicle_id: int, begin_at: float,

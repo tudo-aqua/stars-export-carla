@@ -83,6 +83,14 @@ class ThreadWorker(threading.Thread):
                     break
                 clean = line.rstrip()
                 self.log(clean)
+            if not self.cancelled:
+                try:
+                    rc = self._proc.wait(timeout=10)
+                except Exception:
+                    rc = None
+                if rc not in (0, None):
+                    self.log(f"!! [Runner] Process exited abnormally with code {rc} "
+                             f"- the task did NOT finish successfully.")
         finally:
             self._kill_tree()
 

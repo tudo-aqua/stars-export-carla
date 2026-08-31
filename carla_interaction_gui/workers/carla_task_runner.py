@@ -64,8 +64,16 @@ def run_transform(args):
 
         if os.path.isdir(in_path):
             print(f">> [Runner] Batch transform from root folder: {in_path}")
+            processed = 0
 
-            # Iterate over Town* subfolders
+            recording_exts = {".log", ".rec", ".zip"}
+            cfg_ext = (getattr(args, "recording_ext", "") or "").strip().lower()
+            if cfg_ext:
+                if not cfg_ext.startswith("."):
+                    cfg_ext = "." + cfg_ext
+                recording_exts.add(cfg_ext)
+
+            # ── Structured mode: Town* subfolders with recording/weather pairs ──
             for entry in sorted(os.listdir(in_path)):
                 sub = os.path.join(in_path, entry)
                 if not os.path.isdir(sub):
@@ -75,7 +83,7 @@ def run_transform(args):
 
                 print(f">> [Runner] Searching in subfolder: {sub}")
 
-                # Build pairs of recording_seed_n.zip ↔ weather_data_seed_n.zip
+                # Build pairs of recording_seed_n.zip <-> weather_data_seed_n.zip
                 names = set(os.listdir(sub))
                 for fname in sorted(names):
                     m = re.match(r"recording_seed_(\d+)\.zip$", fname)
@@ -106,8 +114,41 @@ def run_transform(args):
                     unzipped_weather_path = weather_path.replace(".zip", ".json")
 
                     _run_single(unzipped_recording_path, unzipped_weather_path)
+                    processed += 1
 
-            print(">> [Runner] Batch transform finished.")
+            # Flat mode: recordings sitting directly in the root folder
+            for fname in sorted(os.listdir(in_path)):
+                fpath = os.path.join(in_path, fname)
+                if not os.path.isfile(fpath):
+                    continue
+                # Skip files that belong to the structured mode handled above.
+                if re.match(r"recording_seed_\d+\.zip$", fname):
+                    continue
+                if fname.startswith("weather_data_seed_"):
+                    continue
+
+                ext = os.path.splitext(fname)[1].lower()
+                if ext not in recording_exts:
+                    continue
+
+                recording_path = fpath
+                if ext == ".zip":
+                    with zipfile.ZipFile(fpath, 'r') as zip_ref:
+                        zip_ref.extractall(os.path.dirname(fpath))
+                    recording_path = fpath[:-4] + ".log"
+
+                print(f">> [Runner] Found flat recording: {recording_path}")
+                _run_single(recording_path, "")
+                processed += 1
+
+            if processed == 0:
+                print(f">> [Runner] WARNING: No transformable recordings found in '{in_path}'. "
+                      f"Expected either Town*/recording_seed_N.zip (+ weather_data_seed_N.zip) "
+                      f"pairs, or recording files ({', '.join(sorted(recording_exts))}) "
+                      f"directly in the folder.")
+
+            print(f">> [Runner] Batch transform finished. "
+                  f"({processed} recording(s) processed)")
 
         else:
             # Original single-file behaviour (still supported)
@@ -155,14 +196,6 @@ def run_record_video(args):
             begin_at=max(0.0, args.begin_at or 0.0),
             end_at=end_at,
         )
-
-        print(">> [Runner] Encoding mp4")
-        stemless = __import__("os").path.splitext(__import__("os").path.basename(args.input))[0]
-        if args.with_bboxes:
-            rec.save_video(args.output, stemless, args.vehicle_id, max(0.0, args.begin_at or 0.0), rec.END_AT, True)
-        else:
-            rec.save_video(args.output, stemless, args.vehicle_id, max(0.0, args.begin_at or 0.0), rec.END_AT)
-
         print(">> [Runner] Video export finished.")
     except Exception:
         traceback.print_exc()
@@ -394,6 +427,9 @@ def main():
     pt.add_argument("--input", required=True, help="Input recording file (.log/.zip/etc.)")
     pt.add_argument("--output", required=True, help="Output folder for JSON/zip")
     # NEW: CLI to control sampling
+    pt.add_argument("--recording-ext", dest="recording_ext", default="",
+                    help="Recording file extension to pick up in flat-folder batch mode "
+                         "(in addition to .log/.rec/.zip)")
     pt.add_argument("--only-track-at-specific-interval", action="store_true", default=False)
     pt.add_argument("--specific-track-interval", type=float, default=0.5)
     pt.set_defaults(_fn=run_transform)

@@ -260,7 +260,16 @@ class CarlaCameraRecorder:
             spectator.set_transform(carla.Transform(transform.location, transform.rotation))
             print(f">> [CARLA] Tick {tick:05d} of {total_ticks:05d}. Simulation Time: {current_time:.3f}s")
 
-        self.client.reload_world()
+        try:
+            ego_cam.stop()
+            ego_cam.destroy()
+        except Exception:
+            pass
+
+        CarlaCameraRecorder.save_video(
+            recording_folder, filename_without_extension, vehicle_id,
+            begin_at, CarlaCameraRecorder.END_AT, bounding_boxes=True,
+        )
 
         if filename.endswith(".zip"):
             JSONHelper.delete_file(log_data_path)
@@ -385,7 +394,13 @@ class CarlaCameraRecorder:
 
         images = [img for img in images_in_folder if img.endswith(".jpg")]
 
-        images = images[0:-1]
+        if len(images) == 0:
+            print(">> [IO] There are no images with the extension .jpg to save as video")
+            return
+
+        images.sort()
+        if len(images) != 1:
+            images = images[0:-1]
 
         frame = cv2.imread(os.path.join(image_folder, images[0]))
         height, width, layers = frame.shape
