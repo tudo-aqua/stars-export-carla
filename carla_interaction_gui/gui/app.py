@@ -414,7 +414,18 @@ class CarlaInteractionGUI(tk.Tk):
         sys.stdout = sys.stderr = _TextOutputHandler(self)
 
     def log(self, txt: str):
-        """Logs a given text message to the GUI text widget and also appends it to a file."""
+        """Logs a given text message to the GUI text widget, the log file, and the real terminal."""
+        # sys.__stdout__ is the original stdout Python captured at startup and
+        # never reassigned by anything - unlike sys.stdout, which
+        # _redirect_console() points at the GUI widget instead. Writing here
+        # lets output (including from worker subprocesses, which all funnel
+        # through this method as their log callback) survive in the terminal
+        # even if the GUI window closes right after a crash.
+        try:
+            print(txt, file=sys.__stdout__, flush=True)
+        except Exception:
+            pass
+
         self.log_widget.configure(state="normal")
         self.log_widget.insert("end", txt + "\n")
         self.log_widget.see("end")

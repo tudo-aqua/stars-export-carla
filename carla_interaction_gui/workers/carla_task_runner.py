@@ -568,4 +568,12 @@ def main():
 
 
 if __name__ == "__main__":
+    # A crash inside CARLA's native client (e.g. a segfault) kills the
+    # process directly, bypassing Python's exception handling entirely - no
+    # `except Exception` ever runs, and there is no Python stack trace to
+    # print for it. faulthandler at least dumps the low-level C stack for
+    # fatal signals to stderr, which the GUI streams into its persisted log
+    # file, so something survives after the window closes.
+    import faulthandler
+    faulthandler.enable()
     sys.exit(main() or 0)

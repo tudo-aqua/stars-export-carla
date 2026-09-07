@@ -8,10 +8,22 @@ from typing import Callable, Any
 import carla
 import psutil
 
+# Must match the --name given to the container in carla_run.sh.
+CARLA_DOCKER_CONTAINER_NAME = "carla_server"
+
 
 def kill_carla(log: Callable[[str], None] | None = None) -> None:
     """
     Terminate every running Unreal-Engine (CARLA) process on the host.
+
+    On Windows, CARLA runs as a plain native process, so finding and killing
+    it by name (below) is enough. On Linux this project instead runs CARLA
+    inside a Docker container (see carla_run.sh): the game binary lives in
+    the container's own PID namespace under the docker daemon, so killing
+    that process directly (even where psutil can see it) doesn't reliably
+    stop the container - it can linger holding the host network (--net=host,
+    port 2000), blocking the next restart. On Linux we therefore also kill
+    the container itself, by name, via the docker CLI.
 
     Parameters
     ----------
@@ -32,6 +44,29 @@ def kill_carla(log: Callable[[str], None] | None = None) -> None:
                 proc.kill()
             except psutil.NoSuchProcess:
                 pass
+            except psutil.AccessDenied:
+                # E.g. a process left behind by a differently-invoked docker
+                # run (different UID mapping) that this user can't signal
+                # directly. Not fatal here - on Linux the docker-kill below
+                # (or a manual cleanup) is the real way to remove it; don't
+                # let it abort the whole restart/transform.
+                _log(f">> [CARLA] Warning: no permission to kill {proc.info['name']} "
+                     f"(pid={proc.pid}); leaving it running")
+
+    if sys.platform.startswith("linux"):
+        try:
+            result = subprocess.run(
+                ["docker", "kill", CARLA_DOCKER_CONTAINER_NAME],
+                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=10,
+            )
+            if result.returncode == 0:
+                _log(f">> [CARLA] Killed docker container '{CARLA_DOCKER_CONTAINER_NAME}'")
+            # A non-zero exit here just means no such container was running,
+            # which is the common/expected case - nothing to log.
+        except FileNotFoundError:
+            pass  # docker CLI not installed/on PATH; nothing we can do
+        except subprocess.TimeoutExpired:
+            _log(">> [CARLA] 'docker kill' timed out")
 
 
 def start_carla(
