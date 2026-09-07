@@ -36,10 +36,32 @@ def game_loop(args):
     pygame.init()
     pygame.font.init()
     world = None
+    carla_world = None
+    is_synchronous_master = False
 
     try:
         client = carla.Client(host="127.0.0.1", port=2000)
         client.set_timeout(2.0)
+
+        carla_world = client.get_world()
+        traffic_manager = client.get_trafficmanager(8000)  # CARLA default TM port
+
+        # Vehicle physics (tire/suspension) is only numerically stable when
+        # stepped with a small, consistent delta time. Asynchronous mode
+        # ticks with whatever the server's real frame time happens to be,
+        # which causes autopilot-driven vehicles near the ego to oversteer
+        # and crash. Only take over as the synchronous "tick master" if
+        # nobody else already has (e.g. avoid hijacking another session).
+        settings = carla_world.get_settings()
+        if not settings.synchronous_mode:
+            is_synchronous_master = True
+            settings.synchronous_mode = True
+            settings.fixed_delta_seconds = 0.05
+            settings.substepping = True
+            settings.max_substep_delta_time = 0.01
+            settings.max_substeps = 16
+            carla_world.apply_settings(settings)
+        traffic_manager.set_synchronous_mode(True)
 
         display = pygame.display.set_mode(
             size=(0, 0),
@@ -48,13 +70,14 @@ def game_loop(args):
         display_size = pygame.display.get_surface().get_size()
 
         hud = HUD(display_size[0], display_size[1])
-        world = World(client.get_world(), hud, actor_filter=args.filter, role_name=args.rolename)
+        world = World(carla_world, hud, actor_filter=args.filter, role_name=args.rolename)
         controller = KeyboardControl(world, start_in_autopilot=False)
 
         clock = pygame.time.Clock()
         while True:
             clock.tick_busy_loop(60)
-            if controller.parse_events(client, world, clock, sync_mode=False):
+            carla_world.tick()
+            if controller.parse_events(client, world, clock, sync_mode=True):
                 return
 
             world.tick(clock)
@@ -64,6 +87,20 @@ def game_loop(args):
     finally:
         if world is not None:
             world.destroy()
+
+        # Revert the world (and Traffic Manager) back to asynchronous mode
+        # only if we're the one who switched it, and only if the server is
+        # still reachable - otherwise leaving it stuck in synchronous mode
+        # would freeze any other client since nobody would be left to tick it.
+        if is_synchronous_master and carla_world is not None:
+            try:
+                settings = carla_world.get_settings()
+                settings.synchronous_mode = False
+                settings.fixed_delta_seconds = None
+                carla_world.apply_settings(settings)
+                client.get_trafficmanager(8000).set_synchronous_mode(False)
+            except RuntimeError:
+                pass
 
         pygame.quit()
 

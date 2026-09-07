@@ -67,7 +67,12 @@ class CarlaDataGenerator:
         random.seed(args.seed if args.seed is not None else int(time.time()))
 
         traffic_manager = client.get_trafficmanager(args.tm_port)
-        traffic_manager.set_global_distance_to_leading_vehicle(2.5)
+        # 2.5m bumper-to-bumper is only a safe gap at low/urban speeds. At
+        # highway speed it's a fraction of a second of following distance,
+        # so dense highway traffic constantly triggers the TM's collision
+        # avoidance into hard braking/evasive steering. Give it more margin
+        # so those emergency maneuvers are rarer and less violent.
+        traffic_manager.set_global_distance_to_leading_vehicle(5.0)
         if args.respawn:
             traffic_manager.set_respawn_dormant_vehicles(True)
         if args.hybrid:
@@ -86,12 +91,41 @@ class CarlaDataGenerator:
             else:
                 synchronous_master = False
         else:
-            print("You are currently in asynchronous mode. If this is a traffic simulation, \
-                you could experience some issues. If it's not working correctly, switch to synchronous \
-                mode by using traffic_manager.set_synchronous_mode(True)")
+            # We're injecting traffic into an already-running session (e.g.
+            # a manual-driving session) instead of driving the world
+            # ourselves, so never touch synchronous_mode/fixed_delta_seconds
+            # here. But the world's synchronous_mode and the Traffic
+            # Manager's own synchronous_mode are independent flags, and the
+            # TM is a server-side singleton keyed by tm_port that outlives
+            # this client - so match the TM's mode to whatever the world's
+            # *actual* current mode already is instead of assuming it's
+            # async. Forcing a mismatch here (e.g. TM async while the
+            # world is actually synchronous) desyncs the TM's control loop
+            # from the real physics steps, which is exactly what makes
+            # TM-controlled vehicles oversteer and crash.
+            traffic_manager.set_synchronous_mode(settings.synchronous_mode)
+            synchronous_master = False
+            if not settings.synchronous_mode:
+                print("You are currently in asynchronous mode. If this is a traffic simulation, \
+                    you could experience some issues. If it's not working correctly, switch to synchronous \
+                    mode by using traffic_manager.set_synchronous_mode(True)")
 
         if args.no_rendering:
             settings.no_rendering_mode = True
+
+        # Widen the physics substep budget (PhysX default is 10 substeps of
+        # 0.01s = 0.1s of coverage per tick, i.e. it only stays numerically
+        # stable down to ~10 FPS). In asynchronous mode the tick delta is
+        # whatever the server's real frame time is, and that frame time gets
+        # worse the more vehicles are simulated with full physics nearby
+        # (hybrid physics mode only exempts vehicles outside its radius).
+        # A hard brake/evasive-steer command integrated over too few
+        # substeps for the actual elapsed time is exactly what produces the
+        # oversteering/crashing seen during emergency maneuvers in dense
+        # traffic near the ego. 16 is the maximum CARLA/PhysX allows.
+        settings.substepping = True
+        settings.max_substep_delta_time = 0.01
+        settings.max_substeps = 16
         world.apply_settings(settings)
 
         blueprints = self.get_actor_blueprints(world, args.filterv, args.generationv)
@@ -238,7 +272,14 @@ class CarlaDataGenerator:
         # Example of how to use Traffic Manager parameters
         traffic_manager.global_percentage_speed_difference(30.0)
 
-        world.tick()
+        # Only tick here if we are the one driving synchronous mode. In
+        # asynchronous mode (e.g. injecting traffic into an already-running
+        # session) ticking would either error out or, worse, leave the world
+        # stuck in synchronous mode with nobody left to advance it, freezing
+        # any other client (such as a manual-driving session) that expects
+        # the world to keep running on its own.
+        if not args.asynch and synchronous_master:
+            world.tick()
 
         return vehicles_list
 
@@ -567,6 +608,12 @@ class CarlaDataGenerator:
             print("Warning: failed to save weather info:", e)
 
         # Reset world and clean up actors (same as your main tail)
+        # Also reset the Traffic Manager's own synchronous_mode: it is a
+        # server-side singleton (keyed by tm_port) independent from the
+        # world's synchronous_mode, and leaving it set to True here would
+        # desync any later asynchronous session's Traffic Manager, causing
+        # TM-controlled vehicles to oversteer and crash.
+        client.get_trafficmanager(args.tm_port).set_synchronous_mode(False)
         settings = world.get_settings()
         settings.synchronous_mode = False
         settings.no_rendering_mode = False

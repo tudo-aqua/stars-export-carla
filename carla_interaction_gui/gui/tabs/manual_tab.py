@@ -7,6 +7,7 @@ from carla_interaction_gui.gui.constants import ALLOWED_CARLA_MAPS
 from carla_interaction_gui.gui.widgets import entry_row
 from carla_interaction_gui.workers.ManualControlWorker import ManualControlWorker
 from carla_interaction_gui.workers.MoveLatestRecordingWorker import MoveLatestRecordingWorker
+from carla_interaction_gui.workers.SpawnTrafficWorker import SpawnTrafficWorker
 from carla_interaction_gui.workers.SteeringWheelControlWorker import SteeringWheelControlWorker
 
 
@@ -68,6 +69,9 @@ class ManualTab(ttk.Frame):
         tk.Button(row2, text="Truck",
                   command=lambda: self._spawn_manual_extra(filter_str="vehicle.carlamotors.carlacola")
                   ).pack(side="left", padx=2)
+
+        entry_row(self, "Number of vehicles to spawn:", app.manual_spawn_traffic_num_vehicles_variable)
+        tk.Button(self, text="Spawn random traffic", command=self._spawn_random_traffic).pack(pady=2)
 
         tk.Button(self, text="Move 'manual_recording'", command=self._move_latest, state="active").pack(pady=2)
 
@@ -132,6 +136,24 @@ class ManualTab(ttk.Frame):
             kill_server_after=False,
             exclusive=False,
         )
+        app.manual_workers.append(w)
+        app.attach_worker(w)
+
+    def _spawn_random_traffic(self):
+        """
+        Spawn a batch of random autopilot vehicles into the currently running
+        CARLA server, without rebooting/killing it.
+        """
+        app = self.app
+        if not app.validate_paths([("CARLA executable", app.carla_executable_variable, "file")]):
+            return
+
+        try:
+            number_of_vehicles = max(1, int(app.manual_spawn_traffic_num_vehicles_variable.get()))
+        except (tk.TclError, ValueError):
+            return messagebox.showerror("Invalid value", "Number of vehicles to spawn must be a whole number.")
+
+        w = SpawnTrafficWorker(app.collect_cfg(), app.log, number_of_vehicles=number_of_vehicles)
         app.manual_workers.append(w)
         app.attach_worker(w)
 

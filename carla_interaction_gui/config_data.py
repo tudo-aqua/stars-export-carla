@@ -18,6 +18,7 @@ class Config:
     manual_output_dir: str = ""
     default_recordings_folder: str = ""
     new_file_name: str = ""
+    manual_spawn_traffic_num_vehicles: int = 30
 
     transform_input_file: str = ""
     transformer_output_path: str = ""

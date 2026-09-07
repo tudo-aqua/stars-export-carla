@@ -326,6 +326,61 @@ def run_recgen_once(args):
     print(f">> [RecGen-Once] seed {args.seed} finished")
 
 
+def run_spawn_traffic(args):
+    """
+    Connect to an already-running CARLA server and spawn a batch of
+    autopilot-driven vehicles and walkers into the current world, using the
+    same routine as the recording generator's traffic setup.
+    """
+    import time
+    import carla
+    from types import SimpleNamespace
+    from helpers.carla_recording_generator import CarlaDataGenerator
+
+    client = carla.Client('localhost', 2000)
+    client.set_timeout(20.0)
+
+    try:
+        world = client.get_world()
+        _ = world.wait_for_tick(10.0)
+    except Exception:
+        time.sleep(1.0)
+
+    generator = CarlaDataGenerator(client)
+    world = generator.world
+
+    tm_args = SimpleNamespace(
+        seed=None,
+        tm_port=8000,
+        respawn=False,
+        hybrid=True,
+        # We are injecting traffic into an already-running session (e.g. a
+        # manual-driving session) rather than driving the world ourselves.
+        # Whatever tick mode that session is already using (synchronous or
+        # not), generate_traffic() leaves synchronous_mode/fixed_delta_seconds
+        # alone and just matches the Traffic Manager's own mode to it -
+        # setting our own assumption here would either hijack that session's
+        # world settings (freezing it once this process exits and nobody is
+        # left to tick) or desync the Traffic Manager from the world's
+        # actual tick mode (causing autopilot vehicles to go unstable).
+        asynch=True,
+        no_rendering=False,
+        hero=False,
+        car_lights_on=False,
+        number_of_vehicles=args.number_of_vehicles,
+        number_of_walkers=args.number_of_walkers,
+        filterv=args.filterv,
+        generationv=args.generationv,
+        filterw=args.filterw,
+        generationw=args.generationw,
+    )
+
+    print(f">> [SpawnTraffic] spawning {args.number_of_vehicles} vehicles "
+          f"and {args.number_of_walkers} walkers")
+    generator.generate_traffic(tm_args, client, world)
+    print(">> [SpawnTraffic] done")
+
+
 def run_recgen(args):
     """
     For each seed:
@@ -494,6 +549,16 @@ def main():
     pr1.add_argument("--number-of-parked", type=int, default=0)
 
     pr1.set_defaults(_fn=run_recgen_once)
+
+    # spawn_traffic (expects server to be running, e.g. from a manual driving session)
+    pst = sub.add_parser("spawn_traffic", help="Spawn random autopilot traffic into the running world")
+    pst.add_argument("--number-of-vehicles", type=int, default=30)
+    pst.add_argument("--number-of-walkers", type=int, default=10)
+    pst.add_argument("--filterv", default="vehicle.*")
+    pst.add_argument("--generationv", default="All")
+    pst.add_argument("--filterw", default="walker.pedestrian.*")
+    pst.add_argument("--generationw", default="2")
+    pst.set_defaults(_fn=run_spawn_traffic)
 
     # Duration (minutes)
     pr.add_argument("--length-of-run", type=float, default=5.0)
