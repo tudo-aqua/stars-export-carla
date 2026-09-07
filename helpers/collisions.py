@@ -49,8 +49,10 @@ class RecorderIndex:
 
         # Patterns
         frame_hdr = re.compile(rf"^Frame\s+(\d+)\s+at\s+({_FLOAT})\s+seconds$")
+        # Blueprint ids can contain hyphens (e.g. "vehicle.harley-davidson.low_rider",
+        # "vehicle.mercedes-benz.coupe"), so "-" must be in the id character class.
         create_re = re.compile(
-            rf"^\s*Create\s+(\d+):\s+([A-Za-z0-9_.]+)\s+\(\d+\)\s+at\s+\(({_FLOAT}),\s*({_FLOAT}),\s*({_FLOAT})\)\s*$"
+            rf"^\s*Create\s+(\d+):\s+([A-Za-z0-9_.-]+)\s+\(\d+\)\s+at\s+\(({_FLOAT}),\s*({_FLOAT}),\s*({_FLOAT})\)\s*$"
         )
         role_re = re.compile(r"^\s*role_name\s*=\s*(.+)$")
         # allow optional "(hero)" (or similar) after both IDs

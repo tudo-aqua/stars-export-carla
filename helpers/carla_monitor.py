@@ -130,20 +130,23 @@ class CarlaMonitor:
 
             vehicles = []
 
-            # Start replay of simulation and step once to let actors spawn
+            # Start replay of simulation and step until actors spawn. Don't tick
+            # again after vehicles first appear: any extra tick between this
+            # snapshot and create_recorder_to_sim_id_map()'s own world.get_actors()
+            # call lets already-moving (e.g. highway-speed) vehicles drift away
+            # from their logged "Create" position, which can push them outside
+            # the tight position_tolerance_m used below and break the id mapping.
             api_helper.start_replaying(log_data_path)
-            world.tick()
-
             while len(vehicles) == 0:
-                vehicles = api_helper.get_vehicles()
                 world.tick()
+                vehicles = api_helper.get_vehicles()
 
             vehicle_id_mapping = CarlaAPIHelper.create_recorder_to_sim_id_map(world, info,
                                                                               actor_filters=("vehicle.*",),
                                                                               position_tolerance_m=1)
             reverse_vehicle_id_mapping = {v: k for k, v in vehicle_id_mapping.items()}
             if len(vehicle_id_mapping) != len(vehicles):
-                print(">> [CARLA] The vehicle id mapping is not equal to the vehicle id")
+                print(f">> [CARLA] The vehicle id mapping is not equal to the vehicle id: [vehicle_id_mapping] = {len(vehicle_id_mapping)}, [vehicles] = {len(vehicles)}")
                 return
 
             # Best-effort only (unlike vehicles above): used solely to look up recorded
@@ -276,7 +279,7 @@ class CarlaMonitor:
 
             print(">> [Data-AV Transformer] Analysis complete.")
             print(">> [IO] Save data to disk.")
-            file_name = os.path.basename(log_data_path).split(".")[0]
+            file_name = os.path.splitext(os.path.basename(log_data_path))[0]
             save_file_name = os.path.join(result_file_path, f"{JSONHelper.DYNAMIC_FILE_NAME_PREFIX}_{file_name}.json")
             saved_dynamic_data = api_helper.save_dynamic_data(ticks=ticks, file_path=save_file_name)
             JSONHelper.zip_and_delete_file(save_file_name)

@@ -19,6 +19,7 @@ class Config:
     default_recordings_folder: str = ""
     new_file_name: str = ""
     manual_spawn_traffic_num_vehicles: int = 30
+    manual_spawn_traffic_enabled: bool = False
 
     transform_input_file: str = ""
     transformer_output_path: str = ""

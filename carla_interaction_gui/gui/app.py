@@ -48,6 +48,8 @@ class CarlaInteractionGUI(tk.Tk):
         self.new_file_name_variable = tk.StringVar(value=self.config.new_file_name)
         self.manual_spawn_traffic_num_vehicles_variable = tk.IntVar(
             value=getattr(self.config, "manual_spawn_traffic_num_vehicles", 30))
+        self.manual_spawn_traffic_enabled_variable = tk.BooleanVar(
+            value=getattr(self.config, "manual_spawn_traffic_enabled", False))
 
         self.transform_input_file_variable = tk.StringVar(value=self.config.transform_input_file)
         self.transformer_output_path_variable = tk.StringVar(value=self.config.transformer_output_path)
@@ -218,6 +220,7 @@ class CarlaInteractionGUI(tk.Tk):
         config.default_recordings_folder = self.default_recordings_folder_variable.get().strip()
         config.new_file_name = self.new_file_name_variable.get().strip()
         config.manual_spawn_traffic_num_vehicles = max(1, int(self.manual_spawn_traffic_num_vehicles_variable.get()))
+        config.manual_spawn_traffic_enabled = bool(self.manual_spawn_traffic_enabled_variable.get())
         config.transform_input_file = self.transform_input_file_variable.get().strip()
         config.transformer_output_path = self.transformer_output_path_variable.get().strip()
         config.video_input_file = self.video_input_path_variable.get().strip()
@@ -281,6 +284,7 @@ class CarlaInteractionGUI(tk.Tk):
                 self.default_recordings_folder_variable,
                 self.new_file_name_variable,
                 self.manual_spawn_traffic_num_vehicles_variable,
+                self.manual_spawn_traffic_enabled_variable,
                 self.transform_input_file_variable,
                 self.transformer_output_path_variable,
                 self.video_input_path_variable,

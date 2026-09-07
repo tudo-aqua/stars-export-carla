@@ -144,8 +144,13 @@ class CarlaAPIHelper:
 
         # Regexes
         # e.g. "Create 24: spectator (0) at (10828, 30786, 431)"
+        # CARLA vehicle blueprint ids can contain hyphens (e.g.
+        # "vehicle.harley-davidson.low_rider", "vehicle.mercedes-benz.coupe"),
+        # so "-" must be part of the id character class or those ids get
+        # silently truncated (e.g. to "vehicle.harley"), breaking the exact
+        # type_id matching below for that actor.
         create_rx = re.compile(
-            r"Create\s+(\d+)\s*:\s*([A-Za-z0-9_.]+|traffic\s+light|spectator)",
+            r"Create\s+(\d+)\s*:\s*([A-Za-z0-9_.-]+|traffic\s+light|spectator)",
             re.IGNORECASE
         )
         # Fallback id patterns (covers normalized "Id: 24", "Actor 24", etc.)
@@ -153,7 +158,7 @@ class CarlaAPIHelper:
 
         # Type patterns (now also accept bare labels like 'spectator' or 'traffic light')
         type_rx = re.compile(
-            r"(vehicle\.[\w\.]+|walker\.[\w\.]+|sensor\.[\w\.]+|static\.[\w\.]+|traffic\.traffic_light|traffic\s+light|spectator)",
+            r"(vehicle\.[\w.-]+|walker\.[\w.-]+|sensor\.[\w.-]+|static\.[\w.-]+|traffic\.traffic_light|traffic\s+light|spectator)",
             re.IGNORECASE
         )
         role_rx = re.compile(r"role_name\s*[=:]\s*([^\s,)\]]+)", re.IGNORECASE)
