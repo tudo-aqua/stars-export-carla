@@ -80,7 +80,7 @@ class ManualTab(ttk.Frame):
         app = self.app
         if not app.validate_paths([
             ("CARLA executable", app.carla_executable_variable, "file"),
-            ("CARLA output folder", app.manual_output_dir_variable, "dir"),
+            # ("CARLA output folder", app.manual_output_dir_variable, "dir"),
         ]):
             return
         app.clear_log()

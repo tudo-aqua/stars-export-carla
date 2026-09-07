@@ -32,7 +32,7 @@ class CarlaInteractionGUI(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("CARLA interaction GUI")
-        self.geometry("950x800")
+        self.geometry("3000x2000")
         self.resizable(True, True)
 
         self._current_stop_button: tk.Button | None = None

@@ -28,18 +28,19 @@ class SteeringWheelControl(object):
         self._autopilot_enabled = False
         self._recording = False
         self._client = client
+        self._world = world
         self._hud = world.hud
-        if isinstance(world.player, carla.Vehicle):
+        if isinstance(self._world.player, carla.Vehicle):
             self._control = carla.VehicleControl()
-            world.player.set_autopilot(self._autopilot_enabled)
-        elif isinstance(world.player, carla.Walker):
+            self._world.player.set_autopilot(self._autopilot_enabled)
+        elif isinstance(self._world.player, carla.Walker):
             self._control = carla.WalkerControl()
             self._autopilot_enabled = False
-            self._rotation = world.player.get_transform().rotation
+            self._rotation = self._world.player.get_transform().rotation
         else:
             raise NotImplementedError("Actor type not supported")
         self._steer_cache = 0.0
-        world.hud.notification("Press 'H' or '?' for help.", seconds=4.0)
+        self._hud.notification("Press 'H' or '?' for help.", seconds=4.0)
 
         # initialize steering wheel
         pygame.joystick.init()
@@ -50,6 +51,9 @@ class SteeringWheelControl(object):
 
         self._wheel = pygame.joystick.Joystick(0)
         self._wheel.init()
+
+        self._vehicle_blueprints = world.world.get_blueprint_library().filter("vehicle.*")
+        self._current_index = 0
 
         self._parser = ConfigParser()
         self._parser.read(str(Path(__file__).resolve().parent / 'wheel_config.ini'))
@@ -63,20 +67,22 @@ class SteeringWheelControl(object):
         self._btn_wiper = int(self._parser.get('Fanatec', 'btn_wiper'))
         self._btn_burger = int(self._parser.get('Fanatec', 'btn_burger'))
         self._btn_horn = int(self._parser.get('Fanatec', 'btn_horn'))
+        self._btn_next_vehicle = int(self._parser.get('Fanatec', 'btn_next_vehicle'))
+        self._btn_previous_vehicle = int(self._parser.get('Fanatec', 'btn_previous_vehicle'))
 
 
-    def parse_events(self, world, clock) -> bool:
+    def parse_events(self, clock) -> bool:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return True
 
             elif event.type == pygame.JOYBUTTONDOWN:
                 if event.button == self._btn_burger:
-                    world.hud.toggle_info()
+                    self._world.hud.toggle_info()
                 elif event.button == self._btn_eye:
-                    world.camera_manager.toggle_camera()
+                    self._world.camera_manager.toggle_camera()
                 elif event.button == self._btn_wiper:
-                    world.next_weather()
+                    self._world.next_weather()
                 elif event.button == self._btn_park:
                     self._control.gear = 1 if self._control.reverse else -1
                 elif event.button == self._btn_horn:
@@ -93,15 +99,23 @@ class SteeringWheelControl(object):
                         self._hud.notification('Recording Off')
                         self._recording = False
                 elif event.button == self._btn_flasher_left:
-                    if world.player.get_light_state() == carla.VehicleLightState.LeftBlinker:
-                        world.player.set_light_state(carla.VehicleLightState.NONE)
+                    if self._world.player.get_light_state() == carla.VehicleLightState.LeftBlinker:
+                        self._world.player.set_light_state(carla.VehicleLightState.NONE)
                     else:
-                        world.player.set_light_state(carla.VehicleLightState.LeftBlinker)
+                        self._world.player.set_light_state(carla.VehicleLightState.LeftBlinker)
                 elif event.button == self._btn_flasher_right:
-                    if world.player.get_light_state() == carla.VehicleLightState.RightBlinker:
-                        world.player.set_light_state(carla.VehicleLightState.NONE)
+                    if self._world.player.get_light_state() == carla.VehicleLightState.RightBlinker:
+                        self._world.player.set_light_state(carla.VehicleLightState.NONE)
                     else:
-                        world.player.set_light_state(carla.VehicleLightState.RightBlinker)
+                        self._world.player.set_light_state(carla.VehicleLightState.RightBlinker)
+                # elif event.button == self._btn_next_vehicle:
+                #     self._current_index = (self._current_index + 1) % len(self._vehicle_blueprints)
+                #     self._change_vehicle()
+                # elif event.button == self._btn_previous_vehicle:
+                #     self._current_index = (self._current_index + -1) % len(self._vehicle_blueprints)
+                #     self._change_vehicle()
+                else:
+                    print(f"Unregistered button: {event.button}")
 
         if not self._autopilot_enabled:
             if isinstance(self._control, carla.VehicleControl):
@@ -110,7 +124,7 @@ class SteeringWheelControl(object):
                 self._control.reverse = self._control.gear < 0
             elif isinstance(self._control, carla.WalkerControl):
                 self._parse_walker_keys(pygame.key.get_pressed(), clock.get_time())
-            world.player.apply_control(self._control)
+            self._world.player.apply_control(self._control)
 
         return False
 
@@ -178,6 +192,53 @@ class SteeringWheelControl(object):
         self._control.jump = keys[K_SPACE]
         self._rotation.yaw = round(self._rotation.yaw, 1)
         self._control.direction = self._rotation.get_forward_vector()
+
+    # def _change_vehicle(self):
+    #     if not self._vehicle_blueprints:
+    #         self._hud.notification("Keine Fahrzeug-Blueprints gefunden")
+    #         return
+    #
+    #     old_vehicle = self._world.player
+    #
+    #     if old_vehicle is None or not old_vehicle.is_alive:
+    #         self._hud.notification("Aktuelles Fahrzeug ist nicht aktiv")
+    #         return
+    #
+    #     transform = old_vehicle.get_transform()
+    #     blueprint = self._vehicle_blueprints[self._current_index]
+    #
+    #     # Altes Fahrzeug entfernen
+    #     old_vehicle.destroy()
+    #
+    #     # Referenz zunächst löschen
+    #     self._world.player = None
+    #
+    #     # Neues Fahrzeug an gleicher Position erzeugen
+    #     new_vehicle = self._world.world.try_spawn_actor(
+    #         blueprint,
+    #         transform
+    #     )
+    #
+    #     if new_vehicle is None:
+    #         self._hud.notification(
+    #             f"Spawn fehlgeschlagen: {blueprint.id}"
+    #         )
+    #         return
+    #
+    #     # Neues Fahrzeug setzen
+    #     self._world.player = new_vehicle
+    #
+    #     # Manual Control neu initialisieren
+    #     self._control = carla.VehicleControl()
+    #     self._autopilot_enabled = False
+    #
+    #     new_vehicle.set_autopilot(False)
+    #
+    #     self._hud.notification(
+    #         f"{self._current_index + 1}/"
+    #         f"{len(self._vehicle_blueprints)}: "
+    #         f"{blueprint.id}"
+    #     )
 
     @staticmethod
     def _is_quit_shortcut(key):

@@ -86,7 +86,7 @@ class TransformTab(ttk.Frame):
         app = self.app
         if not app.validate_paths([
             ("CARLA executable", app.carla_executable_variable, "file"),
-            ("Input recording", app.transform_input_file_variable, ("dir", "file")),
+            # ("Input recording", app.transform_input_file_variable, ("dir", "file")),
             ("Output folder", app.transformer_output_path_variable, "dir"),
         ]):
             return

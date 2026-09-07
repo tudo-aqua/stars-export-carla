@@ -55,7 +55,7 @@ def game_loop():
         clock = pygame.time.Clock()
         while True:
             clock.tick_busy_loop(60)
-            if controller.parse_events(world, clock):
+            if controller.parse_events(clock):
                 return
 
             world.tick(clock)
