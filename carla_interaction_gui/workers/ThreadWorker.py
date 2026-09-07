@@ -66,6 +66,18 @@ class ThreadWorker(threading.Thread):
         else:
             creation["preexec_fn"] = os.setsid
 
+        # Python block-buffers stdout by default when it isn't a real
+        # terminal (as here, piped for streaming into the GUI log) - so
+        # print() output can sit in the child's buffer, unflushed, for a
+        # while. A hard crash (e.g. a native segfault) bypasses normal
+        # cleanup entirely and never flushes it, silently losing whatever
+        # was printed most recently - making the last *visible* line look
+        # like where the crash happened when it may actually be much
+        # further along. Force the child to flush every line immediately
+        # so the log always reflects its true, most recent state.
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
+
         self.log(">> [Runner] " + " ".join(cmd))
         self._proc = subprocess.Popen(
             cmd,
@@ -74,6 +86,7 @@ class ThreadWorker(threading.Thread):
             stderr=subprocess.STDOUT,
             text=True,
             cwd=cwd,
+            env=env,
             **creation
         )
         try:

@@ -28,13 +28,19 @@ class Config:
     specific_track_interval: float = 0.5
 
     video_input_file: str = ""
+    video_docker_mount_path: str = ""
     video_output_path: str = ""
     video_width: int = 640
     video_height: int = 480
+    video_fov: int = 105
     vehicle_id: int = -1
     begin_at: float = 0.0
     end_at: float = float("inf")
-    with_bboxes: bool = False
+    # Selected camera positions and their per-camera options, persisted as a
+    # JSON list of {"name": <CameraPosition member>, "metadata": bool, "bbox": bool}.
+    video_camera_positions: list[dict] | None = None
+    video_render_safety_boxes: bool = False
+    video_safety_box_style: str = "HATCHING"  # one of SafetyBoxStyle's members
 
     recgen_seed_start: int = 0
     recgen_num_scenarios: int = 1

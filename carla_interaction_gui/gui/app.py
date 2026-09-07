@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import queue
 import sys
 import tkinter as tk
 from datetime import datetime
@@ -9,6 +10,7 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext
 from carla_interaction_gui.carla_launcher import kill_carla
 from carla_interaction_gui.config_data import Config, load, save
 from carla_interaction_gui.gui.constants import ALLOWED_CARLA_MAPS
+from helpers.camera_recorder.CameraPosition import CameraPosition
 from carla_interaction_gui.gui.tabs.manual_tab import ManualTab
 from carla_interaction_gui.gui.tabs.maps_tab import MapsTab
 from carla_interaction_gui.gui.tabs.recgen_tab import RecGenTab
@@ -56,15 +58,36 @@ class CarlaInteractionGUI(tk.Tk):
             value=getattr(self.config, "transform_docker_mount_path", ""))
         self.transformer_output_path_variable = tk.StringVar(value=self.config.transformer_output_path)
         self.video_input_path_variable = tk.StringVar(value=self.config.video_input_file)
+        self.video_docker_mount_path_variable = tk.StringVar(
+            value=getattr(self.config, "video_docker_mount_path", ""))
         self.video_output_path_variable = tk.StringVar(value=self.config.video_output_path)
 
         self.video_width_variable = tk.IntVar(value=self.config.video_width)
         self.video_height_variable = tk.IntVar(value=self.config.video_height)
+        self.video_fov_variable = tk.IntVar(value=getattr(self.config, "video_fov", 105))
         self.vehicle_id_variable = tk.IntVar(value=self.config.vehicle_id)
-        self.with_bboxes_variable = tk.BooleanVar(value=self.config.with_bboxes)
         self.begin_at_variable = tk.StringVar(value=str(self.config.begin_at))
         end_at_default = -1 if self.config.end_at == float("inf") else self.config.end_at
         self.end_at_variable = tk.StringVar(value=str(end_at_default))
+
+        # One (selected, metadata, bbox) BooleanVar triple per CameraPosition,
+        # so the Record->MP4 tab can let the user pick which camera angles to
+        # render and whether each shows metadata text/bounding boxes.
+        self.video_camera_position_vars: dict[str, dict[str, tk.BooleanVar]] = {}
+        saved_positions = {
+            c.get("name"): c for c in (getattr(self.config, "video_camera_positions", None) or [])
+        }
+        for pos in CameraPosition:
+            saved = saved_positions.get(pos.name)
+            self.video_camera_position_vars[pos.name] = {
+                "selected": tk.BooleanVar(value=saved is not None),
+                "metadata": tk.BooleanVar(value=bool(saved.get("metadata")) if saved else False),
+                "bbox": tk.BooleanVar(value=bool(saved.get("bbox")) if saved else False),
+            }
+        self.video_render_safety_boxes_variable = tk.BooleanVar(
+            value=getattr(self.config, "video_render_safety_boxes", False))
+        self.video_safety_box_style_variable = tk.StringVar(
+            value=getattr(self.config, "video_safety_box_style", "HATCHING"))
 
         self.render_off_screen_variable = tk.BooleanVar(value=getattr(self.config, "render_off_screen", False))
         self.render_quality_low_variable = tk.BooleanVar(value=getattr(self.config, "render_quality_low", False))
@@ -114,6 +137,22 @@ class CarlaInteractionGUI(tk.Tk):
         self.log_widget = scrolledtext.ScrolledText(self, height=30, state="disabled")
         self.log_widget.pack(fill="both", expand=False, padx=4, pady=4)
         self._init_log_file()
+
+        # Every ThreadWorker subprocess (record_video, transform, recgen, ...)
+        # streams its output through log() from its own background thread,
+        # and sys.stdout/sys.stderr are globally redirected into it too (see
+        # _redirect_console below). Tcl/Tk is not thread-safe: mutating
+        # self.log_widget from any thread other than the one running
+        # mainloop() races with Tk's own event processing and corrupts the
+        # interpreter's internal state, which segfaults the whole process
+        # with no Python traceback - exactly the native crashes seen when
+        # driving these tasks from the GUI (they never reproduce running the
+        # same command from a plain shell, since there's no Tk widget to
+        # race against there). log() only ever enqueues; _drain_log_queue,
+        # scheduled here via after() and therefore always running on the
+        # main thread, is the only thing allowed to touch the widget.
+        self._log_queue: queue.Queue[str] = queue.Queue()
+        self.after(50, self._drain_log_queue)
 
         self._redirect_console()
         self._setup_autosave()
@@ -227,11 +266,18 @@ class CarlaInteractionGUI(tk.Tk):
         config.transform_docker_mount_path = self.transform_docker_mount_path_variable.get().strip()
         config.transformer_output_path = self.transformer_output_path_variable.get().strip()
         config.video_input_file = self.video_input_path_variable.get().strip()
+        config.video_docker_mount_path = self.video_docker_mount_path_variable.get().strip()
         config.video_output_path = self.video_output_path_variable.get().strip()
-        config.with_bboxes = self.with_bboxes_variable.get()
         config.video_width = self.video_width_variable.get()
         config.video_height = self.video_height_variable.get()
+        config.video_fov = self.video_fov_variable.get()
         config.vehicle_id = self.vehicle_id_variable.get()
+        config.video_camera_positions = [
+            {"name": name, "metadata": v["metadata"].get(), "bbox": v["bbox"].get()}
+            for name, v in self.video_camera_position_vars.items() if v["selected"].get()
+        ]
+        config.video_render_safety_boxes = bool(self.video_render_safety_boxes_variable.get())
+        config.video_safety_box_style = self.video_safety_box_style_variable.get()
 
         config.recgen_seed_start = int(self.recgen_seed_start_var.get())
         config.recgen_num_scenarios = max(1, int(self.recgen_num_scenarios_var.get()))
@@ -292,11 +338,15 @@ class CarlaInteractionGUI(tk.Tk):
                 self.transform_docker_mount_path_variable,
                 self.transformer_output_path_variable,
                 self.video_input_path_variable,
+                self.video_docker_mount_path_variable,
                 self.video_output_path_variable,
                 self.video_width_variable,
                 self.video_height_variable,
+                self.video_fov_variable,
                 self.vehicle_id_variable,
-                self.with_bboxes_variable,
+                self.video_render_safety_boxes_variable,
+                self.video_safety_box_style_variable,
+                *[v for group in self.video_camera_position_vars.values() for v in group.values()],
                 self.begin_at_variable,
                 self.end_at_variable,
                 self.render_off_screen_variable,
@@ -418,7 +468,14 @@ class CarlaInteractionGUI(tk.Tk):
         sys.stdout = sys.stderr = _TextOutputHandler(self)
 
     def log(self, txt: str):
-        """Logs a given text message to the GUI text widget, the log file, and the real terminal."""
+        """
+        Logs a given text message to the GUI text widget, the log file, and the real
+        terminal. Called from arbitrary threads (every worker's subprocess-output
+        loop, plus anything using the redirected sys.stdout/stderr), so it must
+        never touch self.log_widget directly - see the comment on self._log_queue
+        in __init__ for why. The actual widget update happens later, on the main
+        thread, via _drain_log_queue.
+        """
         # sys.__stdout__ is the original stdout Python captured at startup and
         # never reassigned by anything - unlike sys.stdout, which
         # _redirect_console() points at the GUI widget instead. Writing here
@@ -430,10 +487,7 @@ class CarlaInteractionGUI(tk.Tk):
         except Exception:
             pass
 
-        self.log_widget.configure(state="normal")
-        self.log_widget.insert("end", txt + "\n")
-        self.log_widget.see("end")
-        self.log_widget.configure(state="disabled")
+        self._log_queue.put(txt)
 
         log_path = getattr(self, "_log_file_path", None)
         if log_path:
@@ -442,6 +496,28 @@ class CarlaInteractionGUI(tk.Tk):
                     f.write(txt + "\n")
             except Exception:
                 pass
+
+    def _drain_log_queue(self):
+        """
+        Runs on the main thread only (scheduled via after()) and is the sole
+        place allowed to touch self.log_widget, so background threads calling
+        log() never race Tk's own event processing.
+        """
+        pending = []
+        try:
+            while True:
+                pending.append(self._log_queue.get_nowait())
+        except queue.Empty:
+            pass
+
+        if pending:
+            self.log_widget.configure(state="normal")
+            for txt in pending:
+                self.log_widget.insert("end", txt + "\n")
+            self.log_widget.see("end")
+            self.log_widget.configure(state="disabled")
+
+        self.after(50, self._drain_log_queue)
 
     def clear_log(self):
         self.log_widget.configure(state="normal")

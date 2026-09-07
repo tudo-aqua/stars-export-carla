@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -68,10 +69,15 @@ def run_transform(args):
             if not docker_mount_path:
                 return recording_path
             if os.path.isfile(in_path):
-                # --input itself is the single file being transformed, so
-                # the given mount path is already its exact container-side
-                # path - there's no relative offset to preserve.
-                return docker_mount_path
+                # --input itself is the single file being transformed.
+                # --docker-mount-path is the container-side *directory* it
+                # lives under, not its exact full path - join it with
+                # --input's own basename rather than substituting it
+                # verbatim, since handing CARLA's native client a bare
+                # directory instead of a file (e.g. if the mount path is
+                # given without a filename) segfaults the whole process
+                # instead of raising a catchable error.
+                return f"{docker_mount_path.rstrip('/')}/{os.path.basename(in_path)}"
             rel = os.path.relpath(recording_path, in_path)
             return recording_path if rel == "." else f"{docker_mount_path.rstrip('/')}/{rel.replace(os.sep, '/')}"
 
@@ -308,13 +314,200 @@ def run_transform_one(args):
         )
 
 
-def run_record_video(args):
-    # Choose correct recorder class based on --with-bboxes
-    if args.with_bboxes:
-        from helpers.carla_camera_recorder_with_bboxes import CarlaCameraRecorder as Recorder
-    else:
-        from helpers.carla_camera_recorder import CarlaCameraRecorder as Recorder
+def _record_and_render_one(client, *, input_path: str, output: str, width: int, height: int, fov: int,
+                            vehicle_id: int, begin_at: float, end_at: float, camera_positions,
+                            render_safety_boxes: bool, safety_box_style) -> None:
+    """
+    Replays `input_path` against `client` and, for each selected camera
+    position, renders a JPEG sequence (optionally with a metadata overlay
+    and/or 3-D bounding boxes, with an optional "safety box" projected in
+    front of/beside the ego vehicle), then turns those sequences into
+    per-camera mp4s plus a combined multi-view "ALL.mp4" grid. Used by
+    run_record_video for both the single-file case and (via its own
+    recursive "record_video" child processes) each file in batch mode.
+    """
+    from helpers.camera_recorder.CarlaCameraRecorder import CarlaCameraRecorder
+    from helpers.camera_recorder.DownscalingMethod import DownscalingMethod
+    from helpers.camera_recorder.VideoRenderer import record_videos
 
+    recorder = CarlaCameraRecorder(
+        output_dir=output,
+        img_width=width,
+        img_height=height,
+        fov=fov,
+        vehicle_id=vehicle_id,
+        begin_at=max(0.0, begin_at or 0.0),
+        end_at=end_at,
+        camera_positions=camera_positions,
+        render_safety_boxes=render_safety_boxes,
+        safety_box_style=safety_box_style,
+    )
+
+    print(f">> [Runner] Recording {len(camera_positions)} camera(s) from '{input_path}'")
+    images_dir = recorder.record_images(client=client, logfile=input_path)
+
+    print(">> [Runner] Rendering images to mp4")
+    record_videos(
+        images_directory=images_dir,
+        output_directory=output,
+        scaling_method=DownscalingMethod.INTER_AREA,
+        img_width=width,
+        img_height=height,
+    )
+    print(">> [Runner] Video export finished.")
+
+
+def _existing_video_output(output: str, recording_path: str, vehicle_id: int) -> str | None:
+    """
+    The rendered-video folder for `recording_path`, if one already exists.
+    VideoRenderer.record_videos names it after the _images folder
+    CarlaCameraRecorder.record_images produces, whose name embeds the
+    server-clamped begin/end range (e.g. 'range[0.0, 8.05]') - that range
+    isn't knowable without a live CARLA connection, so match by the
+    basename+vehicle_id prefix that IS known upfront rather than requiring
+    one just to decide whether to skip.
+    """
+    basename = os.path.splitext(os.path.basename(recording_path))[0]
+    prefix = f"{basename}-vehicle_{vehicle_id}_range["
+    videos_dir = os.path.join(output, "_videos")
+    if not os.path.isdir(videos_dir):
+        return None
+    for entry in sorted(os.listdir(videos_dir)):
+        if entry.startswith(prefix):
+            full = os.path.join(videos_dir, entry)
+            if os.path.isdir(full) and os.listdir(full):
+                return full
+    return None
+
+
+def run_record_video(args):
+    """
+    Replays a recording (or, in batch mode, every recording in a folder) and
+    renders it to mp4 - see _record_and_render_one for the per-file details.
+
+    Batch mode: given with a trailing slash/backslash, --input is treated as
+    a folder and every recording file directly inside it is processed in
+    turn, skipping any that already have rendered output under
+    '<output>/_videos/' (see _existing_video_output), and a summary of
+    succeeded/failed/skipped is printed at the end - mirroring run_transform's
+    batch mode.
+
+    Unlike run_transform (whose transform_one children reuse one
+    already-running server across the whole batch), each recording here gets
+    a completely fresh CARLA server: batch mode re-invokes this exact same
+    "record_video" subcommand once per file as its own child process, each
+    doing its own restart_and_connect()/kill_carla(). This was proven
+    necessary, not just cautious - reusing one server across ~10+
+    files-in-a-row (each calling client.load_world(), a full level reload)
+    reliably degraded the server's recorder subsystem: show_recorder_file_info()
+    started returning "not a CARLA recorder" for perfectly valid files, purely
+    because of how many replays the server had already handled, not anything
+    wrong with those files (confirmed by re-running one of the "invalid"
+    files on its own, fresh, where it replayed and rendered fine). Paying a
+    fresh boot per file is the reliable trade-off for a batch that's meant to
+    run unattended.
+    """
+    from helpers.camera_recorder.CameraPosition import CameraPosition
+
+    in_path = args.input
+
+    camera_positions_spec = json.loads(args.camera_positions or "[]")
+    if not camera_positions_spec:
+        print(">> [Runner] No camera positions selected; nothing to record.")
+        return
+
+    docker_mount_path = (getattr(args, "docker_mount_path", "") or "").strip()
+
+    if in_path.endswith(("/", "\\")):
+        if not os.path.isdir(in_path):
+            print(f">> [Runner] ERROR: '{in_path}' is not a folder this process can see. "
+                  f"Batch mode needs the host-side folder path (e.g. the host side of a "
+                  f"docker volume mount) - use --docker-mount-path for the container-side "
+                  f"equivalent, rather than typing the container path directly here.")
+            return
+
+        # Unlike run_transform, CarlaCameraRecorder never unzips its input -
+        # it hands the path straight to CARLA's show_recorder_file_info()/
+        # load_world(), which only understand raw .log/.rec recorder files.
+        # '.zip' is deliberately excluded: it would only ever match this
+        # project's OWN output artifacts sitting in the same folder
+        # (dynamic_data_*.zip, static_data_*.zip, weather_data_*.zip), never
+        # a replayable recording.
+        recording_exts = (".log", ".rec")
+        entries = sorted(
+            f for f in os.listdir(in_path)
+            if os.path.isfile(os.path.join(in_path, f)) and f.lower().endswith(recording_exts)
+        )
+        print(f">> [Runner] Batch video export from folder: {in_path}")
+        if not entries:
+            print(f">> [Runner] WARNING: No recording files ({', '.join(recording_exts)}) "
+                  f"found in '{in_path}'.")
+
+        succeeded: List[str] = []
+        failed: List[str] = []
+        skipped: List[str] = []
+
+        for fname in entries:
+            recording_path = os.path.join(in_path, fname)
+
+            existing = _existing_video_output(args.output, recording_path, args.vehicle_id)
+            if existing:
+                print(f">> [Runner] Skipping '{recording_path}': already recorded -> '{existing}'")
+                skipped.append(recording_path)
+                continue
+
+            docker_recording_path = (
+                f"{docker_mount_path.rstrip('/')}/{fname}" if docker_mount_path else recording_path
+            )
+            if docker_recording_path != recording_path:
+                print(f">> [Runner] Mapped '{recording_path}' -> docker path '{docker_recording_path}'")
+            print(f">> [Runner] Recording '{docker_recording_path}' -> '{args.output}'")
+
+            cmd = [
+                sys.executable, os.path.abspath(__file__), "record_video",
+                "--carla-exe", args.carla_exe,
+                "--input", docker_recording_path,
+                "--output", args.output,
+                "--width", str(args.width),
+                "--height", str(args.height),
+                "--fov", str(args.fov),
+                "--vehicle-id", str(args.vehicle_id),
+                "--begin-at", str(max(0.0, args.begin_at or 0.0)),
+                "--end-at", str(args.end_at if args.end_at is not None and args.end_at >= 0 else -1),
+                "--camera-positions", json.dumps(camera_positions_spec),
+            ]
+            if args.offscreen:
+                cmd.append("--offscreen")
+            if args.quality_low:
+                cmd.append("--quality-low")
+            if args.map_name:
+                cmd += ["--map-name", args.map_name]
+            if args.render_safety_boxes:
+                cmd += ["--render-safety-boxes", "--safety-box-style", args.safety_box_style]
+
+            # Inherits this process's stdout/stderr, so its output streams
+            # straight through - no manual relaying needed.
+            result = subprocess.run(cmd)
+            if result.returncode == 0:
+                succeeded.append(recording_path)
+            else:
+                failed.append(recording_path)
+                print(f">> [Runner] FAILED (exit code {result.returncode}): '{recording_path}' "
+                      f"- continuing with the next recording.")
+
+        print(f">> [Runner] Batch video export finished: {len(succeeded)} succeeded, "
+              f"{len(failed)} failed, {len(skipped)} skipped, out of {len(entries)} recording(s) processed.")
+        if failed:
+            print(">> [Runner] Failed recordings:")
+            for f in failed:
+                print(f"    - {f}")
+        return 1 if failed else 0
+
+    # Single file: boot one CARLA server for just this recording.
+    camera_positions = [
+        (CameraPosition[c["name"]], bool(c.get("metadata")), bool(c.get("bbox")))
+        for c in camera_positions_spec
+    ]
     client = None
     try:
         client = restart_and_connect(
@@ -324,21 +517,39 @@ def run_record_video(args):
             map_name=args.map_name or None,
             log=print,
         )
-        rec = Recorder(client)
 
         end_at = sys.maxsize if args.end_at is None or args.end_at < 0 else args.end_at
+        from helpers.camera_recorder.SafetyBoxStyle import SafetyBoxStyle
+        safety_box_style = SafetyBoxStyle[args.safety_box_style] if args.render_safety_boxes else None
 
-        print(f">> [Runner] Record video (bboxes={args.with_bboxes}) from '{args.input}'")
-        rec.record_camera_in_simulation_run(
-            recording_folder=args.output,
-            path=args.input,
-            vehicle_id=args.vehicle_id,
+        # --docker-mount-path is the container-side directory --input's file
+        # lives under (e.g. carla_run.sh's '/workspace/recordings/' mount) -
+        # join it with --input's own basename rather than treating it as the
+        # file's exact full path, since handing CARLA's native client a bare
+        # directory instead of a file (e.g. if the mount path itself was
+        # given verbatim) segfaults the whole process instead of raising a
+        # catchable error.
+        if docker_mount_path:
+            docker_recording_path = f"{docker_mount_path.rstrip('/')}/{os.path.basename(in_path)}"
+        else:
+            docker_recording_path = in_path
+        if docker_recording_path != in_path:
+            print(f">> [Runner] Mapped '{in_path}' -> docker path '{docker_recording_path}'")
+
+        _record_and_render_one(
+            client,
+            input_path=docker_recording_path,
+            output=args.output,
             width=args.width,
             height=args.height,
-            begin_at=max(0.0, args.begin_at or 0.0),
+            fov=args.fov,
+            vehicle_id=args.vehicle_id,
+            begin_at=args.begin_at,
             end_at=end_at,
+            camera_positions=camera_positions,
+            render_safety_boxes=args.render_safety_boxes,
+            safety_box_style=safety_box_style,
         )
-        print(">> [Runner] Video export finished.")
     except Exception:
         traceback.print_exc()
         raise
@@ -648,14 +859,25 @@ def main():
     # record_video
     pv = sub.add_parser("record_video", help="Render a recording directly to mp4")
     add_common(pv)
-    pv.add_argument("--input", required=True, help="Input recording file")
+    pv.add_argument("--input", required=True,
+                     help="Input recording file, or a folder (path ending in '/' or '\\') to "
+                          "batch-record every recording file directly inside it")
+    pv.add_argument("--docker-mount-path", dest="docker_mount_path", default="",
+                     help="Container-side path corresponding to --input, if CARLA runs in a "
+                          "docker container whose mounted recordings folder differs from the "
+                          "path this process sees --input at (see carla_run.sh)")
     pv.add_argument("--output", required=True, help="Output folder (images/mp4)")
     pv.add_argument("--width", type=int, required=True)
     pv.add_argument("--height", type=int, required=True)
     pv.add_argument("--vehicle-id", type=int, default=-1)
     pv.add_argument("--begin-at", dest="begin_at", type=float, default=0.0)
     pv.add_argument("--end-at", dest="end_at", type=float, default=None)
-    pv.add_argument("--with-bboxes", action="store_true", default=False)
+    pv.add_argument("--fov", type=int, default=105)
+    pv.add_argument("--camera-positions", dest="camera_positions", default="[]",
+                     help="JSON list of {\"name\": <CameraPosition member>, \"metadata\": bool, \"bbox\": bool}")
+    pv.add_argument("--render-safety-boxes", dest="render_safety_boxes", action="store_true", default=False)
+    pv.add_argument("--safety-box-style", dest="safety_box_style", default="HATCHING",
+                     help="One of SafetyBoxStyle's members: BOX, X, HATCHING")
     pv.set_defaults(_fn=run_record_video)
 
     # generate maps

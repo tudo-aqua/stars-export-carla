@@ -39,7 +39,7 @@ class TransformTab(ttk.Frame):
         # so the actual replay/transform calls (which run server-side) use
         # the right path while the folder/file picker above still works
         # against the real path on this machine.
-        entry_row(self, "Docker mount path (container-side):", app.transform_docker_mount_path_variable)
+        entry_row(self, "Docker mount folder (container-side):", app.transform_docker_mount_path_variable)
 
         entry_row(self, "Output folder:", app.transformer_output_path_variable,
                  lambda: app.open_directory_dialog(app.transformer_output_path_variable))
