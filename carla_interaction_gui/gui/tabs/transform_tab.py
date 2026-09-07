@@ -33,6 +33,14 @@ class TransformTab(ttk.Frame):
             command=lambda: app.open_directory_dialog(app.transform_input_file_variable)
         ).pack(side="left", padx=2)
 
+        # If CARLA runs in a docker container (see carla_run.sh) whose
+        # mounted recordings folder differs from the path this process sees
+        # the folder/file above at, give the container-side equivalent here
+        # so the actual replay/transform calls (which run server-side) use
+        # the right path while the folder/file picker above still works
+        # against the real path on this machine.
+        entry_row(self, "Docker mount path (container-side):", app.transform_docker_mount_path_variable)
+
         entry_row(self, "Output folder:", app.transformer_output_path_variable,
                  lambda: app.open_directory_dialog(app.transformer_output_path_variable))
 
@@ -86,7 +94,7 @@ class TransformTab(ttk.Frame):
         app = self.app
         if not app.validate_paths([
             ("CARLA executable", app.carla_executable_variable, "file"),
-            # ("Input recording", app.transform_input_file_variable, ("dir", "file")),
+            ("Input recording", app.transform_input_file_variable, ("dir", "file")),
             ("Output folder", app.transformer_output_path_variable, "dir"),
         ]):
             return

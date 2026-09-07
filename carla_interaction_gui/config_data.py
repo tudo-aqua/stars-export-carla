@@ -22,6 +22,7 @@ class Config:
     manual_spawn_traffic_enabled: bool = False
 
     transform_input_file: str = ""
+    transform_docker_mount_path: str = ""
     transformer_output_path: str = ""
     only_track_at_specific_interval: bool = False
     specific_track_interval: float = 0.5

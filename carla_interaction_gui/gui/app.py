@@ -52,6 +52,8 @@ class CarlaInteractionGUI(tk.Tk):
             value=getattr(self.config, "manual_spawn_traffic_enabled", False))
 
         self.transform_input_file_variable = tk.StringVar(value=self.config.transform_input_file)
+        self.transform_docker_mount_path_variable = tk.StringVar(
+            value=getattr(self.config, "transform_docker_mount_path", ""))
         self.transformer_output_path_variable = tk.StringVar(value=self.config.transformer_output_path)
         self.video_input_path_variable = tk.StringVar(value=self.config.video_input_file)
         self.video_output_path_variable = tk.StringVar(value=self.config.video_output_path)
@@ -222,6 +224,7 @@ class CarlaInteractionGUI(tk.Tk):
         config.manual_spawn_traffic_num_vehicles = max(1, int(self.manual_spawn_traffic_num_vehicles_variable.get()))
         config.manual_spawn_traffic_enabled = bool(self.manual_spawn_traffic_enabled_variable.get())
         config.transform_input_file = self.transform_input_file_variable.get().strip()
+        config.transform_docker_mount_path = self.transform_docker_mount_path_variable.get().strip()
         config.transformer_output_path = self.transformer_output_path_variable.get().strip()
         config.video_input_file = self.video_input_path_variable.get().strip()
         config.video_output_path = self.video_output_path_variable.get().strip()
@@ -286,6 +289,7 @@ class CarlaInteractionGUI(tk.Tk):
                 self.manual_spawn_traffic_num_vehicles_variable,
                 self.manual_spawn_traffic_enabled_variable,
                 self.transform_input_file_variable,
+                self.transform_docker_mount_path_variable,
                 self.transformer_output_path_variable,
                 self.video_input_path_variable,
                 self.video_output_path_variable,

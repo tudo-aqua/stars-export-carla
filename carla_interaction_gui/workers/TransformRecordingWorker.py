@@ -21,6 +21,9 @@ class TransformRecordingWorker(ThreadWorker):
             "--input", self.cfg.transform_input_file,
             "--output", self.cfg.transformer_output_path,
         ]
+        docker_mount_path = getattr(self.cfg, "transform_docker_mount_path", "") or ""
+        if docker_mount_path:
+            cmd += ["--docker-mount-path", docker_mount_path]
         rec_ext = getattr(self.cfg, "recording_extension", "") or ""
         if rec_ext:
             cmd += ["--recording-ext", rec_ext]
