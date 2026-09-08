@@ -3,7 +3,7 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-from carla_interaction_gui.gui.constants import ALLOWED_CARLA_MAPS
+from carla_interaction_gui.gui.constants import ALLOWED_CARLA_MAPS, ALLOWED_EGO_VEHICLES
 from carla_interaction_gui.gui.widgets import entry_row
 from carla_interaction_gui.workers.ManualControlWorker import ManualControlWorker
 from carla_interaction_gui.workers.MoveLatestRecordingWorker import MoveLatestRecordingWorker
@@ -56,6 +56,17 @@ class ManualTab(ttk.Frame):
             width=42
         ).pack(side="left", fill="x", expand=True)
 
+        ego_row = tk.Frame(self)
+        ego_row.pack(fill="x", pady=2)
+        tk.Label(ego_row, text="Ego vehicle:", width=26, anchor="w").pack(side="left")
+        ttk.Combobox(
+            ego_row,
+            textvariable=app.selected_ego_vehicle_variable,
+            state="readonly",
+            values=ALLOWED_EGO_VEHICLES,
+            width=42
+        ).pack(side="left", fill="x", expand=True)
+
         options = ttk.LabelFrame(self, text="Options")
         options.pack(fill="x", padx=4, pady=6)
         tk.Checkbutton(options, text="Render off screen",
@@ -98,7 +109,7 @@ class ManualTab(ttk.Frame):
         app.register_stop_button(self.stop_btn)
 
     def _start_manual(self):
-        """Start the primary manual driving (exclusive) as Lincoln MKZ 2020."""
+        """Start the primary manual driving (exclusive) as the selected ego vehicle."""
         app = self.app
         if not app.validate_paths([
             ("CARLA executable", app.carla_executable_variable, "file"),
@@ -113,6 +124,7 @@ class ManualTab(ttk.Frame):
         w = ManualControlWorker(
             app.collect_cfg(),
             app.log,
+            vehicle_filter=app.selected_ego_vehicle_variable.get(),
             restart_before=True,
             kill_server_after=True,
             exclusive=True,
@@ -136,6 +148,7 @@ class ManualTab(ttk.Frame):
         w = SteeringWheelControlWorker(
             app.collect_cfg(),
             app.log,
+            vehicle_filter=app.selected_ego_vehicle_variable.get(),
             restart_before=True,
             kill_server_after=True,
             exclusive=True,

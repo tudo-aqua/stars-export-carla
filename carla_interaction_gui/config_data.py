@@ -14,6 +14,7 @@ class Config:
     render_quality_low: bool = False
     recording_extension: str = ".rec"
     selected_map: str = ""
+    selected_ego_vehicle: str = "vehicle.lincoln.mkz_2017"
 
     manual_output_dir: str = ""
     default_recordings_folder: str = ""

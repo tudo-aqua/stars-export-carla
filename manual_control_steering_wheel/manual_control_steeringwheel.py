@@ -11,6 +11,7 @@
 from __future__ import print_function
 
 
+import argparse
 import glob
 import os
 import sys
@@ -33,7 +34,7 @@ from manual_control_steering_wheel.classes.World import World
 from manual_control_steering_wheel.input_controls.SteeringWheelControl import SteeringWheelControl
 
 
-def game_loop():
+def game_loop(args):
     pygame.init()
     pygame.font.init()
     world = None
@@ -71,7 +72,7 @@ def game_loop():
         display_size = pygame.display.get_surface().get_size()
 
         hud = HUD(display_size[0], display_size[1])
-        world = World(carla_world, hud)
+        world = World(carla_world, hud, actor_filter=args.filter, role_name=args.rolename)
         controller = SteeringWheelControl(world, client)
 
         clock = pygame.time.Clock()
@@ -107,9 +108,22 @@ def game_loop():
 
 
 if __name__ == '__main__':
+    argparser = argparse.ArgumentParser(description='CARLA Manual Control Client (Steering Wheel)')
+    argparser.add_argument(
+        '--filter',
+        metavar='PATTERN',
+        default='vehicle.lincoln.mkz_2017',
+        help='actor filter (default: "vehicle.lincoln.mkz_2017")')
+    argparser.add_argument(
+        '--rolename',
+        metavar='NAME',
+        default='hero',
+        help='actor role name (default: "hero")')
+    args = argparser.parse_args()
+
     logging.basicConfig(format='%(levelname)s: %(message)s', level=logging.INFO)
 
     try:
-        game_loop()
+        game_loop(args)
     except KeyboardInterrupt:
         print('\nCancelled by user. Bye!')

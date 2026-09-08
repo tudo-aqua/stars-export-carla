@@ -9,7 +9,7 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext
 
 from carla_interaction_gui.carla_launcher import kill_carla
 from carla_interaction_gui.config_data import Config, load, save
-from carla_interaction_gui.gui.constants import ALLOWED_CARLA_MAPS
+from carla_interaction_gui.gui.constants import ALLOWED_CARLA_MAPS, ALLOWED_EGO_VEHICLES
 from helpers.camera_recorder.CameraPosition import CameraPosition
 from carla_interaction_gui.gui.tabs.manual_tab import ManualTab
 from carla_interaction_gui.gui.tabs.maps_tab import MapsTab
@@ -102,6 +102,12 @@ class CarlaInteractionGUI(tk.Tk):
         else:
             default_map = ALLOWED_CARLA_MAPS[0]
         self.selected_map_variable = tk.StringVar(value=default_map)
+
+        if getattr(self.config, "selected_ego_vehicle", "") in ALLOWED_EGO_VEHICLES:
+            default_ego_vehicle = self.config.selected_ego_vehicle
+        else:
+            default_ego_vehicle = ALLOWED_EGO_VEHICLES[0]
+        self.selected_ego_vehicle_variable = tk.StringVar(value=default_ego_vehicle)
 
         self.recgen_seed_start_var = tk.IntVar(value=getattr(self.config, "recgen_seed_start", 0))
         self.recgen_num_scenarios_var = tk.IntVar(value=getattr(self.config, "recgen_num_scenarios", 1))
@@ -317,6 +323,7 @@ class CarlaInteractionGUI(tk.Tk):
         config.render_off_screen = self.render_off_screen_variable.get()
         config.render_quality_low = self.render_quality_low_variable.get()
         config.selected_map = self.selected_map_variable.get().strip()
+        config.selected_ego_vehicle = self.selected_ego_vehicle_variable.get().strip()
 
         config.only_track_at_specific_interval = bool(self.only_track_at_specific_interval_variable.get())
         config.specific_track_interval = _parse_var_as_float(self.specific_track_interval_variable, 0.5)
@@ -351,6 +358,7 @@ class CarlaInteractionGUI(tk.Tk):
                 self.end_at_variable,
                 self.render_off_screen_variable,
                 self.render_quality_low_variable,
+                self.selected_ego_vehicle_variable,
                 self.only_track_at_specific_interval_variable,
                 self.specific_track_interval_variable,
                 self.recgen_seed_start_var,

@@ -14,10 +14,9 @@ class SteeringWheelControlWorker(ThreadWorker):
     """
     Launches manual_control_steeringwheel.py, a pygame viewer that behaves like
     CARLA's own manual_control_keyboard.py but reads input from a steering wheel/joystick
-    instead of the keyboard. The script takes no CLI arguments of its own (it
-    always connects to 127.0.0.1:2000 and spawns its own 'hero' vehicle), so this
-    is a primary/exclusive drive method like the main "Start manual driving"
-    button, not an additional controlled actor.
+    instead of the keyboard. It always connects to 127.0.0.1:2000 and spawns its
+    own 'hero' vehicle, so this is a primary/exclusive drive method like the main
+    "Start manual driving" button, not an additional controlled actor.
     """
 
     def __init__(
@@ -25,11 +24,15 @@ class SteeringWheelControlWorker(ThreadWorker):
         cfg: Config,
         log_cb,
         *,
+        vehicle_filter: str | None = None,
+        role_name: str | None = None,
         restart_before: bool = True,
         kill_server_after: bool = True,
         exclusive: bool = True,
     ):
         super().__init__(cfg, log_cb)
+        self.vehicle_filter = vehicle_filter
+        self.role_name = role_name
         self.restart_before = restart_before
         self.kill_server_after = kill_server_after
         self.exclusive = exclusive
@@ -52,6 +55,10 @@ class SteeringWheelControlWorker(ThreadWorker):
             return
 
         cmd = [sys.executable, str(SCRIPT_PATH)]
+        if self.vehicle_filter:
+            cmd += ["--filter", self.vehicle_filter]
+        if self.role_name:
+            cmd += ["--rolename", self.role_name]
         try:
             # wheel_config.ini is loaded via a path relative to the working directory,
             # so this must run with the script's own folder as cwd.
