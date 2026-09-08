@@ -26,6 +26,8 @@ class SteeringWheelControlWorker(ThreadWorker):
         *,
         vehicle_filter: str | None = None,
         role_name: str | None = None,
+        camera_elevation: float | None = None,
+        camera_tilt: float | None = None,
         restart_before: bool = True,
         kill_server_after: bool = True,
         exclusive: bool = True,
@@ -33,6 +35,8 @@ class SteeringWheelControlWorker(ThreadWorker):
         super().__init__(cfg, log_cb)
         self.vehicle_filter = vehicle_filter
         self.role_name = role_name
+        self.camera_elevation = camera_elevation
+        self.camera_tilt = camera_tilt
         self.restart_before = restart_before
         self.kill_server_after = kill_server_after
         self.exclusive = exclusive
@@ -59,6 +63,10 @@ class SteeringWheelControlWorker(ThreadWorker):
             cmd += ["--filter", self.vehicle_filter]
         if self.role_name:
             cmd += ["--rolename", self.role_name]
+        if self.camera_elevation is not None:
+            cmd += ["--camera-elevation", str(self.camera_elevation)]
+        if self.camera_tilt is not None:
+            cmd += ["--camera-tilt", str(self.camera_tilt)]
         try:
             # wheel_config.ini is loaded via a path relative to the working directory,
             # so this must run with the script's own folder as cwd.

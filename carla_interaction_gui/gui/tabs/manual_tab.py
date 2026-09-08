@@ -4,7 +4,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from carla_interaction_gui.gui.constants import ALLOWED_CARLA_MAPS, ALLOWED_EGO_VEHICLES
-from carla_interaction_gui.gui.widgets import entry_row
+from carla_interaction_gui.gui.widgets import entry_row, validate_number
 from carla_interaction_gui.workers.ManualControlWorker import ManualControlWorker
 from carla_interaction_gui.workers.MoveLatestRecordingWorker import MoveLatestRecordingWorker
 from carla_interaction_gui.workers.SpawnTrafficWorker import SpawnTrafficWorker
@@ -67,6 +67,30 @@ class ManualTab(ttk.Frame):
             width=42
         ).pack(side="left", fill="x", expand=True)
 
+        vcmd = (self.register(validate_number), "%P")
+
+        elevation_row = tk.Frame(self)
+        elevation_row.pack(fill="x", pady=2)
+        tk.Label(elevation_row, text="Camera elevation (m) [default: 0.0]:", width=26, anchor="w").pack(side="left")
+        tk.Entry(
+            elevation_row,
+            textvariable=app.camera_elevation_variable,
+            width=10,
+            validate="key",
+            validatecommand=vcmd
+        ).pack(side="left")
+
+        tilt_row = tk.Frame(self)
+        tilt_row.pack(fill="x", pady=2)
+        tk.Label(tilt_row, text="Camera tilt (deg) [default: 0.0]:", width=26, anchor="w").pack(side="left")
+        tk.Entry(
+            tilt_row,
+            textvariable=app.camera_tilt_variable,
+            width=10,
+            validate="key",
+            validatecommand=vcmd
+        ).pack(side="left")
+
         options = ttk.LabelFrame(self, text="Options")
         options.pack(fill="x", padx=4, pady=6)
         tk.Checkbutton(options, text="Render off screen",
@@ -81,6 +105,19 @@ class ManualTab(ttk.Frame):
         tk.Label(spawn_traffic_row, text="Number of vehicles:").pack(side="left", padx=(12, 4))
         tk.Entry(spawn_traffic_row, textvariable=app.manual_spawn_traffic_num_vehicles_variable,
                  width=8).pack(side="left")
+
+        spawn_traffic_type_row = tk.Frame(options)
+        spawn_traffic_type_row.pack(fill="x", padx=6, pady=2)
+        tk.Checkbutton(spawn_traffic_type_row, text="Spawn only one vehicle type",
+                       variable=app.manual_spawn_traffic_single_type_enabled_variable, anchor="w").pack(side="left")
+        tk.Label(spawn_traffic_type_row, text="Vehicle type:").pack(side="left", padx=(12, 4))
+        ttk.Combobox(
+            spawn_traffic_type_row,
+            textvariable=app.manual_spawn_traffic_vehicle_type_variable,
+            state="readonly",
+            values=ALLOWED_EGO_VEHICLES,
+            width=32
+        ).pack(side="left")
 
         tk.Button(self, text="Start manual driving", width=25, command=self._start_manual).pack(pady=8)
         tk.Button(self, text="Start manual driving (Steering Wheel)",
@@ -121,10 +158,13 @@ class ManualTab(ttk.Frame):
             return
         app.clear_log()
 
+        cfg = app.collect_cfg()
         w = ManualControlWorker(
-            app.collect_cfg(),
+            cfg,
             app.log,
-            vehicle_filter=app.selected_ego_vehicle_variable.get(),
+            vehicle_filter=cfg.selected_ego_vehicle,
+            camera_elevation=cfg.camera_elevation,
+            camera_tilt=cfg.camera_tilt,
             restart_before=True,
             kill_server_after=True,
             exclusive=True,
@@ -145,10 +185,13 @@ class ManualTab(ttk.Frame):
             return
         app.clear_log()
 
+        cfg = app.collect_cfg()
         w = SteeringWheelControlWorker(
-            app.collect_cfg(),
+            cfg,
             app.log,
-            vehicle_filter=app.selected_ego_vehicle_variable.get(),
+            vehicle_filter=cfg.selected_ego_vehicle,
+            camera_elevation=cfg.camera_elevation,
+            camera_tilt=cfg.camera_tilt,
             restart_before=True,
             kill_server_after=True,
             exclusive=True,
@@ -166,11 +209,14 @@ class ManualTab(ttk.Frame):
         if not app.validate_paths([("CARLA executable", app.carla_executable_variable, "file")]):
             return
 
+        cfg = app.collect_cfg()
         w = ManualControlWorker(
-            app.collect_cfg(),
+            cfg,
             app.log,
             vehicle_filter=filter_str,
             role_name="manual_control",
+            camera_elevation=cfg.camera_elevation,
+            camera_tilt=cfg.camera_tilt,
             restart_before=False,
             kill_server_after=False,
             exclusive=False,
@@ -210,7 +256,11 @@ class ManualTab(ttk.Frame):
 
     def _spawn_traffic_now(self, number_of_vehicles: int):
         app = self.app
-        w = SpawnTrafficWorker(app.collect_cfg(), app.log, number_of_vehicles=number_of_vehicles)
+        cfg = app.collect_cfg()
+        filter_vehicles = cfg.manual_spawn_traffic_vehicle_type if cfg.manual_spawn_traffic_single_type_enabled \
+            else None
+        w = SpawnTrafficWorker(
+            cfg, app.log, number_of_vehicles=number_of_vehicles, filter_vehicles=filter_vehicles)
         app.manual_workers.append(w)
         app.attach_worker(w)
 

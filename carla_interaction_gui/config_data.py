@@ -15,12 +15,16 @@ class Config:
     recording_extension: str = ".rec"
     selected_map: str = ""
     selected_ego_vehicle: str = "vehicle.lincoln.mkz_2017"
+    camera_elevation: float = 0.0
+    camera_tilt: float = 0.0
 
     manual_output_dir: str = ""
     default_recordings_folder: str = ""
     new_file_name: str = ""
     manual_spawn_traffic_num_vehicles: int = 30
     manual_spawn_traffic_enabled: bool = False
+    manual_spawn_traffic_single_type_enabled: bool = False
+    manual_spawn_traffic_vehicle_type: str = "vehicle.lincoln.mkz_2017"
 
     transform_input_file: str = ""
     transform_docker_mount_path: str = ""

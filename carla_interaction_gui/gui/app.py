@@ -52,6 +52,13 @@ class CarlaInteractionGUI(tk.Tk):
             value=getattr(self.config, "manual_spawn_traffic_num_vehicles", 30))
         self.manual_spawn_traffic_enabled_variable = tk.BooleanVar(
             value=getattr(self.config, "manual_spawn_traffic_enabled", False))
+        self.manual_spawn_traffic_single_type_enabled_variable = tk.BooleanVar(
+            value=getattr(self.config, "manual_spawn_traffic_single_type_enabled", False))
+        if getattr(self.config, "manual_spawn_traffic_vehicle_type", "") in ALLOWED_EGO_VEHICLES:
+            default_traffic_vehicle_type = self.config.manual_spawn_traffic_vehicle_type
+        else:
+            default_traffic_vehicle_type = ALLOWED_EGO_VEHICLES[0]
+        self.manual_spawn_traffic_vehicle_type_variable = tk.StringVar(value=default_traffic_vehicle_type)
 
         self.transform_input_file_variable = tk.StringVar(value=self.config.transform_input_file)
         self.transform_docker_mount_path_variable = tk.StringVar(
@@ -96,6 +103,9 @@ class CarlaInteractionGUI(tk.Tk):
             value=getattr(self.config, "only_track_at_specific_interval", False))
         self.specific_track_interval_variable = tk.DoubleVar(
             value=getattr(self.config, "specific_track_interval", 0.5))
+
+        self.camera_elevation_variable = tk.DoubleVar(value=getattr(self.config, "camera_elevation", 0.0))
+        self.camera_tilt_variable = tk.DoubleVar(value=getattr(self.config, "camera_tilt", 0.0))
 
         if getattr(self.config, "selected_map", "") in ALLOWED_CARLA_MAPS:
             default_map = self.config.selected_map
@@ -268,6 +278,9 @@ class CarlaInteractionGUI(tk.Tk):
         config.new_file_name = self.new_file_name_variable.get().strip()
         config.manual_spawn_traffic_num_vehicles = max(1, int(self.manual_spawn_traffic_num_vehicles_variable.get()))
         config.manual_spawn_traffic_enabled = bool(self.manual_spawn_traffic_enabled_variable.get())
+        config.manual_spawn_traffic_single_type_enabled = \
+            bool(self.manual_spawn_traffic_single_type_enabled_variable.get())
+        config.manual_spawn_traffic_vehicle_type = self.manual_spawn_traffic_vehicle_type_variable.get().strip()
         config.transform_input_file = self.transform_input_file_variable.get().strip()
         config.transform_docker_mount_path = self.transform_docker_mount_path_variable.get().strip()
         config.transformer_output_path = self.transformer_output_path_variable.get().strip()
@@ -328,6 +341,9 @@ class CarlaInteractionGUI(tk.Tk):
         config.only_track_at_specific_interval = bool(self.only_track_at_specific_interval_variable.get())
         config.specific_track_interval = _parse_var_as_float(self.specific_track_interval_variable, 0.5)
 
+        config.camera_elevation = _parse_var_as_float(self.camera_elevation_variable, 0.0)
+        config.camera_tilt = _parse_var_as_float(self.camera_tilt_variable, 0.0)
+
         save(config)
         return config
 
@@ -341,6 +357,8 @@ class CarlaInteractionGUI(tk.Tk):
                 self.new_file_name_variable,
                 self.manual_spawn_traffic_num_vehicles_variable,
                 self.manual_spawn_traffic_enabled_variable,
+                self.manual_spawn_traffic_single_type_enabled_variable,
+                self.manual_spawn_traffic_vehicle_type_variable,
                 self.transform_input_file_variable,
                 self.transform_docker_mount_path_variable,
                 self.transformer_output_path_variable,
@@ -359,6 +377,8 @@ class CarlaInteractionGUI(tk.Tk):
                 self.render_off_screen_variable,
                 self.render_quality_low_variable,
                 self.selected_ego_vehicle_variable,
+                self.camera_elevation_variable,
+                self.camera_tilt_variable,
                 self.only_track_at_specific_interval_variable,
                 self.specific_track_interval_variable,
                 self.recgen_seed_start_var,

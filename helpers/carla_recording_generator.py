@@ -131,7 +131,14 @@ class CarlaDataGenerator:
         blueprints = self.get_actor_blueprints(world, args.filterv, args.generationv)
         blueprintsWalkers = self.get_actor_blueprints(world, args.filterw, args.generationw)
 
-        blueprints = [x for x in blueprints if x.get_attribute('base_type') == 'car']
+        if args.filterv == 'vehicle.*':
+            # Restrict the generic "any vehicle" wildcard to cars: bicycles/
+            # motorcycles behave very differently from car physics as
+            # autopilot-driven background traffic, and trucks/vans/buses are
+            # much rarer in practice. An explicit, narrower --filterv (e.g. a
+            # single blueprint id picked by the user) is trusted as-is, so a
+            # deliberately chosen truck/bus/etc. still gets spawned.
+            blueprints = [x for x in blueprints if x.get_attribute('base_type') == 'car']
 
         blueprints = sorted(blueprints, key=lambda bp: bp.id)
 

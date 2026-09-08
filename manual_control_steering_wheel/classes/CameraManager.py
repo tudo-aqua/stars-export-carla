@@ -7,15 +7,22 @@ import numpy as np
 import pygame
 
 class CameraManager(object):
-    def __init__(self, parent_actor, hud):
+    def __init__(self, parent_actor, hud, camera_elevation=0.0, camera_tilt=0.0):
         self.sensor = None
         self.surface = None
         self._parent = parent_actor
         self.hud = hud
         self.recording = False
+        # camera_elevation/camera_tilt let taller vehicles (e.g. trucks) raise
+        # and re-angle the driving view, which otherwise sits at car height
+        # and ends up looking at the dashboard instead of the road.
         self._camera_transforms = [
-            carla.Transform(carla.Location(x=-5.5, z=2.8), carla.Rotation(pitch=-15)),
-            carla.Transform(carla.Location(x=1.6, z=1.7))]
+            carla.Transform(
+                carla.Location(x=-5.5, z=2.8 + camera_elevation),
+                carla.Rotation(pitch=-15 + camera_tilt)),
+            carla.Transform(
+                carla.Location(x=1.6, z=1.7 + camera_elevation),
+                carla.Rotation(pitch=camera_tilt))]
         self.transform_index = 1
         self.sensors = [
             ['sensor.camera.rgb', cc.Raw, 'Camera RGB'],

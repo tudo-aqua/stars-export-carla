@@ -10,7 +10,8 @@ from manual_control_steering_wheel.helpers import find_weather_presets, get_acto
 
 
 class World(object):
-    def __init__(self, carla_world, hud, actor_filter='vehicle.lincoln.mkz_2017', role_name='hero'):
+    def __init__(self, carla_world, hud, actor_filter='vehicle.lincoln.mkz_2017', role_name='hero',
+                 camera_elevation=0.0, camera_tilt=0.0):
         self.world = carla_world
         self.hud = hud
         self.player = None
@@ -20,6 +21,8 @@ class World(object):
         self.camera_manager = None
         self._actor_filter = actor_filter
         self._role_name = role_name
+        self._camera_elevation = camera_elevation
+        self._camera_tilt = camera_tilt
         self._weather_presets = find_weather_presets()
         self._weather_index = 0
         self.restart()
@@ -55,7 +58,9 @@ class World(object):
         self.collision_sensor = CollisionSensor(self.player, self.hud)
         self.lane_invasion_sensor = LaneInvasionSensor(self.player, self.hud)
         self.gnss_sensor = GnssSensor(self.player)
-        self.camera_manager = CameraManager(self.player, self.hud)
+        self.camera_manager = CameraManager(
+            self.player, self.hud,
+            camera_elevation=self._camera_elevation, camera_tilt=self._camera_tilt)
         self.camera_manager.transform_index = cam_pos_index
         self.camera_manager.set_sensor(cam_index, notify=False)
         actor_type = get_actor_display_name(self.player)

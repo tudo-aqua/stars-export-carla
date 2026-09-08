@@ -70,7 +70,9 @@ def game_loop(args):
         display_size = pygame.display.get_surface().get_size()
 
         hud = HUD(display_size[0], display_size[1])
-        world = World(carla_world, hud, actor_filter=args.filter, role_name=args.rolename)
+        world = World(
+            carla_world, hud, actor_filter=args.filter, role_name=args.rolename,
+            camera_elevation=args.camera_elevation, camera_tilt=args.camera_tilt)
         controller = KeyboardControl(world, start_in_autopilot=False)
 
         clock = pygame.time.Clock()
@@ -117,6 +119,18 @@ if __name__ == '__main__':
         metavar='NAME',
         default='hero',
         help='actor role name (default: "hero")')
+    argparser.add_argument(
+        '--camera-elevation',
+        metavar='METERS',
+        default=0.0,
+        type=float,
+        help='offset added to the driving camera\'s height, useful for tall vehicles like trucks (default: 0.0)')
+    argparser.add_argument(
+        '--camera-tilt',
+        metavar='DEGREES',
+        default=0.0,
+        type=float,
+        help='offset added to the driving camera\'s downward pitch (default: 0.0)')
     args = argparser.parse_args()
 
     logging.basicConfig(format='%(levelname)s: %(message)s', level=logging.INFO)
