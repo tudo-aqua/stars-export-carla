@@ -105,8 +105,10 @@ class CarlaMonitor:
             weather_parameters: DataWeatherParameters = CarlaMonitor.get_simulation_run_weather(
                 weather_file=weather_file_path)
 
-            # Map name as in info
-            map_name = info.split("Map: ")[1].split("\nDate")[0]
+            if not map_name:
+                print(f">> [IO] The recording at path '{file_path}' has no map information, skipping.")
+                return
+
             print(f">> [CARLA] Load map: '{map_name}'")
 
             # Load map from recording
