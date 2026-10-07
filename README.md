@@ -1,5 +1,7 @@
 # Carla simulation-runs generator
 
+[![Project Status: Active – The project has reached a stable, usable state and is being actively developed.](https://www.repostatus.org/badges/latest/active.svg)](https://www.repostatus.org/#active)
+
 This repository consists of a handful of useful function to automatically extract simulation-runs from the
 [Carla Simulator](https://carla.org/) which then can be used by
 the [CARLA Importer](https://github.com/tudo-aqua/stars/tree/main/stars-import-carla)
@@ -13,12 +15,6 @@ found [here](https://zenodo.org/record/8131947).
 <details>
 
   <summary>Linux/Mac</summary>
-
-### Python 3.7
-
-To use the functions of this repository you need Python 3.7. Follow the instructions on
-the [official website](https://www.python.org/downloads/release/python-370/)
-to install Python 3.7 on your system.
 
 ### Virtual Environment
 
@@ -59,13 +55,7 @@ This will install all necessary requirements.
 <details>
 
   <summary>Windows</summary>
-
-### Python 3.7
-
-To use the functions of this repository you need Python 3.7. Follow the instructions on
-the [official website](https://www.python.org/downloads/release/python-370/)
-to install Python 3.7 on your system.
-
+  
 ### Virtual Environment
 
 This repository requires a virtual environment. Follow these instructions to initialize a new virtual environment.
@@ -104,9 +94,9 @@ This will install all necessary requirements.
 
 ### Carla
 
-Firstly, you have to [install Carla](https://github.com/carla-simulator/carla/releases/tag/0.9.14). Currently, this
+Firstly, you have to [install Carla](https://github.com/carla-simulator/carla/releases/tag/0.9.15). Currently, this
 repository
-supports Carla 0.9.14
+supports Carla 0.9.15
 
 Now update the project with the path to your local Carla installation in:
 <details><summary>Linux/Mac</summary>
