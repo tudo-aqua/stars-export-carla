@@ -1,0 +1,163 @@
+from __future__ import annotations
+
+from typing import List
+
+import pandas as pd
+import plotly.graph_objects as go
+
+from carla_data_classes.static.DataWorld import DataWorld
+from .base_layer import BaseLayer, register
+
+
+def _speed_to_color(kmh: float) -> str:
+    """
+    Simple, readable palette by limit bands (km/h).
+    Tweak as you prefer.
+    """
+    # blues (slow) → yellows → oranges → red (fast)
+    if kmh <= 20:  return "#2c7bb6"
+    if kmh <= 30:  return "#74add1"
+    if kmh <= 40:  return "#abd9e9"
+    if kmh <= 50:  return "#ffffbf"
+    if kmh <= 60:  return "#fee090"
+    if kmh <= 70:  return "#fdae61"
+    if kmh <= 80:  return "#f46d43"
+    if kmh <= 100: return "#d73027"
+    return "#a50026"
+
+
+@register("speed_limits")
+class SpeedLimitsLayer(BaseLayer):
+    """
+    Draw speed-limit sections along each lane as colored polylines.
+
+    DataFrame schema produced by build_df():
+        road_id      : int
+        lane_id      : int
+        speed        : float  (km/h)
+        start        : float  (from_distance, m)
+        end          : float  (to_distance, m)
+        xs           : list[float]
+        ys           : list[float]
+    """
+    slider_key = "line_width"  # makes it appear under "Marker sizes" in the GUI
+    default_size = 2
+    df_key = "speed_limits"
+
+    # ---------- build the per-layer dataframe from DataBlocks ----------
+    @classmethod
+    def build_df(cls, data_world: DataWorld, tick) -> pd.DataFrame:
+        rows: List[dict] = []
+
+        # blocks can be a single DataBlock or a list
+        if data_world is None:
+            return pd.DataFrame(rows)
+
+        for road in data_world.get_all_roads():
+            for lane in road.lanes:
+                speed_sections = lane.speed_limits
+                midpoints = lane.lane_midpoints
+                if not speed_sections or not midpoints:
+                    continue
+
+                # Pre-collect (distance, (x,y)) tuples for fast slicing
+                mid_items = []
+                for mp in midpoints:
+                    # DataLaneMidpoint has distance_to_start and DataLocation with .to_tuple()
+                    try:
+                        x, y = mp.location.to_tuple()
+                    except Exception:
+                        # fallback if DataLocation lacks to_tuple(): use attributes
+                        x, y = float(mp.location.x), float(mp.location.y)
+                    mid_items.append((float(mp.distance_to_start), (x, y)))
+
+                # Build a small line for each speed-limit segment on this lane
+                for seg in speed_sections:
+                    start = float(seg.from_distance)
+                    end = float(seg.to_distance)
+                    xs, ys = [], []
+                    for d, (x, y) in mid_items:
+                        if start <= d <= end:
+                            xs.append(x)
+                            ys.append(y)
+
+                    # need at least 2 points to draw a line
+                    if len(xs) >= 2:
+                        rows.append({
+                            "road_id": road.road_id,
+                            "lane_id": lane.lane_id,
+                            "speed": float(seg.speed_limit),
+                            "start": start,
+                            "end": end,
+                            "xs": xs,
+                            "ys": ys,
+                        })
+
+        return pd.DataFrame(rows)
+
+    # ---------- turn the dataframe into Plotly traces ------------------
+    def traces(self) -> List[go.BaseTraceType]:
+        df = self.get_df(self.df_key)
+        if df.empty:
+            return []
+
+        width = self.size.get(self.layer_name, self.default_size)
+
+        # Merge segments sharing the same color band into one trace each
+        # (color bands are discrete, so this is typically ~9 traces instead of
+        # one per segment) — Plotly.js carries a meaningful fixed cost per trace
+        # on every pan/zoom, so trace count dominates over point count.
+        by_color: dict = {}
+        for _, row in df.iterrows():
+            speed_ms = float(row["speed"])  # <-- stored in m/s
+            kmh = _ms_to_kmh(speed_ms)
+            mph = _ms_to_mph(speed_ms)
+
+            road_id = int(row["road_id"])
+            lane_id = int(row["lane_id"])
+            start = float(row["start"])
+            end = float(row["end"])
+
+            xs = row["xs"]
+            ys = row["ys"]
+            color = _speed_to_color(kmh)
+
+            bucket = by_color.setdefault(color, dict(x=[], y=[], customdata=[]))
+            if bucket["x"]:
+                bucket["x"].append(float("nan"))
+                bucket["y"].append(float("nan"))
+                bucket["customdata"].append([None] * 7)
+            row_cd = [speed_ms, kmh, mph, road_id, lane_id, start, end]
+            bucket["x"].extend(xs)
+            bucket["y"].extend(ys)
+            bucket["customdata"].extend([row_cd] * len(xs))
+
+        traces: List[go.Scattergl] = []
+        for color, b in by_color.items():
+            traces.append(
+                go.Scattergl(
+                    x=b["x"],
+                    y=b["y"],
+                    mode="lines",
+                    line=dict(width=width, color=color),
+                    name="Speed limits",
+                    showlegend=False,
+                    hovertemplate=(
+                        "Speed: %{customdata[0]:.1f} m/s"
+                        "<br>%{customdata[1]:.0f} km/h (%{customdata[2]:.0f} mph)"
+                        "<br>Road: %{customdata[3]}  Lane: %{customdata[4]}"
+                        "<br>From: %{customdata[5]:.0f} m  To: %{customdata[6]:.0f} m"
+                        "<extra></extra>"
+                    ),
+                    customdata=b["customdata"],
+                )
+            )
+        return traces
+
+
+def _ms_to_kmh(ms: float) -> float:
+    return ms * 3.6
+
+
+def _ms_to_mph(ms: float) -> float:
+    return ms * 2.2369362921  # exact factor

@@ -3,10 +3,10 @@ from datetime import datetime
 import carla
 from carla import World
 
-from carla_data_classes import DataActorPosition, TickData, DataLandmarkType
+from carla_data_classes.dynamic import DataActorPosition, TickData
+from carla_data_classes.enums.DataLandmarkType import DataLandmarkType
+from data_av_static import MapRasterizer
 from helpers.carla_api_helper import CarlaAPIHelper
-
-from helpers.map_rasterizer import MapRasterizer
 
 if __name__ == '__main__':
     print("Connect to carla simulator")
@@ -22,14 +22,16 @@ if __name__ == '__main__':
     map_name = world.get_map().name
 
     # Calculate the static data for the current map
-    data_blocks = _rasterizer.load_or_calculate_data_blocks(map_name, map_name, False)
+    data_world = _rasterizer.load_or_calculate_data_world(map_name, map_name, False)
 
     actors = world.get_actors()
     landmarks = world.get_map().get_all_landmarks()
     valid_landmarks = []
     for landmark in landmarks:
-        data_road = _rasterizer.get_data_road(landmark.road_id)
-        if data_road.is_junction and DataLandmarkType(int(landmark.type)) == DataLandmarkType.StopSign or DataLandmarkType(int(landmark.type)) == DataLandmarkType.YieldSign:
+        data_road = _rasterizer.get_data_road_from_id(landmark.road_id)
+        if data_road.is_junction and DataLandmarkType(
+                int(landmark.type)) == DataLandmarkType.StopSign or DataLandmarkType(
+            int(landmark.type)) == DataLandmarkType.YieldSign:
             valid_landmarks.append(landmark)
     landmark = list(filter(lambda l: l.id == '947', landmarks))[0]
     data_landmark = _rasterizer.get_data_landmark_for_landmark(landmark)

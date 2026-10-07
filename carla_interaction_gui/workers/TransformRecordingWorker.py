@@ -1,0 +1,44 @@
+import sys
+
+from carla_interaction_gui.workers.ThreadWorker import ThreadWorker
+
+
+class TransformRecordingWorker(ThreadWorker):
+    """
+    Launches a separate Python process that runs CarlaMonitor.monitor_simulation_run
+    and kills the entire process tree on cancel/finish.
+    """
+
+    def run(self):
+        exe = self.cfg.carla_executable
+        runner = self._resolve_runner()
+        if not runner:
+            return self.log(f"!! Could not locate {self.RUNNER}")
+
+        cmd = [
+            sys.executable, runner, "transform",
+            "--carla-exe", exe,
+            "--input", self.cfg.transform_input_file,
+            "--output", self.cfg.transformer_output_path,
+        ]
+        docker_mount_path = getattr(self.cfg, "transform_docker_mount_path", "") or ""
+        if docker_mount_path:
+            cmd += ["--docker-mount-path", docker_mount_path]
+        rec_ext = getattr(self.cfg, "recording_extension", "") or ""
+        if rec_ext:
+            cmd += ["--recording-ext", rec_ext]
+        if getattr(self.cfg, "render_off_screen", False):
+            cmd.append("--offscreen")
+        if getattr(self.cfg, "render_quality_low", False):
+            cmd.append("--quality-low")
+
+        if getattr(self.cfg, "only_track_at_specific_interval", False):
+            cmd += [
+                "--only-track-at-specific-interval",
+                "--specific-track-interval",
+                str(getattr(self.cfg, "specific_track_interval", 0.5))
+            ]
+
+        self._start_and_stream(cmd)
+        self.log(">> [Data-AV Transformer] Done.")
+        return None

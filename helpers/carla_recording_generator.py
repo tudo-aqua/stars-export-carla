@@ -1,17 +1,18 @@
 import argparse
 import logging
-import math
 import random
 import time
-from datetime import datetime
-from typing import List
+from types import SimpleNamespace
+from typing import List, Optional
 
 import carla
-from carla import VehicleLightState as vLS, WeatherParameters, Vehicle, Actor, Map
-from carla import World, Client
+from carla import World, Client, WeatherParameters
+from more_itertools import flatten
 
-from carla_data_classes import DataWeatherParameters
-from carla_data_classes.data_enums import DataWeatherParametersType
+from carla_data_classes.dynamic import DataWeatherParameters
+from carla_data_classes.enums.DataWeatherParametersType import DataWeatherParametersType
+from data_av_static.lane_utils import _LaneUtils
+from data_av_static.world_builder import _BlockBuilder
 from helpers.carla_api_helper import CarlaAPIHelper
 from helpers.json_helper import JSONHelper
 
@@ -29,14 +30,6 @@ class CarlaDataGenerator:
         self.client = carla_client
         self.world: World = carla_client.get_world()
         self.map = self.world.get_map()
-
-    @staticmethod
-    def start_recording(client: Client, file_name: str, map_name: str, additional_infos=False) -> str:
-        recording_dir = JSONHelper.get_file_path_for_name(name=file_name, map_name=map_name,
-                                                          folder=JSONHelper.RECORDINGS_RUNS_FOLDER, file_ending="log")
-        print(f"Recording location: {recording_dir}")
-        client.start_recorder(recording_dir, additional_infos)
-        return recording_dir
 
     def get_actor_blueprints(self, world, filter, generation):
         bps = world.get_blueprint_library().filter(filter)
@@ -62,22 +55,24 @@ class CarlaDataGenerator:
             print("   Warning! Actor Generation is not valid. No actor will be spawned.")
             return []
 
-    def generate_traffic(self, args) -> List[int]:
+    def generate_traffic(self, args, client, world) -> List[int]:
         """
         This is a copy of the code in the shipped generate_traffic.py file of Carla
         """
         vehicles_list = []
         walkers_list = []
         all_id = []
-        client = carla.Client(args.host, args.port)
         client.set_timeout(10.0)
         synchronous_master = False
         random.seed(args.seed if args.seed is not None else int(time.time()))
 
-        world = client.get_world()
-
         traffic_manager = client.get_trafficmanager(args.tm_port)
-        traffic_manager.set_global_distance_to_leading_vehicle(2.5)
+        # 2.5m bumper-to-bumper is only a safe gap at low/urban speeds. At
+        # highway speed it's a fraction of a second of following distance,
+        # so dense highway traffic constantly triggers the TM's collision
+        # avoidance into hard braking/evasive steering. Give it more margin
+        # so those emergency maneuvers are rarer and less violent.
+        traffic_manager.set_global_distance_to_leading_vehicle(5.0)
         if args.respawn:
             traffic_manager.set_respawn_dormant_vehicles(True)
         if args.hybrid:
@@ -96,19 +91,54 @@ class CarlaDataGenerator:
             else:
                 synchronous_master = False
         else:
-            print("You are currently in asynchronous mode. If this is a traffic simulation, \
-                you could experience some issues. If it's not working correctly, switch to synchronous \
-                mode by using traffic_manager.set_synchronous_mode(True)")
+            # We're injecting traffic into an already-running session (e.g.
+            # a manual-driving session) instead of driving the world
+            # ourselves, so never touch synchronous_mode/fixed_delta_seconds
+            # here. But the world's synchronous_mode and the Traffic
+            # Manager's own synchronous_mode are independent flags, and the
+            # TM is a server-side singleton keyed by tm_port that outlives
+            # this client - so match the TM's mode to whatever the world's
+            # *actual* current mode already is instead of assuming it's
+            # async. Forcing a mismatch here (e.g. TM async while the
+            # world is actually synchronous) desyncs the TM's control loop
+            # from the real physics steps, which is exactly what makes
+            # TM-controlled vehicles oversteer and crash.
+            traffic_manager.set_synchronous_mode(settings.synchronous_mode)
+            synchronous_master = False
+            if not settings.synchronous_mode:
+                print("You are currently in asynchronous mode. If this is a traffic simulation, \
+                    you could experience some issues. If it's not working correctly, switch to synchronous \
+                    mode by using traffic_manager.set_synchronous_mode(True)")
 
         if args.no_rendering:
             settings.no_rendering_mode = True
+
+        # Widen the physics substep budget (PhysX default is 10 substeps of
+        # 0.01s = 0.1s of coverage per tick, i.e. it only stays numerically
+        # stable down to ~10 FPS). In asynchronous mode the tick delta is
+        # whatever the server's real frame time is, and that frame time gets
+        # worse the more vehicles are simulated with full physics nearby
+        # (hybrid physics mode only exempts vehicles outside its radius).
+        # A hard brake/evasive-steer command integrated over too few
+        # substeps for the actual elapsed time is exactly what produces the
+        # oversteering/crashing seen during emergency maneuvers in dense
+        # traffic near the ego. 16 is the maximum CARLA/PhysX allows.
+        settings.substepping = True
+        settings.max_substep_delta_time = 0.01
+        settings.max_substeps = 16
         world.apply_settings(settings)
 
         blueprints = self.get_actor_blueprints(world, args.filterv, args.generationv)
         blueprintsWalkers = self.get_actor_blueprints(world, args.filterw, args.generationw)
 
-
-        blueprints = [x for x in blueprints if x.get_attribute('base_type') == 'car']
+        if args.filterv == 'vehicle.*':
+            # Restrict the generic "any vehicle" wildcard to cars: bicycles/
+            # motorcycles behave very differently from car physics as
+            # autopilot-driven background traffic, and trucks/vans/buses are
+            # much rarer in practice. An explicit, narrower --filterv (e.g. a
+            # single blueprint id picked by the user) is trusted as-is, so a
+            # deliberately chosen truck/bus/etc. still gets spawned.
+            blueprints = [x for x in blueprints if x.get_attribute('base_type') == 'car']
 
         blueprints = sorted(blueprints, key=lambda bp: bp.id)
 
@@ -249,20 +279,360 @@ class CarlaDataGenerator:
         # Example of how to use Traffic Manager parameters
         traffic_manager.global_percentage_speed_difference(30.0)
 
-        world.tick()
+        # Only tick here if we are the one driving synchronous mode. In
+        # asynchronous mode (e.g. injecting traffic into an already-running
+        # session) ticking would either error out or, worse, leave the world
+        # stuck in synchronous mode with nobody left to advance it, freezing
+        # any other client (such as a manual-driving session) that expects
+        # the world to keep running on its own.
+        if not args.asynch and synchronous_master:
+            world.tick()
 
         return vehicles_list
 
-    @staticmethod
-    def change_map(client: Client) -> str:
-        maps = CarlaAPIHelper.get_usable_maps(client)
-        map = random.choice(maps)
-        if map == "/Game/Carla/Maps/Town10HD_Opt":
-            print("Map", map, "is already loaded.")
-            return map
-        print("Load map", map)
-        client.load_world(map)
-        return map
+    def _spawn_parked_vehicles(
+            self,
+            world: World,
+            count: int,
+            rng: random.Random,
+            *,
+            filterv: str = "vehicle.*",
+    ) -> list[carla.Actor]:
+        """
+        Spawn `count` parked vehicles on shoulder lanes.
+        Strategy:
+          - sample shoulder waypoints,
+          - for each, try a small search of (lateral, forward, z) offsets to find a collision-free pose,
+          - use compact vehicles,
+          - tag via role_name='parked', disable movement.
+        """
+        if count <= 0:
+            return []
+
+        # Shoulder candidates (centerline transforms)
+        transforms = self._find_shoulder_spawn_transforms(world, min_width_m=1.8)
+        if not transforms:
+            print("[CARLA] No shoulder transforms found for parked vehicles.")
+            return []
+
+        rng.shuffle(transforms)
+
+        # Compact vehicles only → much higher success rate on ~2 m shoulders
+        bps = list(world.get_blueprint_library().filter(filterv or "vehicle.*"))
+        small: list[carla.ActorBlueprint] = []
+        for bp in bps:
+            bid = bp.id.lower()
+            if any(k in bid for k in
+                   ("bus", "truck", "firetruck", "ambulance", "garbage", "sprinter", "van", "carlacola", "semi",
+                    "trailer")):
+                continue
+            # prefer 4-wheelers
+            if bp.has_attribute("number_of_wheels") and bp.get_attribute("number_of_wheels").as_int() < 4:
+                continue
+            small.append(bp)
+        candidates = small or bps  # fallback to any if filter empties
+
+        spawned: list[carla.Actor] = []
+        placed: list[carla.Location] = []
+
+        # Tuning knobs
+        min_spacing_m = 2.0  # allow close spacing; lower to 0.6 if you want even denser
+        lateral_margin_m = 0.5  # margin from outer shoulder edge
+        z_lift = 0.35  # spawn slightly above ground to avoid ground collision
+        fwd_nudge_vals = (0.0, 0.6, -0.6)  # try in-place, then forward/back
+        # try positions across the shoulder from near edge inward
+        lateral_fractions = (0.9, 0.7, 0.5, 0.3)  # relative to (lane_width/2)
+
+        def _too_close(loc: carla.Location) -> bool:
+            for p in placed:
+                dx = loc.x - p.x
+                dy = loc.y - p.y
+                dz = loc.z - p.z
+                if (dx * dx + dy * dy + dz * dz) < (min_spacing_m * min_spacing_m):
+                    return True
+            return False
+
+        amap = world.get_map()
+
+        for base_tf in transforms:
+            if len(spawned) >= count:
+                break
+
+            # verify shoulder at this transform
+            wp = amap.get_waypoint(base_tf.location, project_to_road=True, lane_type=carla.LaneType.Any)
+            if not wp or wp.lane_type != carla.LaneType.Shoulder:
+                continue
+
+            fwd = wp.transform.get_forward_vector()
+            right = wp.transform.get_right_vector()
+            half_w = max(0.0, wp.lane_width * 0.5)
+
+            # search small set of offsets (lateral across shoulder; fwd nudge ±)
+            placed_here = False
+            for frac in lateral_fractions:
+                if placed_here:
+                    break
+                lateral = max(0.0, half_w * frac - lateral_margin_m)
+
+                for fn in fwd_nudge_vals:
+                    if placed_here:
+                        break
+
+                    # compute candidate transform
+                    loc = carla.Location(
+                        x=base_tf.location.x + right.x * lateral + fwd.x * fn,
+                        y=base_tf.location.y + right.y * lateral + fwd.y * fn,
+                        z=base_tf.location.z + z_lift,
+                    )
+                    rot = carla.Rotation(
+                        pitch=base_tf.rotation.pitch,
+                        yaw=base_tf.rotation.yaw,
+                        roll=base_tf.rotation.roll,
+                    )
+                    tf = carla.Transform(loc, rot)
+
+                    # crowding check
+                    if _too_close(loc):
+                        continue
+
+                    # get a fresh blueprint by id (no .clone() in CARLA)
+                    base_bp = rng.choice(candidates)
+                    bp = world.get_blueprint_library().find(base_bp.id)
+                    if bp.has_attribute("role_name"):
+                        bp.set_attribute("role_name", "parked")
+
+                    actor = world.try_spawn_actor(bp, tf)
+                    if not actor:
+                        # final micro-nudge forward if needed
+                        loc2 = carla.Location(loc.x + fwd.x * 0.3, loc.y + fwd.y * 0.3, loc.z)
+                        tf2 = carla.Transform(loc2, rot)
+                        actor = world.try_spawn_actor(bp, tf2)
+
+                    if not actor:
+                        continue
+
+                    # pin it in place
+                    try:
+                        actor.set_autopilot(False)
+                    except Exception:
+                        pass
+                    try:
+                        actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0, hand_brake=True))
+                    except Exception:
+                        pass
+
+                    spawned.append(actor)
+                    placed.append(actor.get_transform().location)
+                    placed_here = True
+
+                    if len(spawned) >= count:
+                        break
+
+        print(f"Spawned {len(spawned)} parked vehicles (requested {count}).")
+        return spawned
+
+    def _to_asset_path(self, client: Client, name: str) -> Optional[str]:
+        """Accepts 'Town05' or a full asset path and returns the asset path, or None if not installed."""
+        availableMaps = client.get_available_maps()
+        name = (name or "").strip()
+        if not name:
+            return None
+        return next((map for map in availableMaps if name in map), None)
+
+    def _load_map_by_seed(self, client: Client, candidates: Optional[list[str]], seed: int) -> str:
+        """Pick a map deterministically from candidates using the seed; fall back to usable maps."""
+        if candidates:
+            pool_set = set()
+            for name in candidates:
+                if not name:
+                    continue
+                asset = self._to_asset_path(client, name)
+                if asset is None:
+                    print(f"!! Map '{name}' is not installed on this CARLA server; skipping.")
+                    continue
+                pool_set.add(asset)
+            pool = sorted(pool_set)
+        else:
+            pool = sorted({m for m in CarlaAPIHelper.get_usable_maps(client)})
+        if not pool:
+            raise RuntimeError("No candidate maps available to choose from.")
+
+        rng = random.Random(seed)
+        chosen = rng.choice(pool)
+
+        current = client.get_world().get_map().name
+        if chosen in current:
+            print(f"Map '{chosen}' is already loaded.")
+            return chosen
+
+        print(f"Load map '{chosen}'")
+        client.load_world(chosen)
+        return chosen
+
+    def run_recording_generation(
+            self,
+            client: Client,
+            *,
+            seed: int,
+            length_minutes: float,
+            number_of_vehicles: int,
+            number_of_walkers: int,
+            filterv: str = "vehicle.*",
+            generationv: str = "All",
+            filterw: str = "walker.pedestrian.*",
+            generationw: str = "2",
+            candidate_maps: Optional[list[str]] = None,
+            output_dir: Optional[str] = None,
+            no_rendering: bool = False,
+            number_of_parked: int = 0,
+    ) -> None:
+
+        """
+        Perform a single recording run in the already-connected CARLA server.
+        - Deterministically selects a map from candidate_maps using 'seed'
+        - Changes weather
+        - Spawns traffic
+        - Records for 'length_minutes'
+        - Stores outputs under 'output_dir' (if provided)
+        """
+        # Allow overriding output directory used by JSONHelper
+        if output_dir:
+            import os
+            os.makedirs(output_dir, exist_ok=True)
+            JSONHelper.RECORDINGS_RUNS_FOLDER = output_dir  # redirect all outputs
+
+        # Build an 'args' namespace expected by the existing helper methods in this module
+        args = SimpleNamespace(
+            # seeded determinism
+            seed=int(seed),
+
+            # sim/traffic manager settings expected by generate_traffic()
+            tm_port=8000,  # CARLA default TM port
+            respawn=False,  # only if you want dormant respawn
+            hybrid=False,  # TrafficManager hybrid physics
+            asynch=False,  # we run in synchronous mode
+            hero=False,  # no hero vehicle
+            car_lights_on=False,  # leave lights off globally
+
+            # rendering toggle
+            no_rendering=bool(no_rendering),
+
+            # actor counts and filters
+            number_of_vehicles=int(number_of_vehicles),
+            number_of_walkers=int(number_of_walkers),
+            filterv=str(filterv or "vehicle.*"),
+            generationv=str(generationv or "All"),
+            filterw=str(filterw or "walker.pedestrian.*"),
+            generationw=str(generationw or "2"),
+            number_of_parked=number_of_parked,
+
+            # duration (minutes -> used later)
+            length_of_run=float(length_minutes),
+        )
+
+        # Deterministic RNG for this run
+        print("Seed:", args.seed)
+        random.seed(args.seed)
+
+        print("Connect to carla simulator (reusing existing client)")
+        world: World = client.get_world()
+        print("Connected to Carla")
+
+        data_generator = CarlaDataGenerator(client)
+
+        # Weather first (weather gets logged later)
+        data_weather = data_generator.change_weather(world=world)
+
+        # Choose and load a map deterministically by seed
+        map_name = self._load_map_by_seed(client=client, candidates=candidate_maps, seed=args.seed)
+        time.sleep(5)  # give CARLA some breaths after map load
+
+        # Build the recording log file path
+        file_name = f"seed_{args.seed}"
+        recording_dir = JSONHelper.get_file_path_for_name(
+            name=file_name,
+            map_name=map_name,
+            file_ending="log",
+            folder=JSONHelper.RECORDINGS_RUNS_FOLDER,
+            prefix=getattr(JSONHelper, "RECORDING_FILE_NAME_PREFIX", "recording"),
+        )
+        try:
+            # Spawn traffic (your existing function configures TM/sync etc.)
+            data_generator.generate_traffic(args, client, world)
+
+            # Parked vehicles (if requested)
+            if number_of_parked and number_of_parked > 0:
+                print(f"[CARLA] Generate {number_of_parked} parked vehicles")
+                self._spawn_parked_vehicles(
+                    world,
+                    count=int(number_of_parked),
+                    rng=random.Random(seed + 13),  # independent but deterministic stream
+                    filterv=filterv,
+                )
+
+            # Switch world settings (sync/no_rendering) inside your generate_traffic() already,
+            # but we still start the recorder here before spawning traffic (like your main).
+            # additional_data=True is required so the log includes the "Dynamic actors"
+            # ground-truth linear_velocity/angular_velocity block - see
+            # helpers.kinematics.compute_recorded_velocities.
+            client.start_recorder(recording_dir, True)
+
+            # Record for the requested duration
+            snapshot = world.get_snapshot()
+            start_timestamp = snapshot.timestamp.elapsed_seconds
+            end_timestamp = start_timestamp + (args.length_of_run * 60)
+            current_timestamp = start_timestamp
+            while current_timestamp < end_timestamp:
+                world.tick()
+                current_timestamp = world.get_snapshot().timestamp.elapsed_seconds
+
+        finally:
+            # Stop and zip recorder log
+            try:
+                client.stop_recorder()
+            except Exception:
+                pass
+
+        # Zip and remove raw recorder log (matches your pattern at the bottom of file)
+        try:
+            JSONHelper.zip_and_delete_file(recording_dir)
+        except Exception as e:
+            print("Warning: failed to zip recording:", e)
+
+        # Save weather json next to recording
+        try:
+            weather_path = JSONHelper.get_file_path_for_name(
+                name=file_name,
+                map_name=map_name,
+                file_ending="json",
+                folder=JSONHelper.RECORDINGS_RUNS_FOLDER,
+                prefix=JSONHelper.WEATHER_FILE_NAME_PREFIX,
+            )
+            print("Save weather information to file", weather_path)
+            JSONHelper.log_weather(data_weather, weather_path)
+            JSONHelper.zip_and_delete_file(weather_path)
+        except Exception as e:
+            print("Warning: failed to save weather info:", e)
+
+        # Reset world and clean up actors (same as your main tail)
+        # Also reset the Traffic Manager's own synchronous_mode: it is a
+        # server-side singleton (keyed by tm_port) independent from the
+        # world's synchronous_mode, and leaving it set to True here would
+        # desync any later asynchronous session's Traffic Manager, causing
+        # TM-controlled vehicles to oversteer and crash.
+        client.get_trafficmanager(args.tm_port).set_synchronous_mode(False)
+        settings = world.get_settings()
+        settings.synchronous_mode = False
+        settings.no_rendering_mode = False
+        settings.fixed_delta_seconds = None
+        world.apply_settings(settings)
+
+        actors = world.get_actors()
+        print(f"Destroy {len(actors)} actors")
+        client.apply_batch([carla.command.DestroyActor(x) for x in actors])
+
+        time.sleep(0.5)
+        print(f"Generation of recording with seed {args.seed} complete")
 
     @staticmethod
     def change_weather(world: World) -> DataWeatherParameters:
@@ -311,207 +681,64 @@ class CarlaDataGenerator:
         world.set_weather(new_weather)
         return DataWeatherParameters.from_weather(new_weather, new_weather_enum)
 
+    def _find_shoulder_spawn_transforms(self, world: World, *, min_width_m: float = 1.8) -> list[carla.Transform]:
+        """
+        Return transforms along Shoulder lanes with approx given width.
+        Uses waypoints to align vehicles in driving direction.
+        """
+        amap = world.get_map()
+        # generate shoulder waypoints roughly every 2.5m (fine-grained)
+        waypoints = amap.generate_waypoints(2.5)
+        lane_utils = _LaneUtils(amap)
+        all_lanes = _BlockBuilder.collect_all_lanes_waypoints(waypoints)
+        shoulder_lanes = list(
+            filter(lambda l: (
+                    not l.is_junction and l.lane_type == carla.LaneType.Shoulder and l.lane_width >= min_width_m),
+                   all_lanes))
+        all_shoulder_lane_waypoints = list(
+            flatten(map(lambda l: map(lambda tupl: tupl[1], lane_utils.get_all_waypoints_for_lane(l)), shoulder_lanes)))
+        return list(map(lambda l: l.transform, all_shoulder_lane_waypoints))
 
-if __name__ == '__main__':
-    abort = False
-    argparser = argparse.ArgumentParser(
-        description=__doc__)
-    argparser.add_argument(
-        '--host',
-        metavar='H',
-        default='127.0.0.1',
-        help='IP of the host server (default: 127.0.0.1)')
-    argparser.add_argument(
-        '-p', '--port',
-        metavar='P',
-        default=2000,
-        type=int,
-        help='TCP port to listen to (default: 2000)')
-    argparser.add_argument(
-        '-n', '--number-of-vehicles',
-        metavar='N',
-        default=200,
-        type=int,
-        help='Number of vehicles (default: 30)')
-    argparser.add_argument(
-        '-w', '--number-of-walkers',
-        metavar='W',
-        default=30,
-        type=int,
-        help='Number of walkers (default: 10)')
-    argparser.add_argument(
-        '--filterv',
-        metavar='PATTERN',
-        default='vehicle.*',
-        help='Filter vehicle model (default: "vehicle.*")')
-    argparser.add_argument(
-        '--generationv',
-        metavar='G',
-        default='All',
-        help='restrict to certain vehicle generation (values: "1","2","All" - default: "All")')
-    argparser.add_argument(
-        '--filterw',
-        metavar='PATTERN',
-        default='walker.pedestrian.*',
-        help='Filter pedestrian type (default: "walker.pedestrian.*")')
-    argparser.add_argument(
-        '--generationw',
-        metavar='G',
-        default='2',
-        help='restrict to certain pedestrian generation (values: "1","2","All" - default: "2")')
-    argparser.add_argument(
-        '--tm-port',
-        metavar='P',
-        default=8000,
-        type=int,
-        help='Port to communicate with TM (default: 8000)')
-    argparser.add_argument(
-        '--asynch',
-        action='store_true',
-        help='Activate asynchronous mode execution')
-    argparser.add_argument(
-        '--hybrid',
-        action='store_true',
-        help='Activate hybrid mode for Traffic Manager')
-    argparser.add_argument(
-        '-s', '--seed',
-        metavar='S',
-        type=int,
-        default=0,
-        help='Set random device seed and deterministic mode for Traffic Manager')
-    argparser.add_argument(
-        '--car-lights-on',
-        action='store_true',
-        default=False,
-        help='Enable automatic car light management')
-    argparser.add_argument(
-        '--hero',
-        action='store_true',
-        default=False,
-        help='Set one of the vehicles as hero')
-    argparser.add_argument(
-        '--respawn',
-        action='store_true',
-        default=False,
-        help='Automatically respawn dormant vehicles (only in large maps)')
-    argparser.add_argument(
-        '--no-rendering',
-        action='store_true',
-        default=False,
-        help='Activate no rendering mode')
-    argparser.add_argument(
-        '-l', '--length-of-run',
-        metavar='L',
-        default=5,
-        type=float,
-        help='Length of the run in minutes (default: 5')
+
+if __name__ == "__main__":
+    argparser = argparse.ArgumentParser()
+    argparser.add_argument('--seed', type=int, default=0)
+    argparser.add_argument('--length-of-run', type=float, default=5.0)
+    argparser.add_argument('--number-of-vehicles', type=int, default=200)
+    argparser.add_argument('--number-of-walkers', type=int, default=30)
+    argparser.add_argument('--filterv', default="vehicle.*")
+    argparser.add_argument('--generationv', default="All")
+    argparser.add_argument('--filterw', default="walker.pedestrian.*")
+    argparser.add_argument('--generationw', default="2")
+    argparser.add_argument('--no-rendering', action='store_true')
+
+    # Repeatable map candidates; the chosen map is seed-deterministic
+    argparser.add_argument('--map', dest='maps', action='append', default=None,
+                           help='Candidate map (repeatable). If omitted, server-usable maps are used.')
+
+    # Optional output folder override
+    argparser.add_argument('--output-dir', default='', help='Override JSONHelper.RECORDINGS_RUNS_FOLDER')
 
     args = argparser.parse_args()
-    print("Seed:", args.seed)
-    random.seed(args.seed)
+
     print("Connect to carla simulator")
-    # Find carla simulator at localhost on port 2000
     client = carla.Client('localhost', 2000)
-    # Try to connect for 10 seconds. Fail if not successful
-    client.set_timeout(10.0)
-    world: World = client.get_world()
+    client.set_timeout(20.0)
     print("Connected to Carla")
-    data_generator = CarlaDataGenerator(client)
-    print("Generate traffic")
-    # Change weather to one of the predefined ones
-    data_weather = data_generator.change_weather(world=world)
-    map_name = data_generator.change_map(client=client)
-    time.sleep(5)
 
-    file_name = map_name + "_seed" + str(args.seed)
-    recording_dir = data_generator.start_recording(client=client, file_name=file_name, map_name=map_name)
+    generator = CarlaDataGenerator(client)
 
-    spawned_vehicle_ids = data_generator.generate_traffic(args)
-
-    try:
-        target_length_of_run_in_minutes = args.length_of_run
-        print("Record", target_length_of_run_in_minutes, "minutes.")
-        target_length_of_run = target_length_of_run_in_minutes * 60
-        first_tick_timestamp = datetime.now()
-        print("Current time:", first_tick_timestamp)
-        length_of_current_run = 0.0
-
-        actors: List[Actor] = list(world.get_actors())
-        # Decide which vehicle should be used as ego for later reference
-        ego_id: int = spawned_vehicle_ids[0]
-        # Get the actual actor based on the ego_id
-        actor = list(filter(lambda ac: ac.id == ego_id, actors))[0]
-        # Save position data to later check if the vehicles have moved
-        # Sometimes CARLA does not compute the movement of vehicles such that
-        # the simulation data is unusable
-        actor_x = actor.get_location().x
-        actor_y = actor.get_location().y
-        checked_for_moving_vehicles = False
-
-        # Loop until the simulation time as reached the desired length of run time
-        while length_of_current_run < target_length_of_run:
-            # Calculate next simulation step
-            world.tick()
-            # Calculate new time stamps and length of current run
-            current_tick_timestamp = datetime.now()
-            length_of_current_run += CarlaDataGenerator.SIMULATOR_FIXED_TICK_DELTA
-
-            # Sometimes the vehicles do not start moving in the simulation. Check and abort if so
-            if length_of_current_run >= 10 and not checked_for_moving_vehicles:
-                print("Check for non-moving vehicles")
-                # Get the current actors
-                new_actors: List[Actor] = list(world.get_actors())
-                new_actor = list(filter(lambda ac: ac.id == ego_id, new_actors))[0]
-                # Get the current position of the current ego vehicle
-                new_actor_x = new_actor.get_location().x
-                new_actor_y = new_actor.get_location().y
-                # Calculate distance for each axis
-                dist_x = pow(new_actor_x - actor_x, 2)
-                dist_y = pow(new_actor_y - actor_y, 2)
-                # Combine distance of both axes
-                dist = math.sqrt(dist_x + dist_y)
-                print(f"Distance: {dist}")
-                checked_for_moving_vehicles = True
-
-                # Check if the vehicles have moved
-                if dist < 0.5:
-                    abort = True
-                    print("The vehicles have not moved. Abort")
-                    # Something in the simulation has gone wrong. Log for later analysis
-                    JSONHelper.log_aborted_run(file_name)
-                    raise KeyboardInterrupt
-
-        print("Total elapsed seconds:", (datetime.now() - first_tick_timestamp).total_seconds(), "s")
-        print("Total elapsed simulation seconds:", length_of_current_run, "s")
-    except KeyboardInterrupt:
-        pass
-    finally:
-        if not abort:
-            # Stop the recorder
-            client.stop_recorder()
-            # Zip and delete log file
-            JSONHelper.zip_and_delete_file(recording_dir)
-            # Log the collected data into a json file
-            file_path = JSONHelper.get_file_path_for_name(name=file_name, map_name=map_name, file_ending="json",
-                                                          folder=JSONHelper.RECORDINGS_RUNS_FOLDER,
-                                                          prefix=JSONHelper.WEATHER_FILE_NAME_PREFIX)
-            print("Save weather information to file", file_path)
-            JSONHelper.log_weather(data_weather, file_path)
-            # Zip and delete weather file
-            JSONHelper.zip_and_delete_file(file_path)
-
-        # Reset the world settings to default values
-        settings = world.get_settings()
-        settings.synchronous_mode = False
-        settings.no_rendering_mode = False
-        settings.fixed_delta_seconds = None
-        world.apply_settings(settings)
-
-        # Remove all remaining actors from the simulation
-        actors = world.get_actors()
-
-        print(f"Destroy {len(actors)} actors")
-        client.apply_batch([carla.command.DestroyActor(x) for x in actors])
-
-        time.sleep(0.5)
-        print(f"Generation of recording with seed {args.seed} complete")
+    generator.run_recording_generation(
+        client,
+        seed=args.seed,
+        length_minutes=args.length_of_run,
+        number_of_vehicles=args.number_of_vehicles,
+        number_of_walkers=args.number_of_walkers,
+        filterv=args.filterv,
+        generationv=args.generationv,
+        filterw=args.filterw,
+        generationw=args.generationw,
+        candidate_maps=args.maps,
+        output_dir=(args.output_dir or None),
+        no_rendering=bool(args.no_rendering),
+    )

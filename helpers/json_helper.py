@@ -1,12 +1,14 @@
 import json
 import os
+import zipfile
 from datetime import datetime
 from os.path import dirname
-from typing import List
-import zipfile
 from pathlib import Path
+from typing import List, Union, IO
 
-from carla_data_classes import DataBlock, TickData, DataWeatherParameters
+from carla_data_classes.dynamic import TickData, DataWeatherParameters
+from carla_data_classes.static.DataBlock import DataBlock
+from carla_data_classes.static.DataWorld import DataWorld
 
 
 class JSONHelper:
@@ -94,7 +96,7 @@ class JSONHelper:
     def log_error(file_name: str, name: str, error_message: str) -> None:
         path = JSONHelper.get_file_path_for_name(name=file_name, folder=JSONHelper.ERROR_FOLDER, file_ending="txt",
                                                  add_date=True)
-        print(f"Log {file_name} to", path)
+        print(f">> [Error] Log {file_name} to", path)
         with open(path, "a") as aborted_runs:
             aborted_runs.write(f"{datetime.now()}: {name}\n")
             aborted_runs.write(f"\t\t {error_message}\n")
@@ -103,7 +105,7 @@ class JSONHelper:
     def log_aborted_run(name) -> None:
         path = JSONHelper.get_file_path_for_name(name="aborted_runs", folder=JSONHelper.ERROR_FOLDER, file_ending="txt",
                                                  add_date=True)
-        print("Log aborted run to", path)
+        print(">> [Error] Log aborted run to", path)
         with open(path, "a") as aborted_runs:
             aborted_runs.write(f"{datetime.now()}: {name}\n")
 
@@ -111,7 +113,7 @@ class JSONHelper:
     def log_invalid_run(name) -> None:
         path = JSONHelper.get_file_path_for_name(name="invalid_runs", folder=JSONHelper.ERROR_FOLDER, file_ending="txt",
                                                  add_date=True)
-        print("Log invalid run to", path)
+        print(">> [Error] Log invalid run to", path)
         with open(path, "a") as aborted_runs:
             aborted_runs.write(f"{datetime.now()}: {name}\n")
 
@@ -120,22 +122,26 @@ class JSONHelper:
         path = JSONHelper.get_file_path_for_name(name="failed_carla_runs", folder=JSONHelper.ERROR_FOLDER,
                                                  file_ending="txt",
                                                  add_date=True)
-        print("Log aborted run to", path)
+        print(">> [Error] Log aborted run to", path)
         with open(path, "a") as aborted_runs:
             aborted_runs.write(f"{datetime.now()}: {name}\n")
 
     @staticmethod
     def log_tick_data(ticks: List[TickData], path: os.path) -> None:
-        # Override existing files
+        directory = os.path.dirname(path)
+        if not os.path.exists(directory):
+            os.makedirs(directory)
         with open(path, "w") as logfile:
             json_string = TickData.list_to_json(ticks)
             logfile.write(json_string)
 
     @staticmethod
-    def log_data_blocks(blocks: List[DataBlock], path: os.path) -> None:
-        # Override existing files
+    def log_data_world(data_world: DataWorld, path: os.path) -> None:
+        directory = os.path.dirname(path)
+        if not os.path.exists(directory):
+            os.makedirs(directory)
         with open(path, "w") as logfile:
-            json_string = DataBlock.list_to_json(blocks)
+            json_string = DataWorld.to_json(data_world)
             logfile.write(json_string)
 
     @staticmethod
@@ -146,11 +152,28 @@ class JSONHelper:
             logfile.write(json_string)
 
     @staticmethod
-    def load_data_blocks(path: os.path) -> [DataBlock]:
-        with open(path) as logfile:
-            data = json.loads(logfile.read())
-            # TODO Check for invalid json files
-            return DataBlock.from_list(data)
+    def load_data_world(source: Union[str, os.PathLike, IO]) -> DataWorld:
+        """Load JSON from either a filesystem path or a file-like (e.g. ZipExtFile)."""
+
+        # Determine if we need to open it ourselves
+        needs_close = False
+        if hasattr(source, "read"):
+            # It's already a file-like (ZipExtFile or open file)
+            f = source
+        else:
+            # It's a path → open it
+            f = open(source, "r", encoding="utf-8")
+            needs_close = True
+
+        try:
+            # Use json.load so we can pass it the file‐object directly
+            data = json.load(f)
+        finally:
+            if needs_close:
+                f.close()
+
+        # Convert your list of dicts into DataBlock instances
+        return DataWorld.from_dict(data)
 
     @staticmethod
     def load_tick_data(path: os.path) -> List[TickData]:
@@ -180,15 +203,15 @@ class JSONHelper:
         modes = {zipfile.ZIP_DEFLATED: 'deflated',
                  zipfile.ZIP_STORED: 'stored',
                  }
-        print('creating archive')
+        print(f'>> [ZIP] Creating zip archive at path: "{path}"')
         zip_file_path = os.path.splitext(path)[0] + ".zip"
         archive_name = os.path.basename(path)
         zf = zipfile.ZipFile(zip_file_path, mode='w')
         try:
-            print(f'adding {path}', modes[compression])
+            print(f'>> [ZIP] Adding file to zip: {path}')
             zf.write(path, arcname=archive_name, compress_type=compression)
         finally:
-            print('closing')
+            print('>> [ZIP] Close zip file')
             zf.close()
 
     @staticmethod

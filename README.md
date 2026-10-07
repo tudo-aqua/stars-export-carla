@@ -145,6 +145,8 @@ The functions in this repository generate three kinds of data types:
     - DataPedestrian
     - DataTrafficSign
     - DataVehicle
+    - DataLaneMarkingContact (per-actor `lane_marking_contacts`: which lane markings the
+      bounding box is touching/crossing this tick; empty when it lies within its lane)
    </details>
 3. **Weather**: In here, the weather parameters of a scenario is stored
    <details><summary>Class details</summary>
@@ -224,3 +226,14 @@ Currently supported:
 - Town01
 - Town02
 - Town10
+
+# Create Docker image
+A Docker image based on the `Dockerfile` can be created using the following command:
+```bash
+docker build -t local/stars-export-carla:latest .
+```
+
+The Docker image can then be saved to the disk using the following command:
+```bash
+docker save -o stars-export-carla-container.tar.gz local/stars-export-carla:latest
+```
