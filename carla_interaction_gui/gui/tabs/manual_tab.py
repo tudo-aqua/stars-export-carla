@@ -5,6 +5,7 @@ from tkinter import ttk, messagebox
 
 from carla_interaction_gui.gui.constants import ALLOWED_CARLA_MAPS, ALLOWED_EGO_VEHICLES
 from carla_interaction_gui.gui.widgets import entry_row, validate_number
+from carla_interaction_gui.workers.DisableTrafficManagerWorker import DisableTrafficManagerWorker
 from carla_interaction_gui.workers.ManualControlWorker import ManualControlWorker
 from carla_interaction_gui.workers.MoveLatestRecordingWorker import MoveLatestRecordingWorker
 from carla_interaction_gui.workers.SpawnTrafficWorker import SpawnTrafficWorker
@@ -119,6 +120,10 @@ class ManualTab(ttk.Frame):
             width=32
         ).pack(side="left")
 
+        tk.Checkbutton(options, text="Disable traffic manager for other vehicles (they will not move)",
+                       variable=app.manual_disable_traffic_manager_enabled_variable,
+                       anchor="w").pack(fill="x", padx=6, pady=2)
+
         tk.Button(self, text="Start manual driving", width=25, command=self._start_manual).pack(pady=8)
         tk.Button(self, text="Start manual driving (Steering Wheel)",
                   command=self._start_manual_steering_wheel).pack(pady=2)
@@ -171,7 +176,7 @@ class ManualTab(ttk.Frame):
         )
         app.manual_workers.append(w)
         app.attach_worker(w, stop_button=self.stop_btn)
-        self._schedule_spawn_traffic(w, number_of_vehicles)
+        self._schedule_post_start_actions(w, number_of_vehicles)
 
     def _start_manual_steering_wheel(self):
         """Start the primary manual driving (exclusive), reading input from a steering wheel/joystick."""
@@ -198,7 +203,7 @@ class ManualTab(ttk.Frame):
         )
         app.manual_workers.append(w)
         app.attach_worker(w, stop_button=self.stop_btn)
-        self._schedule_spawn_traffic(w, number_of_vehicles)
+        self._schedule_post_start_actions(w, number_of_vehicles)
 
     def _spawn_manual_extra(self, *, filter_str: str):
         """
@@ -238,29 +243,57 @@ class ManualTab(ttk.Frame):
             messagebox.showerror("Invalid value", "Number of vehicles to spawn must be a whole number.")
             return None
 
-    def _schedule_spawn_traffic(self, manual_worker, number_of_vehicles: int):
+    def _schedule_post_start_actions(self, manual_worker, number_of_vehicles: int):
         """
-        Spawns a batch of random autopilot vehicles into the just-started
-        CARLA session after a delay, giving it time to restart, load the
-        map, and connect before traffic gets injected. Skipped if the
-        session was stopped again before the delay elapsed.
+        After a delay that gives the just-(re)started CARLA session time to
+        restart, load the map, connect, and spawn the ego vehicle, optionally
+        spawns a batch of random autopilot vehicles and/or disables the
+        Traffic Manager for all non-ego vehicles so they sit still. Skipped
+        (or, for the disable step, run immediately) if there's nothing to do;
+        the whole thing is skipped if the session was stopped again before
+        the delay elapsed.
         """
-        if number_of_vehicles <= 0:
+        disable_traffic_manager = self.app.manual_disable_traffic_manager_enabled_variable.get()
+        if number_of_vehicles <= 0 and not disable_traffic_manager:
             return
 
         def fire():
-            if manual_worker.is_alive() and manual_worker in self.app.manual_workers:
-                self._spawn_traffic_now(number_of_vehicles)
+            if not (manual_worker.is_alive() and manual_worker in self.app.manual_workers):
+                return
+            if number_of_vehicles > 0:
+                spawn_worker = self._spawn_traffic_now(number_of_vehicles)
+                if disable_traffic_manager:
+                    self._wait_then_disable_traffic_manager(spawn_worker)
+            elif disable_traffic_manager:
+                self._disable_traffic_manager_now()
 
         self.app.after(self._SPAWN_TRAFFIC_DELAY_MS, fire)
 
-    def _spawn_traffic_now(self, number_of_vehicles: int):
+    def _spawn_traffic_now(self, number_of_vehicles: int) -> SpawnTrafficWorker:
         app = self.app
         cfg = app.collect_cfg()
         filter_vehicles = cfg.manual_spawn_traffic_vehicle_type if cfg.manual_spawn_traffic_single_type_enabled \
             else None
         w = SpawnTrafficWorker(
             cfg, app.log, number_of_vehicles=number_of_vehicles, filter_vehicles=filter_vehicles)
+        app.manual_workers.append(w)
+        app.attach_worker(w)
+        return w
+
+    def _wait_then_disable_traffic_manager(self, spawn_worker: SpawnTrafficWorker):
+        """Waits for the just-launched spawn-traffic job to finish before disabling the Traffic Manager."""
+
+        def poll():
+            if spawn_worker.is_alive():
+                self.app.after(500, poll)
+            else:
+                self._disable_traffic_manager_now()
+
+        poll()
+
+    def _disable_traffic_manager_now(self):
+        app = self.app
+        w = DisableTrafficManagerWorker(app.collect_cfg(), app.log)
         app.manual_workers.append(w)
         app.attach_worker(w)
 

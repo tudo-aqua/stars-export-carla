@@ -734,6 +734,46 @@ def run_spawn_traffic(args):
     print(">> [SpawnTraffic] done")
 
 
+def run_disable_traffic_manager(args):
+    """
+    Connect to an already-running CARLA server and take every vehicle that
+    isn't the manually-driven ego vehicle or a manually-controlled extra
+    actor off Traffic Manager control, braking it to a stop so it no longer
+    moves on its own.
+    """
+    import time
+    import carla
+
+    client = carla.Client('localhost', 2000)
+    client.set_timeout(20.0)
+
+    try:
+        world = client.get_world()
+        _ = world.wait_for_tick(10.0)
+    except Exception:
+        time.sleep(1.0)
+        world = client.get_world()
+
+    # role_names set by this GUI: 'hero' (the primary manually-driven ego
+    # vehicle, see manual_control_keyboard.py's --rolename default) and
+    # 'manual_control' (extra manually-driven actors, see
+    # ManualTab._spawn_manual_extra). Everything else was spawned by
+    # generate_traffic() with role_name='autopilot' and is Traffic Manager
+    # controlled.
+    excluded_role_names = {"hero", "manual_control"}
+    stop_control = carla.VehicleControl(throttle=0.0, brake=1.0, hand_brake=True)
+
+    stopped = 0
+    for vehicle in world.get_actors().filter("vehicle.*"):
+        if vehicle.attributes.get("role_name") in excluded_role_names:
+            continue
+        vehicle.set_autopilot(False)
+        vehicle.apply_control(stop_control)
+        stopped += 1
+
+    print(f">> [DisableTrafficManager] stopped {stopped} vehicle(s)")
+
+
 def run_recgen(args):
     """
     For each seed:
@@ -937,6 +977,12 @@ def main():
     pst.add_argument("--filterw", default="walker.pedestrian.*")
     pst.add_argument("--generationw", default="2")
     pst.set_defaults(_fn=run_spawn_traffic)
+
+    # disable_traffic_manager (expects server to be running, e.g. from a manual driving session)
+    pdt = sub.add_parser(
+        "disable_traffic_manager",
+        help="Take all non-hero, non-manually-controlled vehicles off Traffic Manager control so they stop moving")
+    pdt.set_defaults(_fn=run_disable_traffic_manager)
 
     # Duration (minutes)
     pr.add_argument("--length-of-run", type=float, default=5.0)

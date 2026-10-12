@@ -25,6 +25,7 @@ class Config:
     manual_spawn_traffic_enabled: bool = False
     manual_spawn_traffic_single_type_enabled: bool = False
     manual_spawn_traffic_vehicle_type: str = "vehicle.lincoln.mkz_2017"
+    manual_disable_traffic_manager_enabled: bool = False
 
     transform_input_file: str = ""
     transform_docker_mount_path: str = ""

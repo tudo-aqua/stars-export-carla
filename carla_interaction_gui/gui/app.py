@@ -59,6 +59,8 @@ class CarlaInteractionGUI(tk.Tk):
         else:
             default_traffic_vehicle_type = ALLOWED_EGO_VEHICLES[0]
         self.manual_spawn_traffic_vehicle_type_variable = tk.StringVar(value=default_traffic_vehicle_type)
+        self.manual_disable_traffic_manager_enabled_variable = tk.BooleanVar(
+            value=getattr(self.config, "manual_disable_traffic_manager_enabled", False))
 
         self.transform_input_file_variable = tk.StringVar(value=self.config.transform_input_file)
         self.transform_docker_mount_path_variable = tk.StringVar(
@@ -281,6 +283,8 @@ class CarlaInteractionGUI(tk.Tk):
         config.manual_spawn_traffic_single_type_enabled = \
             bool(self.manual_spawn_traffic_single_type_enabled_variable.get())
         config.manual_spawn_traffic_vehicle_type = self.manual_spawn_traffic_vehicle_type_variable.get().strip()
+        config.manual_disable_traffic_manager_enabled = \
+            bool(self.manual_disable_traffic_manager_enabled_variable.get())
         config.transform_input_file = self.transform_input_file_variable.get().strip()
         config.transform_docker_mount_path = self.transform_docker_mount_path_variable.get().strip()
         config.transformer_output_path = self.transformer_output_path_variable.get().strip()
@@ -359,6 +363,7 @@ class CarlaInteractionGUI(tk.Tk):
                 self.manual_spawn_traffic_enabled_variable,
                 self.manual_spawn_traffic_single_type_enabled_variable,
                 self.manual_spawn_traffic_vehicle_type_variable,
+                self.manual_disable_traffic_manager_enabled_variable,
                 self.transform_input_file_variable,
                 self.transform_docker_mount_path_variable,
                 self.transformer_output_path_variable,
