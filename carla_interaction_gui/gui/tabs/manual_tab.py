@@ -20,18 +20,12 @@ class ManualTab(Tab):
     manually-controlled actors, and archive the resulting recording.
     """
 
-    # "Start manual driving" restarts the CARLA server before it even
-    # launches the pygame client (see ManualControlWorker -> restart_carla in
-    # carla_launcher.py): kill_carla, a 5s cooldown, then the new process
-    # gets a 20s boot wait before its map gets (re)loaded - all of that runs
-    # before pygame is even started, let alone connected and the ego vehicle
-    # spawned. Spawning traffic any earlier than that just has it wiped out
-    # again the moment the map load finishes. Keep this in sync with
-    # restart_carla's cooldown/boot defaults if those ever change.
-    _CARLA_COOLDOWN_S = 5
-    _CARLA_BOOT_S = 20
-    _MAP_LOAD_AND_EGO_SPAWN_BUFFER_S = 20
-    _SPAWN_TRAFFIC_DELAY_MS = (_CARLA_COOLDOWN_S + _CARLA_BOOT_S + _MAP_LOAD_AND_EGO_SPAWN_BUFFER_S) * 1000
+    # "Start manual driving" restarts the CARLA server and loads the map
+    # before it launches the pygame client, which then spawns the ego vehicle.
+    # Traffic spawned any earlier would be wiped out by that restart/map load,
+    # so it starts once the client is launched and then waits (up to this
+    # long) for the ego vehicle to appear.
+    _WAIT_FOR_EGO_VEHICLE_S = 120
 
     def __init__(self, app):
         super().__init__(app, "Drive around in CARLA manually, add further manually controlled actors and "
@@ -158,13 +152,11 @@ class ManualTab(Tab):
 
     def _schedule_post_start_actions(self, manual_worker, number_of_vehicles: int):
         """
-        After a delay that gives the just-(re)started CARLA session time to
-        restart, load the map, connect, and spawn the ego vehicle, optionally
-        spawns a batch of random autopilot vehicles and/or disables the
-        Traffic Manager for all non-ego vehicles so they sit still. Skipped
-        (or, for the disable step, run immediately) if there's nothing to do;
-        the whole thing is skipped if the session was stopped again before
-        the delay elapsed.
+        Once the just-(re)started CARLA session has launched its driving
+        client, optionally spawns a batch of random autopilot vehicles (after
+        the ego vehicle appeared) and/or disables the Traffic Manager for all
+        non-ego vehicles so they sit still. Skipped if there's nothing to do,
+        or if the session is stopped before its client launched.
         """
         disable_traffic_manager = self.app.settings["manual_disable_traffic_manager_enabled"].get()
         if number_of_vehicles <= 0 and not disable_traffic_manager:
@@ -173,6 +165,9 @@ class ManualTab(Tab):
         def fire():
             if not (manual_worker.is_alive() and manual_worker in self.app.manual_workers):
                 return
+            if not manual_worker.client_started.is_set():
+                QTimer.singleShot(500, fire)
+                return
             if number_of_vehicles > 0:
                 spawn_worker = self._spawn_traffic_now(number_of_vehicles)
                 if disable_traffic_manager:
@@ -180,15 +175,15 @@ class ManualTab(Tab):
             elif disable_traffic_manager:
                 self._disable_traffic_manager_now()
 
-        QTimer.singleShot(self._SPAWN_TRAFFIC_DELAY_MS, fire)
+        fire()
 
     def _spawn_traffic_now(self, number_of_vehicles: int) -> SpawnTrafficWorker:
         app = self.app
         cfg = app.collect_cfg()
         filter_vehicles = cfg.manual_spawn_traffic_vehicle_type if cfg.manual_spawn_traffic_single_type_enabled \
             else None
-        w = SpawnTrafficWorker(
-            cfg, app.log, number_of_vehicles=number_of_vehicles, filter_vehicles=filter_vehicles)
+        w = SpawnTrafficWorker(cfg, app.log, number_of_vehicles=number_of_vehicles, filter_vehicles=filter_vehicles,
+                               wait_for_hero=self._WAIT_FOR_EGO_VEHICLE_S)
         app.manual_workers.append(w)
         app.attach_worker(w)
         return w

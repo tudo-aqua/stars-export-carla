@@ -35,8 +35,7 @@ class ServerTab(Tab):
             if not app.validate_paths([("CARLA executable", "carla_executable", "carla")]):
                 return
             app.clear_log()
-            app.carla_worker = CarlaServerWorker(app.collect_cfg(), app.log)
-            app.carla_worker.start()
+            app.start_carla_worker(CarlaServerWorker(app.collect_cfg(), app.log))
             self.server_btn.setText("Stop CARLA server")
             self.stop_btn.setEnabled(True)
 

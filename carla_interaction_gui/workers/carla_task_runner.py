@@ -679,6 +679,23 @@ def run_recgen_once(args):
     print(f">> [RecGen-Once] seed {args.seed} finished")
 
 
+def _wait_for_hero(client, timeout: float) -> bool:
+    """Wait until the manually driven ego vehicle (role name 'hero') exists in the world."""
+    print(f">> [SpawnTraffic] Waiting for the ego vehicle (up to {timeout:.0f}s)")
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            vehicles = client.get_world().get_actors().filter("vehicle.*")
+            if any(v.attributes.get("role_name") == "hero" for v in vehicles):
+                print(">> [SpawnTraffic] Ego vehicle is there")
+                return True
+        except RuntimeError:
+            pass  # server busy, e.g. still loading the map
+        if time.monotonic() > deadline:
+            return False
+        time.sleep(0.5)
+
+
 def run_spawn_traffic(args):
     """
     Connect to an already-running CARLA server and spawn a batch of
@@ -692,6 +709,12 @@ def run_spawn_traffic(args):
 
     client = carla.Client('localhost', 2000)
     client.set_timeout(20.0)
+
+    # Traffic spawned before the ego vehicle (i.e. before the driving
+    # client's map load is done) would be wiped again.
+    if args.wait_for_hero > 0 and not _wait_for_hero(client, args.wait_for_hero):
+        print(f"!! [SpawnTraffic] No ego vehicle after {args.wait_for_hero:.0f}s; not spawning traffic")
+        return 1
 
     try:
         world = client.get_world()
@@ -746,6 +769,12 @@ def run_disable_traffic_manager(args):
 
     client = carla.Client('localhost', 2000)
     client.set_timeout(20.0)
+
+    # Traffic spawned before the ego vehicle (i.e. before the driving
+    # client's map load is done) would be wiped again.
+    if args.wait_for_hero > 0 and not _wait_for_hero(client, args.wait_for_hero):
+        print(f"!! [SpawnTraffic] No ego vehicle after {args.wait_for_hero:.0f}s; not spawning traffic")
+        return 1
 
     try:
         world = client.get_world()
@@ -981,6 +1010,8 @@ def main():
     pst.add_argument("--generationv", default="All")
     pst.add_argument("--filterw", default="walker.pedestrian.*")
     pst.add_argument("--generationw", default="2")
+    pst.add_argument("--wait-for-hero", type=float, default=0,
+                     help="Seconds to wait for the ego vehicle (role name 'hero') before spawning; 0 = don't wait")
     pst.set_defaults(_fn=run_spawn_traffic)
 
     # disable_traffic_manager (expects server to be running, e.g. from a manual driving session)

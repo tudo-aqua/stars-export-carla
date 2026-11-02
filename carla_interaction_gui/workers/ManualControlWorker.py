@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 from pathlib import Path
 
 from carla_interaction_gui.carla_launcher import kill_carla
@@ -36,11 +37,17 @@ class ManualControlWorker(ThreadWorker):
         self.restart_before = restart_before
         self.kill_server_after = kill_server_after
         self.exclusive = exclusive
+        # Set once the driving client is launched into the (re)started server;
+        # the GUI waits for it before spawning traffic.
+        self.client_started = threading.Event()
 
     def run(self):
         if self.restart_before:
             self.log(">> [CARLA] Rebooting CARLA")
-            self._restart_carla()
+            if not self._restart_carla():
+                if self.kill_server_after:
+                    kill_carla(log=self.log)
+                return
             if self.cancelled:
                 return
 
@@ -57,6 +64,7 @@ class ManualControlWorker(ThreadWorker):
             cmd += ["--camera-elevation", str(self.camera_elevation)]
         if self.camera_tilt is not None:
             cmd += ["--camera-tilt", str(self.camera_tilt)]
+        self.client_started.set()
         try:
             # wheel_config.ini is loaded via a path relative to the working directory,
             # so this must run with the script's own folder as cwd.

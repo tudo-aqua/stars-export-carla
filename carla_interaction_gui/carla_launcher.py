@@ -1,20 +1,24 @@
 from __future__ import annotations
 
 import os
+import socket
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Callable
 
 import psutil
 
-from carla_interaction_gui.carla_versions import is_start_script, start_script_for
+from carla_interaction_gui.carla_versions import is_start_script, python_api_env, start_script_for
 from carla_interaction_gui.gui.constants import (
+    CARLA_BOOT_TIMEOUT_S,
     CARLA_DOCKER_CONTAINER_NAME,
     CARLA_DOCKER_RECORDINGS_CONTAINER_DIR,
     CARLA_DOCKER_RECORDINGS_HOST_DIR,
     CARLA_DOCKER_RUN_ARGS,
     CARLA_DOCKER_SERVER_ARGS,
+    CARLA_STOP_TIMEOUT_S,
 )
 
 # The CARLA Python API (`import carla`) is only imported inside the functions
@@ -22,6 +26,25 @@ from carla_interaction_gui.gui.constants import (
 # version matching the server put on PYTHONPATH (see carla_versions). The GUI
 # process imports this module too, for kill_carla/restart_carla, and must not
 # load any CARLA API itself.
+
+# Where every task expects the server (the CARLA defaults).
+CARLA_HOST = "localhost"
+CARLA_PORT = 2000
+
+_CARLA_PROCESS_NAMES = (
+    "CarlaUE4-Linux-Shipping", "CarlaUE4.sh",
+    "CarlaUnreal-Linux-Shipping", "CarlaUnreal.sh",
+)
+
+# Run in a subprocess with the selected Python API: succeeds once the server
+# serves requests. The RPC port opens a few seconds before that, so an open
+# port alone isn't enough.
+_READY_PROBE = (
+    "import sys, carla\n"
+    "client = carla.Client(sys.argv[1], int(sys.argv[2]))\n"
+    "client.set_timeout(2.0)\n"
+    "client.get_world()\n"
+)
 
 
 def kill_carla(log: Callable[[str], None] | None = None) -> None:
@@ -46,10 +69,7 @@ def kill_carla(log: Callable[[str], None] | None = None) -> None:
     """
     _log = log or print
     for proc in psutil.process_iter(["name"]):
-        if proc.info["name"] in (
-                "CarlaUE4-Linux-Shipping", "CarlaUE4.sh",
-                "CarlaUnreal-Linux-Shipping", "CarlaUnreal.sh",
-        ):
+        if proc.info["name"] in _CARLA_PROCESS_NAMES:
             try:
                 _log(f">> [CARLA] Killing existing instance: {proc.info['name']}")
                 proc.kill()
@@ -79,6 +99,89 @@ def kill_carla(log: Callable[[str], None] | None = None) -> None:
         _log(">> [CARLA] 'docker kill' timed out")
 
 
+def _port_open(host: str = CARLA_HOST, port: int = CARLA_PORT) -> bool:
+    try:
+        socket.create_connection((host, port), timeout=0.5).close()
+        return True
+    except OSError:
+        return False
+
+
+def _carla_still_running() -> str | None:
+    """What of a previous CARLA server is still around, if anything."""
+    try:
+        if subprocess.run(["docker", "ps", "-q", "-f", f"name=^{CARLA_DOCKER_CONTAINER_NAME}$"],
+                          capture_output=True, text=True, timeout=10).stdout.strip():
+            return f"docker container '{CARLA_DOCKER_CONTAINER_NAME}'"
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    for proc in psutil.process_iter(["name"]):
+        if proc.info["name"] in _CARLA_PROCESS_NAMES:
+            return f"process {proc.info['name']} (pid={proc.pid})"
+    if _port_open():
+        return f"something listening on port {CARLA_PORT}"
+    return None
+
+
+def wait_until_stopped(timeout: float = CARLA_STOP_TIMEOUT_S, log: Callable[[str], None] | None = None) -> bool:
+    """
+    Wait until no CARLA server is left (container, process or port 2000), so
+    a new one can bind the port. Returns False if one is still around after
+    `timeout` seconds.
+    """
+    _log = log or print
+    deadline = time.monotonic() + timeout
+    while (leftover := _carla_still_running()) is not None:
+        if time.monotonic() > deadline:
+            _log(f">> [CARLA] Warning: {leftover} still running after {timeout:.0f}s")
+            return False
+        time.sleep(0.2)
+    return True
+
+
+def wait_until_ready(
+        server: subprocess.Popen,
+        *,
+        timeout: float = CARLA_BOOT_TIMEOUT_S,
+        python_api: str | None = None,
+        log: Callable[[str], None] | None = None,
+) -> None:
+    """
+    Wait until the just-started CARLA server serves requests. Raises if the
+    server process exits while booting or isn't ready after `timeout` seconds
+    (a first start of an image can take much longer than later ones, e.g.
+    while compiling shaders).
+
+    The check imports the CARLA Python API in a subprocess: with `python_api`
+    given that version (for callers in the GUI process, which must not import
+    it), otherwise whatever this process' environment provides.
+    """
+    _log = log or print
+    env = python_api_env(python_api, _log) if python_api else None
+    started = time.monotonic()
+    next_report = started + 10
+    while True:
+        exit_code = server.poll()
+        if exit_code is not None:
+            raise RuntimeError(f"CARLA server exited with code {exit_code} while booting")
+        if _port_open():
+            try:
+                probe = subprocess.run([sys.executable, "-c", _READY_PROBE, CARLA_HOST, str(CARLA_PORT)],
+                                       env=env, capture_output=True, timeout=15)
+                if probe.returncode == 0:
+                    _log(f">> [CARLA] Server ready after {time.monotonic() - started:.1f}s")
+                    return
+            except subprocess.TimeoutExpired:
+                pass
+        now = time.monotonic()
+        if now - started > timeout:
+            raise TimeoutError(f"CARLA server not ready after {timeout:.0f}s")
+        if now >= next_report:
+            _log(f">> [CARLA] Still waiting for the server to boot ({now - started:.0f}s)")
+            next_report = now + 10
+        time.sleep(0.5)
+
+
 def _docker_run_command(image: str, server_args: list[str]) -> list[str]:
     """The `docker run` command starting a CARLA server from the given image."""
     recordings_host_dir = Path(CARLA_DOCKER_RECORDINGS_HOST_DIR).expanduser()
@@ -102,13 +205,15 @@ def start_carla(
         render_off_screen: bool = True,
         quality_low: bool = True,
         map_name: str | None = None,
-        boot: float = 20.0,
+        boot_timeout: float = CARLA_BOOT_TIMEOUT_S,
+        python_api: str | None = None,
         log: Callable[[str], None] | None = None,
 ) -> None:
     """
-    Launch a CARLA server and optionally set the map after an optional boot
-    wait. `exe` is either a local start script (see carla_versions.is_start_script)
-    or the name of a docker image to start a fresh container from.
+    Launch a CARLA server, wait until it is ready (see wait_until_ready) and
+    optionally set the map. `exe` is either a local start script (see
+    carla_versions.is_start_script) or the name of a docker image to start a
+    fresh container from.
     """
     _log = log or print
 
@@ -128,12 +233,10 @@ def start_carla(
         cmd = _docker_run_command(exe, server_args)
 
     _log(">> [CARLA] " + " ".join(cmd))
-    subprocess.Popen(cmd)
+    server = subprocess.Popen(cmd)
 
-    # If a map is requested, wait for UE to boot, then switch maps
-    if boot > 0:
-        _log(f">> [CARLA] Waiting {boot:.1f}s for CARLA to boot")
-        time.sleep(boot)
+    _log(">> [CARLA] Waiting for the server to boot")
+    wait_until_ready(server, timeout=boot_timeout, python_api=python_api, log=_log)
     if map_name:
         ok = set_map(map_name, log=_log)
         if not ok:
@@ -146,15 +249,15 @@ def restart_carla(
         render_off_screen: bool = True,
         render_quality_low: bool = True,
         map_name: str | None = None,
-        cooldown: float = 5.0,
-        boot: float = 20.0,
+        boot_timeout: float = CARLA_BOOT_TIMEOUT_S,
+        python_api: str | None = None,
         log: Callable[[str], None] | None = None,
 ) -> None:
     """
     Hard-restart the CARLA server and wait until it is ready; optionally load a map.
 
     The routine is a convenience wrapper around:
-    kill_carla -> cool-down -> start_carla (with flags/map) -> boot-wait (handled in start_carla).
+    kill_carla -> wait_until_stopped -> start_carla (with flags/map, waits until ready).
 
     Parameters
     ----------
@@ -166,11 +269,10 @@ def restart_carla(
         Forwarded to ``start_carla``.
     map_name : str | None, default None
         Forwarded to ``start_carla`` to load after boot.
-    cooldown : float, default 5.0
-        Seconds to wait after killing existing instances but before spawning a new one.
-    boot : float, default 20.0
-        Seconds to wait after launching CARLA before trying to load the map.
-        Only relevant when ``map_name`` is provided.
+    boot_timeout : float
+        Longest wait for the new server to become ready.
+    python_api : str | None
+        CARLA Python API version for the readiness check, see ``wait_until_ready``.
     log : Callable[[str], None] | None, default None
         Optional logger (defaults to ``print``).
     """
@@ -178,10 +280,7 @@ def restart_carla(
 
     _log(">> [CARLA] Killing existing instances")
     kill_carla(_log)
-
-    if cooldown > 0:
-        _log(f">> [CARLA] Waiting {cooldown:.1f}s before restart")
-        time.sleep(cooldown)
+    wait_until_stopped(log=_log)
 
     _log(">> [CARLA] Starting new server")
     start_carla(
@@ -189,28 +288,27 @@ def restart_carla(
         render_off_screen=render_off_screen,
         quality_low=render_quality_low,
         map_name=map_name,
-        boot=boot,
+        boot_timeout=boot_timeout,
+        python_api=python_api,
         log=_log,
     )
-
-    _log(">> [CARLA] Server should now be ready")
 
 
 def restart_and_connect(
         exe: str,
-        host: str = "localhost",
-        port: int = 2000,
+        host: str = CARLA_HOST,
+        port: int = CARLA_PORT,
         timeout: float = 600,
         *,
         render_off_screen: bool = True,
         render_quality_low: bool = True,
         map_name: str | None = None,
-        cooldown: float = 5,
-        boot: float = 20,
+        boot_timeout: float = CARLA_BOOT_TIMEOUT_S,
         log: Callable[[str], None] | None = None
 ):
     """
-    Restart CARLA and return an active `carla.Client`.
+    Restart CARLA and return an active `carla.Client`. Only usable where the
+    CARLA Python API is importable (worker subprocesses).
 
     Parameters
     ----------
@@ -220,11 +318,11 @@ def restart_and_connect(
         Connection endpoint for the CARLA RPC server.
     port: int, default ``2000``
         Connection endpoint port for the CARLA RPC server.
-    timeout : float, default 60
+    timeout : float, default 600
         Seconds before a socket operation on the client aborts.
     render_off_screen, render_quality_low : bool
         Forwarded to `restart_carla`.
-    cooldown, boot : float
+    boot_timeout : float
         Forwarded verbatim to `restart_carla`.
     log : Callable[[str], None], optional
         Logger callback (defaults to `print`).
@@ -242,8 +340,7 @@ def restart_and_connect(
         render_off_screen=render_off_screen,
         render_quality_low=render_quality_low,
         map_name=map_name,
-        cooldown=cooldown,
-        boot=boot,
+        boot_timeout=boot_timeout,
         log=_log,
     )
 
@@ -257,8 +354,8 @@ def restart_and_connect(
 def set_map(
         map_name: str,
         *,
-        host: str = "localhost",
-        port: int = 2000,
+        host: str = CARLA_HOST,
+        port: int = CARLA_PORT,
         log: Callable[[str], None] | None = None,
 ) -> bool:
     """

@@ -61,25 +61,32 @@ class ThreadWorker(threading.Thread):
                 return str(c)
         return None
 
-    def _restart_carla(self):
+    def _restart_carla(self) -> bool:
         """
         restart_carla() for workers running in the GUI process: the map is
         loaded from a runner subprocess afterwards, since only subprocesses
-        may import the CARLA Python API (see _start_and_stream).
+        may import the CARLA Python API (see _start_and_stream). Returns
+        False (after logging why) if the server didn't come up.
         """
-        restart_carla(
-            self.cfg.carla_executable,
-            log=self.log,
-            render_quality_low=self.cfg.render_quality_low,
-            render_off_screen=self.cfg.render_off_screen,
-        )
+        try:
+            restart_carla(
+                self.cfg.carla_executable,
+                log=self.log,
+                render_quality_low=self.cfg.render_quality_low,
+                render_off_screen=self.cfg.render_off_screen,
+                python_api=self.cfg.carla_python_api,
+            )
+        except Exception as e:
+            self.log(f"!! [CARLA] Server did not start: {e}")
+            return False
         map_name = self.cfg.selected_map
         if map_name and not self.cancelled:
             runner = self._resolve_runner()
             if not runner:
-                return self.log(f"!! Could not locate {self.RUNNER}")
+                self.log(f"!! Could not locate {self.RUNNER}")
+                return False
             self._start_and_stream([sys.executable, runner, "set_map", "--map", map_name])
-        return None
+        return True
 
     def _start_and_stream(self, cmd: list[str], *, cwd: str | None = None):
         # The child imports the CARLA Python API selected in the GUI, matching

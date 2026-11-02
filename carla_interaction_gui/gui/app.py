@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import os
 import sys
 from datetime import datetime
@@ -65,9 +66,12 @@ class CarlaInteractionGUI(QMainWindow):
         self._active_worker: ThreadWorker | None = None
         self.carla_worker: ThreadWorker | None = None
         self.manual_workers: list[ThreadWorker] = []
+        # Every worker ever started, so closing can wait for all of them.
+        self._all_workers: list[ThreadWorker] = []
+        self._closing = False
         self._version_listeners: list[Callable[[], None]] = []
 
-        self.settings = Settings(self._normalized(load()))
+        self.settings = Settings(self._normalized(load()), self)
         self.settings["carla_executable"].changed.connect(self._on_carla_executable_changed)
 
         # Debounced so typing into a field doesn't rewrite the config file per keystroke.
@@ -75,7 +79,7 @@ class CarlaInteractionGUI(QMainWindow):
         self._save_timer.timeout.connect(lambda: save(self.collect_cfg()))
         self.settings.changed.connect(self._save_timer.start)
 
-        self._log_signal = _LogSignal()
+        self._log_signal = _LogSignal(self)
         self._log_signal.line.connect(self._append_log, Qt.ConnectionType.QueuedConnection)
 
         central = QWidget()
@@ -227,6 +231,7 @@ class CarlaInteractionGUI(QMainWindow):
             return
 
         worker.start()
+        self._all_workers.append(worker)
 
         if worker.exclusive:
             self._active_worker = worker
@@ -285,11 +290,25 @@ class CarlaInteractionGUI(QMainWindow):
 
         kill_carla()
 
+    def start_carla_worker(self, worker: ThreadWorker) -> None:
+        """Start the CARLA server worker (not exclusive: other tasks may use its server)."""
+        self.carla_worker = worker
+        self._all_workers.append(worker)
+        worker.start()
+
     def closeEvent(self, event):
         try:
             self._save_timer.stop()
             self.collect_cfg()
             self.stop_worker()
+            # Cancelled workers still log while winding down (e.g. from their
+            # finally blocks); let them finish before Qt objects go away, and
+            # then stop routing output into the window, or a late log line
+            # from a worker thread can crash the interpreter on exit.
+            for worker in self._all_workers:
+                worker.join(timeout=10)
+            self._closing = True
+            sys.stdout, sys.stderr = sys.__stdout__, sys.__stderr__
         finally:
             super().closeEvent(event)
 
@@ -386,7 +405,8 @@ class CarlaInteractionGUI(QMainWindow):
         except Exception:
             pass
 
-        self._log_signal.line.emit(txt)
+        if not self._closing:
+            self._log_signal.line.emit(txt)
 
         log_path = getattr(self, "_log_file_path", None)
         if log_path:
@@ -430,7 +450,15 @@ def run() -> int:
     app.setStyleSheet(STYLESHEET)
     window = CarlaInteractionGUI()
     window.show()
-    return app.exec()
+    exit_code = app.exec()
+    # Tear Qt objects down while the QApplication still exists; leaving them
+    # to Python's final garbage collection crashed on exit ("munmap_chunk():
+    # invalid pointer") once workers had run.
+    window.deleteLater()
+    app.processEvents()
+    del window
+    gc.collect()
+    return exit_code
 
 
 if __name__ == "__main__":

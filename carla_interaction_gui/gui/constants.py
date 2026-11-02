@@ -175,6 +175,12 @@ CARLA_DOCKER_RUN_ARGS = [
     "--volume=/tmp/.X11-unix:/tmp/.X11-unix:rw",
 ]
 CARLA_DOCKER_SERVER_ARGS = ["-nosound"]
+
+# Longest waits for a stopped server to be gone and for a new one to serve
+# requests; both are polled, so these are only upper limits. The first start
+# of an image can take much longer than later ones (e.g. compiling shaders).
+CARLA_STOP_TIMEOUT_S = 30
+CARLA_BOOT_TIMEOUT_S = 180
 # Host folder mounted into the container for recordings (host, container side).
 CARLA_DOCKER_RECORDINGS_HOST_DIR = "~/workspace/carlarecordings"
 CARLA_DOCKER_RECORDINGS_CONTAINER_DIR = "/workspace/recordings"
