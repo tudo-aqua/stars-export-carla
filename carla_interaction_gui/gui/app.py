@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import os
-import queue
 import sys
-import tkinter as tk
 from datetime import datetime
-from tkinter import ttk, filedialog, messagebox, scrolledtext
-
 from typing import Callable
+
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from PySide6.QtGui import QFontDatabase, QTextCursor
+from PySide6.QtWidgets import (
+    QApplication, QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton,
+    QSplitter, QTabWidget, QVBoxLayout, QWidget,
+)
 
 from carla_interaction_gui.carla_launcher import kill_carla
 from carla_interaction_gui.carla_versions import (
@@ -15,184 +18,158 @@ from carla_interaction_gui.carla_versions import (
     validate_target, vehicles_for,
 )
 from carla_interaction_gui.config_data import Config, load, save
-from carla_interaction_gui.gui.constants import CARLA_DEFAULT_DOCKER_IMAGE
-from helpers.camera_recorder.CameraPosition import CameraPosition
+from carla_interaction_gui.gui.binding import Settings, Value
+from carla_interaction_gui.gui.constants import ALLOWED_NON_LAYERED_MAPS, CARLA_DEFAULT_DOCKER_IMAGE
 from carla_interaction_gui.gui.tabs.manual_tab import ManualTab
 from carla_interaction_gui.gui.tabs.maps_tab import MapsTab
 from carla_interaction_gui.gui.tabs.recgen_tab import RecGenTab
 from carla_interaction_gui.gui.tabs.server_tab import ServerTab
 from carla_interaction_gui.gui.tabs.transform_tab import TransformTab
 from carla_interaction_gui.gui.tabs.video_tab import VideoTab
+from carla_interaction_gui.gui.widgets import carla_panel
 from carla_interaction_gui.workers.ThreadWorker import ThreadWorker
 
+STYLESHEET = """
+QLabel#tabDescription { color: palette(placeholder-text); }
+QGroupBox { font-weight: 600; margin-top: 6px; }
+QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; }
+QGroupBox > QWidget { font-weight: normal; }
+QPushButton#primaryButton { font-weight: 600; padding: 6px 14px; }
+"""
 
-class CarlaInteractionGUI(tk.Tk):
+
+class _LogSignal(QObject):
+    """Carries log lines from any thread to the GUI thread (queued by Qt)."""
+    line = Signal(str)
+
+
+class CarlaInteractionGUI(QMainWindow):
     """
     Main GUI application window for interaction with the CARLA Simulator.
 
-    Owns the persisted configuration, the tk.Variables bound to it, and the
-    cross-cutting services (background-worker lifecycle, logging, path
-    validation, file dialogs) that every tab relies on. Each tab's own UI and
-    click handlers live in carla_interaction_gui.gui.tabs and are handed a
-    reference to this app to reach those shared services.
+    Owns the persisted configuration (as observable Settings that the tabs'
+    widgets bind to) and the cross-cutting services (background-worker
+    lifecycle, logging, path validation, file dialogs) that every tab relies
+    on. Each tab's own UI and click handlers live in
+    carla_interaction_gui.gui.tabs and are handed a reference to this app to
+    reach those shared services.
     """
 
     def __init__(self):
         super().__init__()
-        self.title("CARLA interaction GUI")
-        self.geometry("3000x2000")
-        self.resizable(True, True)
+        self.setWindowTitle("CARLA interaction GUI")
+        self.resize(1200, 950)
 
-        self._current_stop_button: tk.Button | None = None
-        self._stop_buttons: list[tk.Button] = []
+        self._stop_buttons: list[QPushButton] = []
+        self._current_stop_button: QPushButton | None = None
+        self._active_worker: ThreadWorker | None = None
+        self.carla_worker: ThreadWorker | None = None
+        self.manual_workers: list[ThreadWorker] = []
+        self._version_listeners: list[Callable[[], None]] = []
 
-        self.config: Config = load()
+        self.settings = Settings(self._normalized(load()))
+        self.settings["carla_executable"].changed.connect(self._on_carla_executable_changed)
 
+        # Debounced so typing into a field doesn't rewrite the config file per keystroke.
+        self._save_timer = QTimer(self, singleShot=True, interval=400)
+        self._save_timer.timeout.connect(lambda: save(self.collect_cfg()))
+        self.settings.changed.connect(self._save_timer.start)
+
+        self._log_signal = _LogSignal()
+        self._log_signal.line.connect(self._append_log, Qt.ConnectionType.QueuedConnection)
+
+        central = QWidget()
+        layout = QVBoxLayout(central)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.addWidget(carla_panel(self))
+
+        self.tabs = QTabWidget()
+        self.tabs.setDocumentMode(True)
+        self.server_tab = ServerTab(self)
+        self.manual_tab = ManualTab(self)
+        self.transform_tab = TransformTab(self)
+        self.video_tab = VideoTab(self)
+        self.maps_tab = MapsTab(self)
+        self.recgen_tab = RecGenTab(self)
+        for tab, title in ((self.server_tab, "CARLA Server"), (self.manual_tab, "Manual Drive"),
+                           (self.transform_tab, "Transform"), (self.video_tab, "Record ➜ MP4"),
+                           (self.maps_tab, "Generate Maps"), (self.recgen_tab, "Recording Generator")):
+            self.tabs.addTab(tab, title)
+
+        self.log_widget = QPlainTextEdit(readOnly=True)
+        self.log_widget.setMaximumBlockCount(20_000)
+        self.log_widget.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        self.log_widget.setPlaceholderText("Task output appears here.")
+
+        log_pane = QWidget()
+        log_layout = QVBoxLayout(log_pane)
+        log_layout.setContentsMargins(0, 4, 0, 0)
+        log_header = QHBoxLayout()
+        log_header.addWidget(QLabel("<b>Log</b>"))
+        log_header.addStretch(1)
+        clear = QPushButton("Clear")
+        clear.clicked.connect(self.clear_log)
+        log_header.addWidget(clear)
+        log_layout.addLayout(log_header)
+        log_layout.addWidget(self.log_widget)
+
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.setChildrenCollapsible(False)
+        splitter.addWidget(self.tabs)
+        splitter.addWidget(log_pane)
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 2)
+        layout.addWidget(splitter, 1)
+        self.setCentralWidget(central)
+
+        self._init_log_file()
+        self._redirect_console()
+
+    # ------------------------------------------------------------------
+    # Config
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _normalized(config: Config) -> Config:
+        """Replace saved choices that don't fit the configured CARLA version with its defaults."""
         # A saved start script that's gone (e.g. the former carla_run.sh) falls
         # back to the default docker image.
-        carla_executable = self.config.carla_executable
-        if not carla_executable or (is_start_script(carla_executable) and not os.path.isfile(carla_executable)):
-            carla_executable = CARLA_DEFAULT_DOCKER_IMAGE
-        self.carla_executable_variable = tk.StringVar(value=carla_executable)
-        carla_python_api = python_api_for(carla_executable) or self.config.carla_python_api
-        if carla_python_api not in python_api_versions():
-            carla_python_api = python_api_versions()[0]
-        self.carla_python_api_variable = tk.StringVar(value=carla_python_api)
-        # Tabs showing version-dependent choices (maps, vehicles) register here
-        # to follow the CARLA executable.
-        self._version_listeners: list[Callable[[], None]] = []
-        self.recording_extension_variable = tk.StringVar(value=self.config.recording_extension)
+        if not config.carla_executable or (
+                is_start_script(config.carla_executable) and not os.path.isfile(config.carla_executable)):
+            config.carla_executable = CARLA_DEFAULT_DOCKER_IMAGE
+        config.carla_python_api = python_api_for(config.carla_executable) or config.carla_python_api
+        if config.carla_python_api not in python_api_versions():
+            config.carla_python_api = python_api_versions()[0]
 
-        self.manual_output_dir_variable = tk.StringVar(value=self.config.manual_output_dir)
-        self.default_recordings_folder_variable = tk.StringVar(value=self.config.default_recordings_folder)
-        self.new_file_name_variable = tk.StringVar(value=self.config.new_file_name)
-        self.manual_spawn_traffic_num_vehicles_variable = tk.IntVar(
-            value=getattr(self.config, "manual_spawn_traffic_num_vehicles", 30))
-        self.manual_spawn_traffic_enabled_variable = tk.BooleanVar(
-            value=getattr(self.config, "manual_spawn_traffic_enabled", False))
-        self.manual_spawn_traffic_single_type_enabled_variable = tk.BooleanVar(
-            value=getattr(self.config, "manual_spawn_traffic_single_type_enabled", False))
-        if getattr(self.config, "manual_spawn_traffic_vehicle_type", "") in self.available_vehicles():
-            default_traffic_vehicle_type = self.config.manual_spawn_traffic_vehicle_type
-        else:
-            default_traffic_vehicle_type = self.available_vehicles()[0]
-        self.manual_spawn_traffic_vehicle_type_variable = tk.StringVar(value=default_traffic_vehicle_type)
-        self.manual_disable_traffic_manager_enabled_variable = tk.BooleanVar(
-            value=getattr(self.config, "manual_disable_traffic_manager_enabled", False))
+        maps = maps_for(config.carla_executable)
+        if config.selected_map not in maps:
+            config.selected_map = maps[0]
+        vehicles = vehicles_for(config.carla_executable)
+        if config.selected_ego_vehicle not in vehicles:
+            config.selected_ego_vehicle = vehicles[0]
+        if config.manual_spawn_traffic_vehicle_type not in vehicles:
+            config.manual_spawn_traffic_vehicle_type = vehicles[0]
+        if config.recgen_selected_maps is None:
+            config.recgen_selected_maps = list(ALLOWED_NON_LAYERED_MAPS)
+        if config.video_camera_positions is None:
+            config.video_camera_positions = []
+        return config
 
-        self.transform_input_file_variable = tk.StringVar(value=self.config.transform_input_file)
-        self.transform_docker_mount_path_variable = tk.StringVar(
-            value=getattr(self.config, "transform_docker_mount_path", ""))
-        self.transformer_output_path_variable = tk.StringVar(value=self.config.transformer_output_path)
-        self.video_input_path_variable = tk.StringVar(value=self.config.video_input_file)
-        self.video_docker_mount_path_variable = tk.StringVar(
-            value=getattr(self.config, "video_docker_mount_path", ""))
-        self.video_output_path_variable = tk.StringVar(value=self.config.video_output_path)
+    def collect_cfg(self) -> Config:
+        """Snapshot of the current settings, also written to disk."""
+        config = self.settings.to_config()
+        config.recording_extension = self.normalize_extension(config.recording_extension.strip())
+        for field in ("carla_executable", "manual_output_dir", "default_recordings_folder", "new_file_name",
+                      "transform_input_file", "transform_docker_mount_path", "transformer_output_path",
+                      "video_input_file", "video_docker_mount_path", "video_output_path", "recgen_output_dir"):
+            setattr(config, field, getattr(config, field).strip())
+        save(config)
+        return config
 
-        self.video_width_variable = tk.IntVar(value=self.config.video_width)
-        self.video_height_variable = tk.IntVar(value=self.config.video_height)
-        self.video_fov_variable = tk.IntVar(value=getattr(self.config, "video_fov", 105))
-        self.vehicle_id_variable = tk.IntVar(value=self.config.vehicle_id)
-        self.begin_at_variable = tk.StringVar(value=str(self.config.begin_at))
-        end_at_default = -1 if self.config.end_at == float("inf") else self.config.end_at
-        self.end_at_variable = tk.StringVar(value=str(end_at_default))
-
-        # One (selected, metadata, bbox) BooleanVar triple per CameraPosition,
-        # so the Record->MP4 tab can let the user pick which camera angles to
-        # render and whether each shows metadata text/bounding boxes.
-        self.video_camera_position_vars: dict[str, dict[str, tk.BooleanVar]] = {}
-        saved_positions = {
-            c.get("name"): c for c in (getattr(self.config, "video_camera_positions", None) or [])
-        }
-        for pos in CameraPosition:
-            saved = saved_positions.get(pos.name)
-            self.video_camera_position_vars[pos.name] = {
-                "selected": tk.BooleanVar(value=saved is not None),
-                "metadata": tk.BooleanVar(value=bool(saved.get("metadata")) if saved else False),
-                "bbox": tk.BooleanVar(value=bool(saved.get("bbox")) if saved else False),
-            }
-        self.video_render_safety_boxes_variable = tk.BooleanVar(
-            value=getattr(self.config, "video_render_safety_boxes", False))
-        self.video_safety_box_style_variable = tk.StringVar(
-            value=getattr(self.config, "video_safety_box_style", "HATCHING"))
-
-        self.render_off_screen_variable = tk.BooleanVar(value=getattr(self.config, "render_off_screen", False))
-        self.render_quality_low_variable = tk.BooleanVar(value=getattr(self.config, "render_quality_low", False))
-
-        self.only_track_at_specific_interval_variable = tk.BooleanVar(
-            value=getattr(self.config, "only_track_at_specific_interval", False))
-        self.specific_track_interval_variable = tk.DoubleVar(
-            value=getattr(self.config, "specific_track_interval", 0.5))
-
-        self.camera_elevation_variable = tk.DoubleVar(value=getattr(self.config, "camera_elevation", 0.0))
-        self.camera_tilt_variable = tk.DoubleVar(value=getattr(self.config, "camera_tilt", 0.0))
-
-        if getattr(self.config, "selected_map", "") in self.available_maps():
-            default_map = self.config.selected_map
-        else:
-            default_map = self.available_maps()[0]
-        self.selected_map_variable = tk.StringVar(value=default_map)
-
-        if getattr(self.config, "selected_ego_vehicle", "") in self.available_vehicles():
-            default_ego_vehicle = self.config.selected_ego_vehicle
-        else:
-            default_ego_vehicle = self.available_vehicles()[0]
-        self.selected_ego_vehicle_variable = tk.StringVar(value=default_ego_vehicle)
-
-        self.recgen_seed_start_var = tk.IntVar(value=getattr(self.config, "recgen_seed_start", 0))
-        self.recgen_num_scenarios_var = tk.IntVar(value=getattr(self.config, "recgen_num_scenarios", 1))
-        self.recgen_num_vehicles_var = tk.IntVar(value=getattr(self.config, "recgen_num_vehicles", 200))
-        self.recgen_num_walkers_var = tk.IntVar(value=getattr(self.config, "recgen_num_walkers", 30))
-        self.recgen_filter_vehicles_var = tk.StringVar(
-            value=getattr(self.config, "recgen_filter_vehicles", "vehicle.*"))
-        self.recgen_generation_vehicles_var = tk.StringVar(
-            value=getattr(self.config, "recgen_generation_vehicles", "All"))
-        self.recgen_filter_walkers_var = tk.StringVar(
-            value=getattr(self.config, "recgen_filter_walkers", "walker.pedestrian.*"))
-        self.recgen_generation_walkers_var = tk.StringVar(
-            value=getattr(self.config, "recgen_generation_walkers", "2"))
-        self.recgen_length_minutes_var = tk.DoubleVar(value=getattr(self.config, "recgen_length_minutes", 5.0))
-        self.recgen_output_dir_variable = tk.StringVar(value=getattr(self.config, "recgen_output_dir", ""))
-        self.recgen_num_parked_var = tk.IntVar(value=getattr(self.config, "recgen_num_parked", 0))
-
-        self._active_worker = None
-        self.carla_worker = None
-        self.manual_workers: list[ThreadWorker] = []
-        self.protocol("WM_DELETE_WINDOW", self._on_close)
-
-        notebook = ttk.Notebook(self)
-        notebook.pack(fill="both", expand=True)
-        self.server_tab = ServerTab(notebook, self)
-        self.manual_tab = ManualTab(notebook, self)
-        self.transform_tab = TransformTab(notebook, self)
-        self.video_tab = VideoTab(notebook, self)
-        self.maps_tab = MapsTab(notebook, self)
-        self.recgen_tab = RecGenTab(notebook, self)
-
-        # log pane
-        self.log_widget = scrolledtext.ScrolledText(self, height=30, state="disabled")
-        self.log_widget.pack(fill="both", expand=False, padx=4, pady=4)
-        self._init_log_file()
-
-        # Every ThreadWorker subprocess (record_video, transform, recgen, ...)
-        # streams its output through log() from its own background thread,
-        # and sys.stdout/sys.stderr are globally redirected into it too (see
-        # _redirect_console below). Tcl/Tk is not thread-safe: mutating
-        # self.log_widget from any thread other than the one running
-        # mainloop() races with Tk's own event processing and corrupts the
-        # interpreter's internal state, which segfaults the whole process
-        # with no Python traceback - exactly the native crashes seen when
-        # driving these tasks from the GUI (they never reproduce running the
-        # same command from a plain shell, since there's no Tk widget to
-        # race against there). log() only ever enqueues; _drain_log_queue,
-        # scheduled here via after() and therefore always running on the
-        # main thread, is the only thing allowed to touch the widget.
-        self._log_queue: queue.Queue[str] = queue.Queue()
-        self.after(50, self._drain_log_queue)
-
-        self._redirect_console()
-        self.carla_executable_variable.trace_add("write", self._on_carla_executable_changed)
-        self._setup_autosave()
+    @staticmethod
+    def normalize_extension(ext: str) -> str:
+        """Normalizes a given file extension by ensuring it starts with a period."""
+        return ext if ext.startswith(".") else f".{ext}"
 
     # ------------------------------------------------------------------
     # CARLA version selection
@@ -200,35 +177,34 @@ class CarlaInteractionGUI(tk.Tk):
 
     def available_maps(self) -> list[str]:
         """Maps offered for the current CARLA executable (all known ones for free text)."""
-        return maps_for(self.carla_executable_variable.get())
+        return maps_for(self.settings["carla_executable"].get())
 
     def available_vehicles(self) -> list[str]:
         """Vehicle blueprints offered for the current CARLA executable (all known ones for free text)."""
-        return vehicles_for(self.carla_executable_variable.get())
+        return vehicles_for(self.settings["carla_executable"].get())
 
     def available_controlled_actors(self) -> dict[str, str]:
         """'Add controlled actor' buttons (label -> blueprint filter) for the current CARLA executable."""
-        return controlled_actors_for(self.carla_executable_variable.get())
+        return controlled_actors_for(self.settings["carla_executable"].get())
 
     def register_version_listener(self, listener: Callable[[], None]) -> None:
         """Call `listener` now and whenever the CARLA executable changes (e.g. to refresh map choices)."""
         self._version_listeners.append(listener)
         listener()
 
-    def _on_carla_executable_changed(self, *_):
+    def _on_carla_executable_changed(self, executable: str):
         """Follow a catalogued image with its Python API, maps and vehicles."""
-        executable = self.carla_executable_variable.get()
         python_api = python_api_for(executable)
         if python_api:
-            self.carla_python_api_variable.set(python_api)
+            self.settings["carla_python_api"].set(python_api)
 
         maps = self.available_maps()
-        if self.selected_map_variable.get() not in maps:
-            self.selected_map_variable.set(maps[0])
+        if self.settings["selected_map"].get() not in maps:
+            self.settings["selected_map"].set(maps[0])
         vehicles = self.available_vehicles()
-        for variable in (self.selected_ego_vehicle_variable, self.manual_spawn_traffic_vehicle_type_variable):
-            if variable.get() not in vehicles:
-                variable.set(vehicles[0])
+        for name in ("selected_ego_vehicle", "manual_spawn_traffic_vehicle_type"):
+            if self.settings[name].get() not in vehicles:
+                self.settings[name].set(vehicles[0])
         for listener in self._version_listeners:
             listener()
 
@@ -236,39 +212,43 @@ class CarlaInteractionGUI(tk.Tk):
     # Worker lifecycle
     # ------------------------------------------------------------------
 
-    def register_stop_button(self, button: tk.Button) -> None:
+    def register_stop_button(self, button: QPushButton) -> None:
         """Track a tab's stop button so a global stop can disable it."""
         self._stop_buttons.append(button)
 
-    def attach_worker(self, worker: ThreadWorker, *, stop_button: tk.Button | None = None):
+    def attach_worker(self, worker: ThreadWorker, *, stop_button: QPushButton | None = None):
         """
         Starts a worker and manages its lifecycle in the UI: guards against
         starting a second exclusive worker while one is running, and
         re-enables the stop button once the worker finishes.
         """
         if worker.exclusive and self._active_worker:
-            return messagebox.showwarning("Busy", "Another exclusive task is running.")
+            QMessageBox.warning(self, "Busy", "Another exclusive task is running.")
+            return
 
         worker.start()
 
         if worker.exclusive:
             self._active_worker = worker
             if stop_button is not None:
-                stop_button.config(state="normal")
+                stop_button.setEnabled(True)
                 self._current_stop_button = stop_button
+
+        timer = QTimer(self, interval=500)
 
         def poll():
             if worker.is_alive():
-                self.after(500, poll)
-            else:
-                if worker is self._active_worker:
-                    self._active_worker = None
-                    if self._current_stop_button is not None:
-                        self._current_stop_button.config(state="disabled")
-                        self._current_stop_button = None
+                return
+            timer.stop()
+            timer.deleteLater()
+            if worker is self._active_worker:
+                self._active_worker = None
+                if self._current_stop_button is not None:
+                    self._current_stop_button.setEnabled(False)
+                    self._current_stop_button = None
 
-        poll()
-        return None
+        timer.timeout.connect(poll)
+        timer.start()
 
     def stop_worker(self):
         """
@@ -287,32 +267,17 @@ class CarlaInteractionGUI(tk.Tk):
         if w:
             try:
                 w.cancel()
-            except Exception:
-                pass
-            try:
                 w.join(timeout=5.0)
             except Exception:
                 pass
             self._active_worker = None
-            try:
-                if self._current_stop_button is not None:
-                    self._current_stop_button.config(state="disabled")
-                    self._current_stop_button = None
-            except Exception:
-                pass
-
-            for btn in self._stop_buttons:
-                try:
-                    btn.config(state="disabled")
-                except Exception:
-                    pass
+            self._current_stop_button = None
+            for button in self._stop_buttons:
+                button.setEnabled(False)
 
         if self.carla_worker and self.carla_worker.is_alive():
             try:
                 self.carla_worker.cancel()
-            except Exception:
-                pass
-            try:
                 self.carla_worker.join(timeout=5.0)
             except Exception:
                 pass
@@ -320,237 +285,75 @@ class CarlaInteractionGUI(tk.Tk):
 
         kill_carla()
 
-    # ------------------------------------------------------------------
-    # Config persistence
-    # ------------------------------------------------------------------
-
-    def collect_cfg(self) -> Config:
-        """
-        Collects and normalizes configuration data from every tab's variables,
-        updates the persisted config object, and saves it.
-        """
-        config = self.config
-        config.carla_executable = self.carla_executable_variable.get().strip()
-        config.carla_python_api = self.carla_python_api_variable.get().strip()
-        config.recording_extension = self.normalize_extension(self.recording_extension_variable.get())
-        config.manual_output_dir = self.manual_output_dir_variable.get().strip()
-        config.default_recordings_folder = self.default_recordings_folder_variable.get().strip()
-        config.new_file_name = self.new_file_name_variable.get().strip()
-        config.manual_spawn_traffic_num_vehicles = max(1, int(self.manual_spawn_traffic_num_vehicles_variable.get()))
-        config.manual_spawn_traffic_enabled = bool(self.manual_spawn_traffic_enabled_variable.get())
-        config.manual_spawn_traffic_single_type_enabled = \
-            bool(self.manual_spawn_traffic_single_type_enabled_variable.get())
-        config.manual_spawn_traffic_vehicle_type = self.manual_spawn_traffic_vehicle_type_variable.get().strip()
-        config.manual_disable_traffic_manager_enabled = \
-            bool(self.manual_disable_traffic_manager_enabled_variable.get())
-        config.transform_input_file = self.transform_input_file_variable.get().strip()
-        config.transform_docker_mount_path = self.transform_docker_mount_path_variable.get().strip()
-        config.transformer_output_path = self.transformer_output_path_variable.get().strip()
-        config.video_input_file = self.video_input_path_variable.get().strip()
-        config.video_docker_mount_path = self.video_docker_mount_path_variable.get().strip()
-        config.video_output_path = self.video_output_path_variable.get().strip()
-        config.video_width = self.video_width_variable.get()
-        config.video_height = self.video_height_variable.get()
-        config.video_fov = self.video_fov_variable.get()
-        config.vehicle_id = self.vehicle_id_variable.get()
-        config.video_camera_positions = [
-            {"name": name, "metadata": v["metadata"].get(), "bbox": v["bbox"].get()}
-            for name, v in self.video_camera_position_vars.items() if v["selected"].get()
-        ]
-        config.video_render_safety_boxes = bool(self.video_render_safety_boxes_variable.get())
-        config.video_safety_box_style = self.video_safety_box_style_variable.get()
-
-        config.recgen_seed_start = int(self.recgen_seed_start_var.get())
-        config.recgen_num_scenarios = max(1, int(self.recgen_num_scenarios_var.get()))
-        config.recgen_selected_maps = [m for m, v in self.recgen_tab.map_vars.items() if v.get()]
-        config.recgen_num_vehicles = int(self.recgen_num_vehicles_var.get())
-        config.recgen_num_walkers = int(self.recgen_num_walkers_var.get())
-        config.recgen_filter_vehicles = (self.recgen_filter_vehicles_var.get() or "vehicle.*").strip()
-        config.recgen_generation_vehicles = (self.recgen_generation_vehicles_var.get() or "All").strip()
-        config.recgen_filter_walkers = (self.recgen_filter_walkers_var.get() or "walker.pedestrian.*").strip()
-        config.recgen_generation_walkers = (self.recgen_generation_walkers_var.get() or "2").strip()
+    def closeEvent(self, event):
         try:
-            config.recgen_length_minutes = float(self.recgen_length_minutes_var.get())
-        except Exception:
-            config.recgen_length_minutes = 5.0
-        config.recgen_output_dir = self.recgen_output_dir_variable.get().strip()
-        config.recgen_num_parked = max(0, int(self.recgen_num_parked_var.get()))
-
-        def _parse_var_as_float(var, default: float) -> float:
-            try:
-                val = var.get()
-            except Exception:
-                return default
-            s = str(val).strip()
-            if s in ("", "-", ".", "-."):
-                return default
-            try:
-                return float(s)
-            except ValueError:
-                return default
-
-        begin = _parse_var_as_float(self.begin_at_variable, 0.0)
-        config.begin_at = max(0.0, begin)
-
-        end_val = _parse_var_as_float(self.end_at_variable, float("inf"))
-        config.end_at = float("inf") if end_val < 0 else end_val
-
-        config.render_off_screen = self.render_off_screen_variable.get()
-        config.render_quality_low = self.render_quality_low_variable.get()
-        config.selected_map = self.selected_map_variable.get().strip()
-        config.selected_ego_vehicle = self.selected_ego_vehicle_variable.get().strip()
-
-        config.only_track_at_specific_interval = bool(self.only_track_at_specific_interval_variable.get())
-        config.specific_track_interval = _parse_var_as_float(self.specific_track_interval_variable, 0.5)
-
-        config.camera_elevation = _parse_var_as_float(self.camera_elevation_variable, 0.0)
-        config.camera_tilt = _parse_var_as_float(self.camera_tilt_variable, 0.0)
-
-        save(config)
-        return config
-
-    def _setup_autosave(self):
-        """Persist the config whenever any bound variable changes."""
-        for variable in (
-                self.carla_executable_variable,
-                self.carla_python_api_variable,
-                self.recording_extension_variable,
-                self.manual_output_dir_variable,
-                self.default_recordings_folder_variable,
-                self.new_file_name_variable,
-                self.manual_spawn_traffic_num_vehicles_variable,
-                self.manual_spawn_traffic_enabled_variable,
-                self.manual_spawn_traffic_single_type_enabled_variable,
-                self.manual_spawn_traffic_vehicle_type_variable,
-                self.manual_disable_traffic_manager_enabled_variable,
-                self.transform_input_file_variable,
-                self.transform_docker_mount_path_variable,
-                self.transformer_output_path_variable,
-                self.video_input_path_variable,
-                self.video_docker_mount_path_variable,
-                self.video_output_path_variable,
-                self.video_width_variable,
-                self.video_height_variable,
-                self.video_fov_variable,
-                self.vehicle_id_variable,
-                self.video_render_safety_boxes_variable,
-                self.video_safety_box_style_variable,
-                *[v for group in self.video_camera_position_vars.values() for v in group.values()],
-                self.begin_at_variable,
-                self.end_at_variable,
-                self.render_off_screen_variable,
-                self.render_quality_low_variable,
-                self.selected_ego_vehicle_variable,
-                self.camera_elevation_variable,
-                self.camera_tilt_variable,
-                self.only_track_at_specific_interval_variable,
-                self.specific_track_interval_variable,
-                self.recgen_seed_start_var,
-                self.recgen_num_scenarios_var,
-                self.recgen_num_vehicles_var,
-                self.recgen_num_walkers_var,
-                self.recgen_filter_vehicles_var,
-                self.recgen_generation_vehicles_var,
-                self.recgen_filter_walkers_var,
-                self.recgen_generation_walkers_var,
-                self.recgen_length_minutes_var,
-                self.recgen_output_dir_variable,
-                self.recgen_num_parked_var,
-        ):
-            variable.trace_add("write", self._auto_save)
-
-        for var in self.recgen_tab.map_vars.values():
-            var.trace_add("write", self._auto_save)
-
-        self.recgen_num_parked_var.trace_add("write", lambda *_: self.recgen_tab.refresh_map_filters())
-
-    def _auto_save(self, *_):
-        """Skips saving while numeric fields are in an in-progress state."""
-        transient = {"", "-", ".", "-."}
-        if (self.begin_at_variable.get() in transient or
-                self.end_at_variable.get() in transient):
-            return
-        try:
+            self._save_timer.stop()
             self.collect_cfg()
-        except Exception:
-            pass
-
-    def _on_close(self):
-        try:
             self.stop_worker()
         finally:
-            try:
-                self.destroy()
-            except Exception:
-                pass
+            super().closeEvent(event)
 
     # ------------------------------------------------------------------
-    # Path validation / dialogs
+    # Validation / dialogs
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def normalize_extension(ext: str) -> str:
-        """Normalizes a given file extension by ensuring it starts with a period."""
-        return ext if ext.startswith(".") else f".{ext}"
+    def show_error(self, title: str, message: str) -> None:
+        QMessageBox.critical(self, title, message)
 
-    def validate_paths(self, specs: list[tuple[str, tk.Variable, str]]) -> bool:
+    def validate_paths(self, specs: list[tuple[str, str, str | tuple[str, ...]]]) -> bool:
         """
-        Validate that the given variables point to existing paths.
+        Validate that the given settings point to existing paths.
 
-        specs: list of (label, variable, kind) where kind in {"file","dir","any","carla"}.
-        "carla" checks a CARLA executable (start script or docker image, see
-        carla_versions) together with the selected CARLA Python API.
-        Shows a messagebox and returns False on the first invalid item.
+        specs: list of (label, setting name, kind) where kind in {"file","dir","any","carla"}
+        or a tuple of "file"/"dir" accepting either. "carla" checks a CARLA
+        executable (start script or docker image, see carla_versions) together
+        with the selected CARLA Python API.
+        Shows an error dialog and returns False on the first invalid item.
         """
-        for label, var, kind in specs:
-            try:
-                value = var.get().strip()
-            except Exception:
-                value = str(var).strip()
+        for label, name, kind in specs:
+            value = str(self.settings[name].get()).strip()
 
             if kind == "carla":
-                error = validate_target(value) or validate_python_api(self.carla_python_api_variable.get())
+                error = validate_target(value) or validate_python_api(self.settings["carla_python_api"].get())
                 if error:
-                    messagebox.showerror("Invalid CARLA executable", error)
+                    self.show_error("Invalid CARLA executable", error)
                     return False
                 continue
 
             if not value:
-                messagebox.showerror("Missing", f"{label} required.")
+                self.show_error("Missing", f"{label} required.")
                 return False
-
             if "file" in kind and "dir" in kind:
-                if not (os.path.isfile(value) or os.path.isdir(value)):
-                    messagebox.showerror("Invalid path", f"{label} does not exist as a file/folder:\n{value}")
-                    return False
-
-            if kind == "file":
-                if not os.path.isfile(value):
-                    messagebox.showerror("Invalid path", f"{label} does not exist as a file:\n{value}")
-                    return False
+                ok, what = os.path.isfile(value) or os.path.isdir(value), "file/folder"
+            elif kind == "file":
+                ok, what = os.path.isfile(value), "file"
             elif kind == "dir":
-                if not os.path.isdir(value):
-                    messagebox.showerror("Invalid path", f"{label} does not exist as a folder:\n{value}")
-                    return False
+                ok, what = os.path.isdir(value), "folder"
             else:
-                if not os.path.exists(value):
-                    messagebox.showerror("Invalid path", f"{label} path does not exist:\n{value}")
-                    return False
+                ok, what = os.path.exists(value), "path"
+            if not ok:
+                self.show_error("Invalid path", f"{label} does not exist as a {what}:\n{value}")
+                return False
         return True
 
-    def open_file_dialog(self, variable: tk.StringVar):
-        selected_file = filedialog.askopenfilename()
-        variable.set(selected_file or variable.get())
+    def choose_file(self, value: Value, *, recording: bool = False):
+        name_filter = ""
+        if recording:
+            extension = self.normalize_extension(self.settings["recording_extension"].get())
+            name_filter = f"{extension} files (*{extension});;All files (*)"
+        selected, _ = QFileDialog.getOpenFileName(self, "Select file", self._dialog_start(value), name_filter)
+        if selected:
+            value.set(selected)
 
-    def open_file_selection_with_specified_extension(self, variable: tk.StringVar):
-        extension = self.normalize_extension(self.recording_extension_variable.get())
-        selected_file = filedialog.askopenfilename(filetypes=[(f"{extension} files", f"*{extension}"),
-                                                              ("All files", "*.*")])
-        variable.set(selected_file or variable.get())
+    def choose_folder(self, value: Value):
+        selected = QFileDialog.getExistingDirectory(self, "Select folder", self._dialog_start(value))
+        if selected:
+            value.set(selected)
 
-    def open_directory_dialog(self, variable: tk.StringVar):
-        selected_directory = filedialog.askdirectory()
-        variable.set(selected_directory or variable.get())
+    @staticmethod
+    def _dialog_start(value: Value) -> str:
+        current = str(value.get()).strip()
+        return current if os.path.exists(current) else os.path.dirname(current)
 
     # ------------------------------------------------------------------
     # Logging
@@ -561,8 +364,8 @@ class CarlaInteractionGUI(tk.Tk):
             def __init__(self, app): self.app = app
 
             def write(self, txt):
-                for lines in txt.rstrip().splitlines():
-                    self.app.log(lines)
+                for line in txt.rstrip().splitlines():
+                    self.app.log(line)
 
             def flush(self): pass
 
@@ -570,25 +373,20 @@ class CarlaInteractionGUI(tk.Tk):
 
     def log(self, txt: str):
         """
-        Logs a given text message to the GUI text widget, the log file, and the real
-        terminal. Called from arbitrary threads (every worker's subprocess-output
-        loop, plus anything using the redirected sys.stdout/stderr), so it must
-        never touch self.log_widget directly - see the comment on self._log_queue
-        in __init__ for why. The actual widget update happens later, on the main
-        thread, via _drain_log_queue.
+        Logs a given text message to the log pane, the log file, and the real
+        terminal. Safe to call from any thread (every worker's subprocess-output
+        loop calls it): the pane is only updated on the GUI thread, via a
+        queued signal.
         """
-        # sys.__stdout__ is the original stdout Python captured at startup and
-        # never reassigned by anything - unlike sys.stdout, which
-        # _redirect_console() points at the GUI widget instead. Writing here
-        # lets output (including from worker subprocesses, which all funnel
-        # through this method as their log callback) survive in the terminal
-        # even if the GUI window closes right after a crash.
+        # sys.__stdout__ is the original stdout, never redirected by
+        # _redirect_console(), so output survives in the terminal even if the
+        # GUI window closes right after a crash.
         try:
             print(txt, file=sys.__stdout__, flush=True)
         except Exception:
             pass
 
-        self._log_queue.put(txt)
+        self._log_signal.line.emit(txt)
 
         log_path = getattr(self, "_log_file_path", None)
         if log_path:
@@ -598,36 +396,18 @@ class CarlaInteractionGUI(tk.Tk):
             except Exception:
                 pass
 
-    def _drain_log_queue(self):
-        """
-        Runs on the main thread only (scheduled via after()) and is the sole
-        place allowed to touch self.log_widget, so background threads calling
-        log() never race Tk's own event processing.
-        """
-        pending = []
-        try:
-            while True:
-                pending.append(self._log_queue.get_nowait())
-        except queue.Empty:
-            pass
-
-        if pending:
-            self.log_widget.configure(state="normal")
-            for txt in pending:
-                self.log_widget.insert("end", txt + "\n")
-            self.log_widget.see("end")
-            self.log_widget.configure(state="disabled")
-
-        self.after(50, self._drain_log_queue)
+    def _append_log(self, txt: str):
+        at_bottom = self.log_widget.verticalScrollBar().value() == self.log_widget.verticalScrollBar().maximum()
+        self.log_widget.appendPlainText(txt)
+        if at_bottom:
+            self.log_widget.moveCursor(QTextCursor.MoveOperation.End)
 
     def clear_log(self):
-        self.log_widget.configure(state="normal")
-        self.log_widget.delete("1.0", "end")
-        self.log_widget.configure(state="disabled")
+        self.log_widget.clear()
 
     def _init_log_file(self):
         """Decide where to write the session log and create the folder if needed."""
-        logs_dir = os.path.join(self.config.transformer_output_path, "logs")
+        logs_dir = os.path.join(self.settings["transformer_output_path"].get(), "logs")
         try:
             os.makedirs(logs_dir, exist_ok=True)
         except Exception:
@@ -643,5 +423,15 @@ class CarlaInteractionGUI(tk.Tk):
             pass
 
 
+def run() -> int:
+    app = QApplication(sys.argv)
+    app.setApplicationName("CARLA interaction GUI")
+    app.setStyle("Fusion")
+    app.setStyleSheet(STYLESHEET)
+    window = CarlaInteractionGUI()
+    window.show()
+    return app.exec()
+
+
 if __name__ == "__main__":
-    CarlaInteractionGUI().mainloop()
+    sys.exit(run())

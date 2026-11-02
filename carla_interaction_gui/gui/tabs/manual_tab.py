@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-import tkinter as tk
-from tkinter import ttk, messagebox
+from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import QHBoxLayout, QWidget
 
-from carla_interaction_gui.gui.widgets import carla_target_rows, entry_row, validate_number
+from carla_interaction_gui.gui.binding import set_combo_items
+from carla_interaction_gui.gui.widgets import (
+    Tab, button, check, combo, double_spin, hbox, line_edit, path_field, primary_button, spin,
+)
 from carla_interaction_gui.workers.DisableTrafficManagerWorker import DisableTrafficManagerWorker
 from carla_interaction_gui.workers.ManualControlWorker import ManualControlWorker
 from carla_interaction_gui.workers.MoveLatestRecordingWorker import MoveLatestRecordingWorker
@@ -11,7 +14,7 @@ from carla_interaction_gui.workers.SpawnTrafficWorker import SpawnTrafficWorker
 from carla_interaction_gui.workers.SteeringWheelControlWorker import SteeringWheelControlWorker
 
 
-class ManualTab(ttk.Frame):
+class ManualTab(Tab):
     """
     The "Manual Drive" tab: drive around in CARLA manually, spawn extra
     manually-controlled actors, and archive the resulting recording.
@@ -30,142 +33,84 @@ class ManualTab(ttk.Frame):
     _MAP_LOAD_AND_EGO_SPAWN_BUFFER_S = 20
     _SPAWN_TRAFFIC_DELAY_MS = (_CARLA_COOLDOWN_S + _CARLA_BOOT_S + _MAP_LOAD_AND_EGO_SPAWN_BUFFER_S) * 1000
 
-    def __init__(self, notebook: ttk.Notebook, app):
-        super().__init__(notebook)
-        self.app = app
-        notebook.add(self, text="Manual Drive")
-        tk.Label(self, text="Let's you manually drive around in CARLA.").pack(pady=5)
+    def __init__(self, app):
+        super().__init__(app, "Drive around in CARLA manually, add further manually controlled actors and "
+                              "archive the resulting recording.")
+        settings = app.settings
 
-        carla_target_rows(self, app)
-        entry_row(self, "Recording extension:", app.recording_extension_variable)
-        entry_row(self, "CARLA output folder:", app.manual_output_dir_variable,
-                 lambda: app.open_directory_dialog(app.manual_output_dir_variable))
-        entry_row(self, "Archive recordings folder:", app.default_recordings_folder_variable,
-                 lambda: app.open_directory_dialog(app.default_recordings_folder_variable))
-        entry_row(self, "New file-name prefix:", app.new_file_name_variable)
+        form = self.section("Driving")
+        map_combo = combo(settings["selected_map"])
+        ego_combo = combo(settings["selected_ego_vehicle"])
+        traffic_type_combo = combo(settings["manual_spawn_traffic_vehicle_type"])
 
-        row = tk.Frame(self)
-        row.pack(fill="x", pady=2)
-        tk.Label(row, text="Map:", width=26, anchor="w").pack(side="left")
-        map_combobox = ttk.Combobox(
-            row,
-            textvariable=app.selected_map_variable,
-            state="readonly",
-            width=42
-        )
-        map_combobox.pack(side="left", fill="x", expand=True)
-        app.register_version_listener(lambda: map_combobox.config(values=app.available_maps()))
+        def follow_version():
+            set_combo_items(map_combo, app.available_maps(), settings["selected_map"])
+            for c, name in ((ego_combo, "selected_ego_vehicle"),
+                            (traffic_type_combo, "manual_spawn_traffic_vehicle_type")):
+                set_combo_items(c, app.available_vehicles(), settings[name])
 
-        ego_row = tk.Frame(self)
-        ego_row.pack(fill="x", pady=2)
-        tk.Label(ego_row, text="Ego vehicle:", width=26, anchor="w").pack(side="left")
-        ego_combobox = ttk.Combobox(
-            ego_row,
-            textvariable=app.selected_ego_vehicle_variable,
-            state="readonly",
-            width=42
-        )
-        ego_combobox.pack(side="left", fill="x", expand=True)
-        app.register_version_listener(lambda: ego_combobox.config(values=app.available_vehicles()))
+        app.register_version_listener(follow_version)
+        form.addRow("Map:", map_combo)
+        form.addRow("Ego vehicle:", ego_combo)
+        form.addRow("Camera elevation:", double_spin(settings["camera_elevation"], -50, 50, step=0.1, suffix=" m"))
+        form.addRow("Camera tilt:", double_spin(settings["camera_tilt"], -90, 90, step=1, suffix="°"))
 
-        vcmd = (self.register(validate_number), "%P")
+        form = self.section("Traffic")
+        spawn_enabled = check("Spawn traffic", settings["manual_spawn_traffic_enabled"])
+        count = spin(settings["manual_spawn_traffic_num_vehicles"], 1, 10_000, " vehicles")
+        form.addRow(hbox(spawn_enabled, count, QWidget(), stretch_last=True))
+        single_type = check("Spawn only one vehicle type:", settings["manual_spawn_traffic_single_type_enabled"])
+        form.addRow(hbox(single_type, traffic_type_combo, stretch_last=True))
 
-        elevation_row = tk.Frame(self)
-        elevation_row.pack(fill="x", pady=2)
-        tk.Label(elevation_row, text="Camera elevation (m) [default: 0.0]:", width=26, anchor="w").pack(side="left")
-        tk.Entry(
-            elevation_row,
-            textvariable=app.camera_elevation_variable,
-            width=10,
-            validate="key",
-            validatecommand=vcmd
-        ).pack(side="left")
+        def update_traffic_enabled():
+            count.setEnabled(spawn_enabled.isChecked())
+            single_type.setEnabled(spawn_enabled.isChecked())
+            traffic_type_combo.setEnabled(spawn_enabled.isChecked() and single_type.isChecked())
 
-        tilt_row = tk.Frame(self)
-        tilt_row.pack(fill="x", pady=2)
-        tk.Label(tilt_row, text="Camera tilt (deg) [default: 0.0]:", width=26, anchor="w").pack(side="left")
-        tk.Entry(
-            tilt_row,
-            textvariable=app.camera_tilt_variable,
-            width=10,
-            validate="key",
-            validatecommand=vcmd
-        ).pack(side="left")
+        update_traffic_enabled()
+        spawn_enabled.toggled.connect(update_traffic_enabled)
+        single_type.toggled.connect(update_traffic_enabled)
+        form.addRow(check("Disable traffic manager for other vehicles (they will not move)",
+                          settings["manual_disable_traffic_manager_enabled"]))
 
-        options = ttk.LabelFrame(self, text="Options")
-        options.pack(fill="x", padx=4, pady=6)
-        tk.Checkbutton(options, text="Render off screen",
-                       variable=app.render_off_screen_variable, anchor="w").pack(fill="x", padx=6, pady=2)
-        tk.Checkbutton(options, text="Render quality low",
-                       variable=app.render_quality_low_variable, anchor="w").pack(fill="x", padx=6, pady=2)
+        form = self.section("Recording")
+        form.addRow("Recording extension:", line_edit(settings["recording_extension"], ".rec"))
+        form.addRow("CARLA output folder:", path_field(app, settings["manual_output_dir"], folder=True))
+        form.addRow("Archive recordings folder:", path_field(app, settings["default_recordings_folder"], folder=True))
+        form.addRow("New file-name prefix:", hbox(line_edit(settings["new_file_name"]),
+                                                  button("Move 'manual_recording'", self._move_latest)))
 
-        spawn_traffic_row = tk.Frame(options)
-        spawn_traffic_row.pack(fill="x", padx=6, pady=2)
-        tk.Checkbutton(spawn_traffic_row, text="Spawn traffic",
-                       variable=app.manual_spawn_traffic_enabled_variable, anchor="w").pack(side="left")
-        tk.Label(spawn_traffic_row, text="Number of vehicles:").pack(side="left", padx=(12, 4))
-        tk.Entry(spawn_traffic_row, textvariable=app.manual_spawn_traffic_num_vehicles_variable,
-                 width=8).pack(side="left")
-
-        spawn_traffic_type_row = tk.Frame(options)
-        spawn_traffic_type_row.pack(fill="x", padx=6, pady=2)
-        tk.Checkbutton(spawn_traffic_type_row, text="Spawn only one vehicle type",
-                       variable=app.manual_spawn_traffic_single_type_enabled_variable, anchor="w").pack(side="left")
-        tk.Label(spawn_traffic_type_row, text="Vehicle type:").pack(side="left", padx=(12, 4))
-        traffic_type_combobox = ttk.Combobox(
-            spawn_traffic_type_row,
-            textvariable=app.manual_spawn_traffic_vehicle_type_variable,
-            state="readonly",
-            width=32
-        )
-        traffic_type_combobox.pack(side="left")
-        app.register_version_listener(lambda: traffic_type_combobox.config(values=app.available_vehicles()))
-
-        tk.Checkbutton(options, text="Disable traffic manager for other vehicles (they will not move)",
-                       variable=app.manual_disable_traffic_manager_enabled_variable,
-                       anchor="w").pack(fill="x", padx=6, pady=2)
-
-        tk.Button(self, text="Start manual driving", width=25, command=self._start_manual).pack(pady=8)
-        tk.Button(self, text="Start manual driving (Steering Wheel)",
-                  command=self._start_manual_steering_wheel).pack(pady=2)
-
-        row2 = tk.Frame(self)
-        row2.pack(fill="x", pady=4)
-        tk.Label(row2, text="Add controlled actor:", width=26, anchor="w").pack(side="left")
-        actor_buttons = tk.Frame(row2)
-        actor_buttons.pack(side="left")
+        form = self.section("Add controlled actor")
+        self._actor_buttons = QWidget()
+        actor_row = QHBoxLayout(self._actor_buttons)
+        actor_row.setContentsMargins(0, 0, 0, 0)
 
         def show_actor_buttons():
-            for child in actor_buttons.winfo_children():
-                child.destroy()
+            while actor_row.count():
+                old = actor_row.takeAt(0).widget()
+                old.setParent(None)  # off screen right away, not only once deleteLater runs
+                old.deleteLater()
             for label, filter_str in app.available_controlled_actors().items():
-                tk.Button(actor_buttons, text=label,
-                          command=lambda f=filter_str: self._spawn_manual_extra(filter_str=f)
-                          ).pack(side="left", padx=2)
+                actor_row.addWidget(button(label, lambda _=False, f=filter_str: self._spawn_manual_extra(
+                    filter_str=f)))
 
         app.register_version_listener(show_actor_buttons)
+        form.addRow("Into the running session:", hbox(self._actor_buttons, QWidget(), stretch_last=True))
 
-        tk.Button(self, text="Move 'manual_recording'", command=self._move_latest, state="active").pack(pady=2)
+        self.stop_btn = self.actions(
+            primary_button("Start manual driving", self._start_manual),
+            button("Start manual driving (steering wheel)", self._start_manual_steering_wheel),
+        )
 
-        self.stop_btn = tk.Button(self, text="Stop", command=app.stop_worker, state="disabled")
-        self.stop_btn.pack(pady=8)
-        app.register_stop_button(self.stop_btn)
-
-    def _start_manual(self):
+    def _start_primary(self, worker_type):
         """Start the primary manual driving (exclusive) as the selected ego vehicle."""
         app = self.app
-        if not app.validate_paths([
-            ("CARLA executable", app.carla_executable_variable, "carla"),
-            # ("CARLA output folder", app.manual_output_dir_variable, "dir"),
-        ]):
-            return
-        number_of_vehicles = self._resolve_spawn_traffic_vehicle_count()
-        if number_of_vehicles is None:
+        if not app.validate_paths([("CARLA executable", "carla_executable", "carla")]):
             return
         app.clear_log()
 
         cfg = app.collect_cfg()
-        w = ManualControlWorker(
+        w = worker_type(
             cfg,
             app.log,
             vehicle_filter=cfg.selected_ego_vehicle,
@@ -177,34 +122,15 @@ class ManualTab(ttk.Frame):
         )
         app.manual_workers.append(w)
         app.attach_worker(w, stop_button=self.stop_btn)
-        self._schedule_post_start_actions(w, number_of_vehicles)
+        self._schedule_post_start_actions(w, cfg.manual_spawn_traffic_num_vehicles
+                                          if cfg.manual_spawn_traffic_enabled else 0)
+
+    def _start_manual(self):
+        self._start_primary(ManualControlWorker)
 
     def _start_manual_steering_wheel(self):
-        """Start the primary manual driving (exclusive), reading input from a steering wheel/joystick."""
-        app = self.app
-        if not app.validate_paths([
-            ("CARLA executable", app.carla_executable_variable, "carla"),
-        ]):
-            return
-        number_of_vehicles = self._resolve_spawn_traffic_vehicle_count()
-        if number_of_vehicles is None:
-            return
-        app.clear_log()
-
-        cfg = app.collect_cfg()
-        w = SteeringWheelControlWorker(
-            cfg,
-            app.log,
-            vehicle_filter=cfg.selected_ego_vehicle,
-            camera_elevation=cfg.camera_elevation,
-            camera_tilt=cfg.camera_tilt,
-            restart_before=True,
-            kill_server_after=True,
-            exclusive=True,
-        )
-        app.manual_workers.append(w)
-        app.attach_worker(w, stop_button=self.stop_btn)
-        self._schedule_post_start_actions(w, number_of_vehicles)
+        """Like _start_manual, reading input from a steering wheel/joystick."""
+        self._start_primary(SteeringWheelControlWorker)
 
     def _spawn_manual_extra(self, *, filter_str: str):
         """
@@ -212,7 +138,7 @@ class ManualTab(ttk.Frame):
         the provided --filter, without rebooting/killing the CARLA server.
         """
         app = self.app
-        if not app.validate_paths([("CARLA executable", app.carla_executable_variable, "carla")]):
+        if not app.validate_paths([("CARLA executable", "carla_executable", "carla")]):
             return
 
         cfg = app.collect_cfg()
@@ -230,20 +156,6 @@ class ManualTab(ttk.Frame):
         app.manual_workers.append(w)
         app.attach_worker(w)
 
-    def _resolve_spawn_traffic_vehicle_count(self) -> int | None:
-        """
-        Returns the configured vehicle count if the "Spawn traffic" checkbox
-        is enabled, 0 if it's disabled, or None (after showing an error) if
-        the configured count is invalid.
-        """
-        if not self.app.manual_spawn_traffic_enabled_variable.get():
-            return 0
-        try:
-            return max(1, int(self.app.manual_spawn_traffic_num_vehicles_variable.get()))
-        except (tk.TclError, ValueError):
-            messagebox.showerror("Invalid value", "Number of vehicles to spawn must be a whole number.")
-            return None
-
     def _schedule_post_start_actions(self, manual_worker, number_of_vehicles: int):
         """
         After a delay that gives the just-(re)started CARLA session time to
@@ -254,7 +166,7 @@ class ManualTab(ttk.Frame):
         the whole thing is skipped if the session was stopped again before
         the delay elapsed.
         """
-        disable_traffic_manager = self.app.manual_disable_traffic_manager_enabled_variable.get()
+        disable_traffic_manager = self.app.settings["manual_disable_traffic_manager_enabled"].get()
         if number_of_vehicles <= 0 and not disable_traffic_manager:
             return
 
@@ -268,7 +180,7 @@ class ManualTab(ttk.Frame):
             elif disable_traffic_manager:
                 self._disable_traffic_manager_now()
 
-        self.app.after(self._SPAWN_TRAFFIC_DELAY_MS, fire)
+        QTimer.singleShot(self._SPAWN_TRAFFIC_DELAY_MS, fire)
 
     def _spawn_traffic_now(self, number_of_vehicles: int) -> SpawnTrafficWorker:
         app = self.app
@@ -286,7 +198,7 @@ class ManualTab(ttk.Frame):
 
         def poll():
             if spawn_worker.is_alive():
-                self.app.after(500, poll)
+                QTimer.singleShot(500, poll)
             else:
                 self._disable_traffic_manager_now()
 
@@ -301,10 +213,10 @@ class ManualTab(ttk.Frame):
     def _move_latest(self):
         """Moves the latest recording with the specified prefix."""
         app = self.app
-        if not app.new_file_name_variable.get().strip():
-            return messagebox.showerror("Missing", "File-name prefix required.")
-        if not app.validate_paths([
-            ("Archive recordings folder", app.default_recordings_folder_variable, "dir"),
-        ]):
-            return
-        app.attach_worker(MoveLatestRecordingWorker(app.collect_cfg(), app.new_file_name_variable.get(), app.log))
+        if not app.settings["new_file_name"].get().strip():
+            return app.show_error("Missing", "File-name prefix required.")
+        if not app.validate_paths([("Archive recordings folder", "default_recordings_folder", "dir")]):
+            return None
+        cfg = app.collect_cfg()
+        app.attach_worker(MoveLatestRecordingWorker(cfg, cfg.new_file_name, app.log))
+        return None
