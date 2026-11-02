@@ -3,8 +3,7 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 
-from carla_interaction_gui.gui.constants import ALLOWED_CARLA_MAPS
-from carla_interaction_gui.gui.widgets import entry_row
+from carla_interaction_gui.gui.widgets import carla_target_rows
 from carla_interaction_gui.workers.CarlaServerWorker import CarlaServerWorker
 
 
@@ -17,19 +16,19 @@ class ServerTab(ttk.Frame):
         notebook.add(self, text="CARLA Server")
         tk.Label(self, text="Start or stop a head-less CARLA instance.").pack(pady=5)
 
-        entry_row(self, "CARLA executable:", app.carla_executable_variable,
-                 lambda: app.open_file_dialog(app.carla_executable_variable))
+        carla_target_rows(self, app)
 
         row = tk.Frame(self)
         row.pack(fill="x", pady=2)
         tk.Label(row, text="Map:", width=26, anchor="w").pack(side="left")
-        ttk.Combobox(
+        map_combobox = ttk.Combobox(
             row,
             textvariable=app.selected_map_variable,
             state="readonly",
-            values=ALLOWED_CARLA_MAPS,
             width=42
-        ).pack(side="left", fill="x", expand=True)
+        )
+        map_combobox.pack(side="left", fill="x", expand=True)
+        app.register_version_listener(lambda: map_combobox.config(values=app.available_maps()))
 
         rendering_options = ttk.LabelFrame(self, text="Rendering options")
         rendering_options.pack(fill="x", padx=4, pady=6)
@@ -56,7 +55,7 @@ class ServerTab(ttk.Frame):
             app.carla_worker.cancel()
             self.reset_server_button()
         else:
-            if not app.validate_paths([("CARLA executable", app.carla_executable_variable, "file")]):
+            if not app.validate_paths([("CARLA executable", app.carla_executable_variable, "carla")]):
                 return
             app.clear_log()
             app.carla_worker = CarlaServerWorker(app.collect_cfg(), app.log)

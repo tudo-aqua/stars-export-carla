@@ -3,8 +3,8 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-from carla_interaction_gui.gui.constants import ALLOWED_CARLA_MAPS, ALLOWED_NON_LAYERED_MAPS, ALLOWED_PARKED_MAPS
-from carla_interaction_gui.gui.widgets import entry_row
+from carla_interaction_gui.gui.constants import ALL_CARLA_MAPS, ALLOWED_NON_LAYERED_MAPS, ALLOWED_PARKED_MAPS
+from carla_interaction_gui.gui.widgets import carla_target_rows, entry_row
 from carla_interaction_gui.workers.RecGenRunner import RecGenRunner
 
 
@@ -21,8 +21,7 @@ class RecGenTab(ttk.Frame):
 
         tk.Label(self, text="Generate CARLA recordings across seed ranges and selected maps.").pack(pady=5)
 
-        entry_row(self, "CARLA executable:", app.carla_executable_variable,
-                 lambda: app.open_file_dialog(app.carla_executable_variable))
+        carla_target_rows(self, app)
 
         render_row = tk.Frame(self)
         render_row.pack(fill="x", padx=4, pady=(2, 8))
@@ -38,18 +37,15 @@ class RecGenTab(ttk.Frame):
         maps_frame = ttk.LabelFrame(self, text="Maps (select one or more)")
         maps_frame.pack(fill="x", padx=4, pady=6)
 
+        # One var per known map, so selections survive switching CARLA
+        # versions; only the maps of the current version get a checkbox.
         saved_maps = getattr(app.config, "recgen_selected_maps", None)
         previously = set(saved_maps) if saved_maps else set(ALLOWED_NON_LAYERED_MAPS)
-        self.map_vars: dict[str, tk.BooleanVar] = {}
-        row = tk.Frame(maps_frame)
-        row.pack(fill="x", pady=2)
-        for i, m in enumerate(ALLOWED_CARLA_MAPS):
-            var = tk.BooleanVar(value=m in previously)
-            self.map_vars[m] = var
-            tk.Checkbutton(row, text=m, variable=var, anchor="w").pack(side="left", padx=6)
-            if (i + 1) % 4 == 0 and i != len(ALLOWED_CARLA_MAPS) - 1:
-                row = tk.Frame(maps_frame)
-                row.pack(fill="x", pady=2)
+        self.map_vars: dict[str, tk.BooleanVar] = {
+            m: tk.BooleanVar(value=m in previously) for m in ALL_CARLA_MAPS
+        }
+        self._maps_frame = maps_frame
+        app.register_version_listener(self._show_maps)
 
         tp = ttk.LabelFrame(self, text="Traffic parameters")
         tp.pack(fill="x", padx=4, pady=6)
@@ -77,6 +73,17 @@ class RecGenTab(ttk.Frame):
         self.stop_btn.pack(side="left", padx=4)
         app.register_stop_button(self.stop_btn)
 
+    def _show_maps(self):
+        """(Re)build the map checkboxes for the maps of the current CARLA version."""
+        maps = self._available_maps = self.app.available_maps()
+        for child in self._maps_frame.winfo_children():
+            child.destroy()
+        for i, m in enumerate(maps):
+            if i % 4 == 0:
+                row = tk.Frame(self._maps_frame)
+                row.pack(fill="x", pady=2)
+            tk.Checkbutton(row, text=m, variable=self.map_vars[m], anchor="w").pack(side="left", padx=6)
+
     def _start_recgen(self):
         """
         Start the recording generator across a seed range.
@@ -84,14 +91,14 @@ class RecGenTab(ttk.Frame):
         """
         app = self.app
         if not app.validate_paths([
-            ("CARLA executable", app.carla_executable_variable, "file"),
+            ("CARLA executable", app.carla_executable_variable, "carla"),
             ("Output directory", app.recgen_output_dir_variable, "dir"),
         ]):
             return
 
         cfg = app.collect_cfg()
 
-        selected_maps = [m for m, v in self.map_vars.items() if v.get()]
+        selected_maps = [m for m in self._available_maps if self.map_vars[m].get()]
         if not selected_maps:
             return messagebox.showerror("Missing", "Select at least one map.")
 

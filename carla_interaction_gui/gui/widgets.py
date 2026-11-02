@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import tkinter as tk
+from tkinter import ttk
 from typing import Callable
+
+from carla_interaction_gui.carla_versions import python_api_versions
+from carla_interaction_gui.gui.constants import CARLA_DOCKER_VERSIONS
 
 
 def entry_row(parent: tk.Widget, label: str, var: tk.Variable, browse: Callable = None,
@@ -29,6 +33,28 @@ def entry_row(parent: tk.Widget, label: str, var: tk.Variable, browse: Callable 
     if browse:
         tk.Button(row, text="...", command=browse).pack(side="left", padx=2)
     return row
+
+
+def carla_target_rows(parent: tk.Widget, app) -> None:
+    """
+    Rows choosing the CARLA server and the Python API to talk to it with: an
+    editable dropdown of the catalogued docker images (accepting any other
+    image name or a start script path as free text, see carla_versions) and a
+    dropdown of Python API versions, which follows the image selection.
+    """
+    row = tk.Frame(parent)
+    row.pack(fill="x", pady=2)
+    tk.Label(row, text="CARLA executable:", width=26, anchor="w").pack(side="left")
+    ttk.Combobox(row, textvariable=app.carla_executable_variable, values=list(CARLA_DOCKER_VERSIONS),
+                 width=42).pack(side="left", fill="x", expand=True)
+    tk.Button(row, text="...", command=lambda: app.open_file_dialog(app.carla_executable_variable)
+              ).pack(side="left", padx=2)
+
+    row = tk.Frame(parent)
+    row.pack(fill="x", pady=2)
+    tk.Label(row, text="CARLA Python API:", width=26, anchor="w").pack(side="left")
+    ttk.Combobox(row, textvariable=app.carla_python_api_variable, state="readonly",
+                 values=python_api_versions(), width=42).pack(side="left", fill="x", expand=True)
 
 
 def validate_number(proposed: str) -> bool:

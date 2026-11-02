@@ -3,8 +3,7 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 
-from carla_interaction_gui.gui.constants import ALLOWED_NON_LAYERED_MAPS
-from carla_interaction_gui.gui.widgets import entry_row
+from carla_interaction_gui.gui.widgets import carla_target_rows, entry_row
 from carla_interaction_gui.workers.GenerateMapsWorker import GenerateMapsWorker
 
 
@@ -15,10 +14,9 @@ class MapsTab(ttk.Frame):
         super().__init__(notebook)
         self.app = app
         notebook.add(self, text="Generate Maps")
-        tk.Label(self, text="Generate map data for all allowed maps.").pack(pady=5)
+        tk.Label(self, text="Generate map data for all maps of the selected CARLA version.").pack(pady=5)
 
-        entry_row(self, "CARLA executable:", app.carla_executable_variable,
-                 lambda: app.open_file_dialog(app.carla_executable_variable))
+        carla_target_rows(self, app)
         entry_row(self, "Maps output folder:", app.transformer_output_path_variable,
                  lambda: app.open_directory_dialog(app.transformer_output_path_variable))
 
@@ -35,7 +33,7 @@ class MapsTab(ttk.Frame):
     def _start_generate_maps(self):
         app = self.app
         if not app.validate_paths([
-            ("CARLA executable", app.carla_executable_variable, "file"),
+            ("CARLA executable", app.carla_executable_variable, "carla"),
             ("Maps output folder", app.transformer_output_path_variable, "dir"),
         ]):
             return
@@ -43,6 +41,6 @@ class MapsTab(ttk.Frame):
         app.clear_log()
         cfg = app.collect_cfg()
         app.attach_worker(
-            GenerateMapsWorker(cfg, app.log, list(ALLOWED_NON_LAYERED_MAPS)),
+            GenerateMapsWorker(cfg, app.log, app.available_maps()),
             stop_button=self.stop_btn
         )

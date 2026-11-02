@@ -3,8 +3,7 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-from carla_interaction_gui.gui.constants import ALLOWED_CARLA_MAPS, ALLOWED_EGO_VEHICLES
-from carla_interaction_gui.gui.widgets import entry_row, validate_number
+from carla_interaction_gui.gui.widgets import carla_target_rows, entry_row, validate_number
 from carla_interaction_gui.workers.DisableTrafficManagerWorker import DisableTrafficManagerWorker
 from carla_interaction_gui.workers.ManualControlWorker import ManualControlWorker
 from carla_interaction_gui.workers.MoveLatestRecordingWorker import MoveLatestRecordingWorker
@@ -37,8 +36,7 @@ class ManualTab(ttk.Frame):
         notebook.add(self, text="Manual Drive")
         tk.Label(self, text="Let's you manually drive around in CARLA.").pack(pady=5)
 
-        entry_row(self, "CARLA executable:", app.carla_executable_variable,
-                 lambda: app.open_file_dialog(app.carla_executable_variable))
+        carla_target_rows(self, app)
         entry_row(self, "Recording extension:", app.recording_extension_variable)
         entry_row(self, "CARLA output folder:", app.manual_output_dir_variable,
                  lambda: app.open_directory_dialog(app.manual_output_dir_variable))
@@ -49,24 +47,26 @@ class ManualTab(ttk.Frame):
         row = tk.Frame(self)
         row.pack(fill="x", pady=2)
         tk.Label(row, text="Map:", width=26, anchor="w").pack(side="left")
-        ttk.Combobox(
+        map_combobox = ttk.Combobox(
             row,
             textvariable=app.selected_map_variable,
             state="readonly",
-            values=ALLOWED_CARLA_MAPS,
             width=42
-        ).pack(side="left", fill="x", expand=True)
+        )
+        map_combobox.pack(side="left", fill="x", expand=True)
+        app.register_version_listener(lambda: map_combobox.config(values=app.available_maps()))
 
         ego_row = tk.Frame(self)
         ego_row.pack(fill="x", pady=2)
         tk.Label(ego_row, text="Ego vehicle:", width=26, anchor="w").pack(side="left")
-        ttk.Combobox(
+        ego_combobox = ttk.Combobox(
             ego_row,
             textvariable=app.selected_ego_vehicle_variable,
             state="readonly",
-            values=ALLOWED_EGO_VEHICLES,
             width=42
-        ).pack(side="left", fill="x", expand=True)
+        )
+        ego_combobox.pack(side="left", fill="x", expand=True)
+        app.register_version_listener(lambda: ego_combobox.config(values=app.available_vehicles()))
 
         vcmd = (self.register(validate_number), "%P")
 
@@ -112,13 +112,14 @@ class ManualTab(ttk.Frame):
         tk.Checkbutton(spawn_traffic_type_row, text="Spawn only one vehicle type",
                        variable=app.manual_spawn_traffic_single_type_enabled_variable, anchor="w").pack(side="left")
         tk.Label(spawn_traffic_type_row, text="Vehicle type:").pack(side="left", padx=(12, 4))
-        ttk.Combobox(
+        traffic_type_combobox = ttk.Combobox(
             spawn_traffic_type_row,
             textvariable=app.manual_spawn_traffic_vehicle_type_variable,
             state="readonly",
-            values=ALLOWED_EGO_VEHICLES,
             width=32
-        ).pack(side="left")
+        )
+        traffic_type_combobox.pack(side="left")
+        app.register_version_listener(lambda: traffic_type_combobox.config(values=app.available_vehicles()))
 
         tk.Checkbutton(options, text="Disable traffic manager for other vehicles (they will not move)",
                        variable=app.manual_disable_traffic_manager_enabled_variable,
@@ -131,18 +132,18 @@ class ManualTab(ttk.Frame):
         row2 = tk.Frame(self)
         row2.pack(fill="x", pady=4)
         tk.Label(row2, text="Add controlled actor:", width=26, anchor="w").pack(side="left")
-        tk.Button(row2, text="Cyclist",
-                  command=lambda: self._spawn_manual_extra(filter_str="vehicle.bh.crossbike")
-                  ).pack(side="left", padx=2)
-        tk.Button(row2, text="Walker",
-                  command=lambda: self._spawn_manual_extra(filter_str="walker.pedestrian.*")
-                  ).pack(side="left", padx=2)
-        tk.Button(row2, text="Small car",
-                  command=lambda: self._spawn_manual_extra(filter_str="vehicle.mini.cooper_s_2021")
-                  ).pack(side="left", padx=2)
-        tk.Button(row2, text="Truck",
-                  command=lambda: self._spawn_manual_extra(filter_str="vehicle.carlamotors.carlacola")
-                  ).pack(side="left", padx=2)
+        actor_buttons = tk.Frame(row2)
+        actor_buttons.pack(side="left")
+
+        def show_actor_buttons():
+            for child in actor_buttons.winfo_children():
+                child.destroy()
+            for label, filter_str in app.available_controlled_actors().items():
+                tk.Button(actor_buttons, text=label,
+                          command=lambda f=filter_str: self._spawn_manual_extra(filter_str=f)
+                          ).pack(side="left", padx=2)
+
+        app.register_version_listener(show_actor_buttons)
 
         tk.Button(self, text="Move 'manual_recording'", command=self._move_latest, state="active").pack(pady=2)
 
@@ -154,7 +155,7 @@ class ManualTab(ttk.Frame):
         """Start the primary manual driving (exclusive) as the selected ego vehicle."""
         app = self.app
         if not app.validate_paths([
-            ("CARLA executable", app.carla_executable_variable, "file"),
+            ("CARLA executable", app.carla_executable_variable, "carla"),
             # ("CARLA output folder", app.manual_output_dir_variable, "dir"),
         ]):
             return
@@ -182,7 +183,7 @@ class ManualTab(ttk.Frame):
         """Start the primary manual driving (exclusive), reading input from a steering wheel/joystick."""
         app = self.app
         if not app.validate_paths([
-            ("CARLA executable", app.carla_executable_variable, "file"),
+            ("CARLA executable", app.carla_executable_variable, "carla"),
         ]):
             return
         number_of_vehicles = self._resolve_spawn_traffic_vehicle_count()
@@ -211,7 +212,7 @@ class ManualTab(ttk.Frame):
         the provided --filter, without rebooting/killing the CARLA server.
         """
         app = self.app
-        if not app.validate_paths([("CARLA executable", app.carla_executable_variable, "file")]):
+        if not app.validate_paths([("CARLA executable", app.carla_executable_variable, "carla")]):
             return
 
         cfg = app.collect_cfg()

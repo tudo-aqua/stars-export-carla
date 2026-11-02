@@ -1,29 +1,40 @@
 from __future__ import annotations
 
+import os
 import subprocess
-import sys
 import time
-from typing import Callable, Any
+from pathlib import Path
+from typing import Callable
 
-import carla
 import psutil
 
-# Must match the --name given to the container in carla_run.sh.
-CARLA_DOCKER_CONTAINER_NAME = "carla_server"
+from carla_interaction_gui.carla_versions import is_start_script, start_script_for
+from carla_interaction_gui.gui.constants import (
+    CARLA_DOCKER_CONTAINER_NAME,
+    CARLA_DOCKER_RECORDINGS_CONTAINER_DIR,
+    CARLA_DOCKER_RECORDINGS_HOST_DIR,
+    CARLA_DOCKER_RUN_ARGS,
+    CARLA_DOCKER_SERVER_ARGS,
+)
+
+# The CARLA Python API (`import carla`) is only imported inside the functions
+# that talk to the server: those run in worker subprocesses that get the API
+# version matching the server put on PYTHONPATH (see carla_versions). The GUI
+# process imports this module too, for kill_carla/restart_carla, and must not
+# load any CARLA API itself.
 
 
 def kill_carla(log: Callable[[str], None] | None = None) -> None:
     """
-    Terminate every running Unreal-Engine (CARLA) process on the host.
+    Terminate every running CARLA server on the host.
 
-    On Windows, CARLA runs as a plain native process, so finding and killing
-    it by name (below) is enough. On Linux this project instead runs CARLA
-    inside a Docker container (see carla_run.sh): the game binary lives in
-    the container's own PID namespace under the docker daemon, so killing
-    that process directly (even where psutil can see it) doesn't reliably
-    stop the container - it can linger holding the host network (--net=host,
-    port 2000), blocking the next restart. On Linux we therefore also kill
-    the container itself, by name, via the docker CLI.
+    CARLA launched from a start script runs as a plain host process, so
+    finding and killing it by name (below) is enough. CARLA launched from a
+    docker image instead lives in the container's own PID namespace under the
+    docker daemon, so killing that process directly (even where psutil can see
+    it) doesn't reliably stop the container - it can linger holding the host
+    network (--net=host, port 2000), blocking the next restart. The container
+    itself is therefore also killed, by name, via the docker CLI.
 
     Parameters
     ----------
@@ -31,13 +42,13 @@ def kill_carla(log: Callable[[str], None] | None = None) -> None:
         Logging callback that will receive status messages
         (defaults to `print`).  The callback is invoked **before**
         each process is killed, so you always know which binary
-        was terminated (e.g. ``CarlaUE4-Win64-Shipping.exe``).
+        was terminated (e.g. ``CarlaUE4-Linux-Shipping``).
     """
     _log = log or print
     for proc in psutil.process_iter(["name"]):
         if proc.info["name"] in (
-                "CarlaUE4-Win64-Shipping.exe", "CarlaUE4.exe",
-                "CarlaUE4-Linux-Shipping", "CarlaUE4.sh"
+                "CarlaUE4-Linux-Shipping", "CarlaUE4.sh",
+                "CarlaUnreal-Linux-Shipping", "CarlaUnreal.sh",
         ):
             try:
                 _log(f">> [CARLA] Killing existing instance: {proc.info['name']}")
@@ -45,28 +56,44 @@ def kill_carla(log: Callable[[str], None] | None = None) -> None:
             except psutil.NoSuchProcess:
                 pass
             except psutil.AccessDenied:
-                # E.g. a process left behind by a differently-invoked docker
-                # run (different UID mapping) that this user can't signal
-                # directly. Not fatal here - on Linux the docker-kill below
-                # (or a manual cleanup) is the real way to remove it; don't
-                # let it abort the whole restart/transform.
+                # E.g. a process inside a docker container running under a
+                # different UID mapping that this user can't signal directly.
+                # Not fatal here - the docker-kill below (or a manual cleanup)
+                # is the real way to remove it; don't let it abort the whole
+                # restart/transform.
                 _log(f">> [CARLA] Warning: no permission to kill {proc.info['name']} "
                      f"(pid={proc.pid}); leaving it running")
 
-    if sys.platform.startswith("linux"):
-        try:
-            result = subprocess.run(
-                ["docker", "kill", CARLA_DOCKER_CONTAINER_NAME],
-                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=10,
-            )
-            if result.returncode == 0:
-                _log(f">> [CARLA] Killed docker container '{CARLA_DOCKER_CONTAINER_NAME}'")
-            # A non-zero exit here just means no such container was running,
-            # which is the common/expected case - nothing to log.
-        except FileNotFoundError:
-            pass  # docker CLI not installed/on PATH; nothing we can do
-        except subprocess.TimeoutExpired:
-            _log(">> [CARLA] 'docker kill' timed out")
+    try:
+        result = subprocess.run(
+            ["docker", "kill", CARLA_DOCKER_CONTAINER_NAME],
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=10,
+        )
+        if result.returncode == 0:
+            _log(f">> [CARLA] Killed docker container '{CARLA_DOCKER_CONTAINER_NAME}'")
+        # A non-zero exit here just means no such container was running,
+        # which is the common/expected case - nothing to log.
+    except FileNotFoundError:
+        pass  # docker CLI not installed/on PATH; nothing we can do
+    except subprocess.TimeoutExpired:
+        _log(">> [CARLA] 'docker kill' timed out")
+
+
+def _docker_run_command(image: str, server_args: list[str]) -> list[str]:
+    """The `docker run` command starting a CARLA server from the given image."""
+    recordings_host_dir = Path(CARLA_DOCKER_RECORDINGS_HOST_DIR).expanduser()
+    # docker would otherwise create a missing mount source itself, owned by root.
+    recordings_host_dir.mkdir(parents=True, exist_ok=True)
+    return [
+        "docker", "run",
+        f"--name={CARLA_DOCKER_CONTAINER_NAME}",
+        *CARLA_DOCKER_RUN_ARGS,
+        f"--user={os.getuid()}:{os.getgid()}",
+        f"--env=DISPLAY={os.environ.get('DISPLAY', '')}",
+        f"--volume={recordings_host_dir}:{CARLA_DOCKER_RECORDINGS_CONTAINER_DIR}",
+        image,
+        "bash", start_script_for(image), *CARLA_DOCKER_SERVER_ARGS, *server_args,
+    ]
 
 
 def start_carla(
@@ -79,33 +106,38 @@ def start_carla(
         log: Callable[[str], None] | None = None,
 ) -> None:
     """
-    Launch a CARLA server in its own process group and optionally set the map
-    using PythonAPI/util/config.py after an optional boot wait.
+    Launch a CARLA server and optionally set the map after an optional boot
+    wait. `exe` is either a local start script (see carla_versions.is_start_script)
+    or the name of a docker image to start a fresh container from.
     """
     _log = log or print
 
-    cmd = [exe]
+    server_args = []
     if render_off_screen:
-        cmd.append("-RenderOffScreen")
+        server_args.append("-RenderOffScreen")
     if quality_low:
-        cmd.append("-quality-level=Low")
+        server_args.append("-quality-level=Low")
 
-    kwargs: dict[str, Any]
-    if sys.platform.startswith("win"):
-        kwargs = dict(creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+    if is_start_script(exe):
+        cmd = [exe, *server_args]
     else:
-        kwargs = {}
+        # Make sure no stale container (e.g. left over from an unclean
+        # previous kill) is still holding the name or the host network.
+        subprocess.run(["docker", "rm", "-f", CARLA_DOCKER_CONTAINER_NAME],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        cmd = _docker_run_command(exe, server_args)
 
-    subprocess.Popen(cmd, **kwargs)
+    _log(">> [CARLA] " + " ".join(cmd))
+    subprocess.Popen(cmd)
 
-    # If a map is requested, wait for UE to boot, then switch maps via config.py
+    # If a map is requested, wait for UE to boot, then switch maps
     if boot > 0:
         _log(f">> [CARLA] Waiting {boot:.1f}s for CARLA to boot")
         time.sleep(boot)
     if map_name:
         ok = set_map(map_name, log=_log)
         if not ok:
-            _log(f">> [CARLA] Warning: failed to set map '{map_name}' via config.py")
+            _log(f">> [CARLA] Warning: failed to set map '{map_name}'")
 
 
 def restart_carla(
@@ -127,7 +159,7 @@ def restart_carla(
     Parameters
     ----------
     exe : str
-        Fully qualified path to the CARLA executable.
+        CARLA start script or docker image, forwarded to ``start_carla``.
     render_off_screen : bool, default False
         Forwarded to ``start_carla``.
     render_quality_low : bool, default False
@@ -183,7 +215,7 @@ def restart_and_connect(
     Parameters
     ----------
     exe : str
-        Location of the CARLA executable passed through to `restart_carla`.
+        CARLA start script or docker image, passed through to `restart_carla`.
     host : str, default ``"localhost"``
         Connection endpoint for the CARLA RPC server.
     port: int, default ``2000``
@@ -202,6 +234,8 @@ def restart_and_connect(
     carla.Client
         A connected client of Carla ready for world interaction.
     """
+    import carla
+
     _log = log or print
     restart_carla(
         exe,
@@ -228,10 +262,10 @@ def set_map(
         log: Callable[[str], None] | None = None,
 ) -> bool:
     """
-    Invoke CARLA's config.py to change the running map, e.g.:
-        python PythonAPI/util/config.py --host <host> --port <port> --map Town05
-    Returns True on success, False otherwise.
+    Change the running map. Returns True on success, False otherwise.
     """
+    import carla
+
     _log = log or print
     _log(f">> [CARLA] Changing map to '{map_name}'")
     client = carla.Client(host=host, port=port)

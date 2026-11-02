@@ -9,7 +9,8 @@ _CONFIG_PATH = Path.home() / ".carla_gui_config.json"
 
 @dataclass
 class Config:
-    carla_executable: str = ""
+    carla_executable: str = ""  # start script (.sh) or docker image, see carla_versions
+    carla_python_api: str = ""  # CARLA version whose Python API the worker subprocesses import
     render_off_screen: bool = False
     render_quality_low: bool = False
     recording_extension: str = ".rec"

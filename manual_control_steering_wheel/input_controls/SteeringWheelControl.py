@@ -5,7 +5,7 @@ from pathlib import Path
 
 import carla
 import pygame
-from carla.libcarla import Client
+from carla import Client
 from pygame.locals import KMOD_CTRL
 from pygame.locals import KMOD_SHIFT
 from pygame.locals import K_DOWN

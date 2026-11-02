@@ -7,9 +7,15 @@ import tkinter as tk
 from datetime import datetime
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 
+from typing import Callable
+
 from carla_interaction_gui.carla_launcher import kill_carla
+from carla_interaction_gui.carla_versions import (
+    controlled_actors_for, is_start_script, maps_for, python_api_for, python_api_versions, validate_python_api,
+    validate_target, vehicles_for,
+)
 from carla_interaction_gui.config_data import Config, load, save
-from carla_interaction_gui.gui.constants import ALLOWED_CARLA_MAPS, ALLOWED_EGO_VEHICLES
+from carla_interaction_gui.gui.constants import CARLA_DOCKER_VERSIONS
 from helpers.camera_recorder.CameraPosition import CameraPosition
 from carla_interaction_gui.gui.tabs.manual_tab import ManualTab
 from carla_interaction_gui.gui.tabs.maps_tab import MapsTab
@@ -42,7 +48,19 @@ class CarlaInteractionGUI(tk.Tk):
 
         self.config: Config = load()
 
-        self.carla_executable_variable = tk.StringVar(value=self.config.carla_executable)
+        # A saved start script that's gone (e.g. the former carla_run.sh) falls
+        # back to the first catalogued docker image.
+        carla_executable = self.config.carla_executable
+        if not carla_executable or (is_start_script(carla_executable) and not os.path.isfile(carla_executable)):
+            carla_executable = next(iter(CARLA_DOCKER_VERSIONS))
+        self.carla_executable_variable = tk.StringVar(value=carla_executable)
+        carla_python_api = python_api_for(carla_executable) or self.config.carla_python_api
+        if carla_python_api not in python_api_versions():
+            carla_python_api = python_api_versions()[0]
+        self.carla_python_api_variable = tk.StringVar(value=carla_python_api)
+        # Tabs showing version-dependent choices (maps, vehicles) register here
+        # to follow the CARLA executable.
+        self._version_listeners: list[Callable[[], None]] = []
         self.recording_extension_variable = tk.StringVar(value=self.config.recording_extension)
 
         self.manual_output_dir_variable = tk.StringVar(value=self.config.manual_output_dir)
@@ -54,10 +72,10 @@ class CarlaInteractionGUI(tk.Tk):
             value=getattr(self.config, "manual_spawn_traffic_enabled", False))
         self.manual_spawn_traffic_single_type_enabled_variable = tk.BooleanVar(
             value=getattr(self.config, "manual_spawn_traffic_single_type_enabled", False))
-        if getattr(self.config, "manual_spawn_traffic_vehicle_type", "") in ALLOWED_EGO_VEHICLES:
+        if getattr(self.config, "manual_spawn_traffic_vehicle_type", "") in self.available_vehicles():
             default_traffic_vehicle_type = self.config.manual_spawn_traffic_vehicle_type
         else:
-            default_traffic_vehicle_type = ALLOWED_EGO_VEHICLES[0]
+            default_traffic_vehicle_type = self.available_vehicles()[0]
         self.manual_spawn_traffic_vehicle_type_variable = tk.StringVar(value=default_traffic_vehicle_type)
         self.manual_disable_traffic_manager_enabled_variable = tk.BooleanVar(
             value=getattr(self.config, "manual_disable_traffic_manager_enabled", False))
@@ -109,16 +127,16 @@ class CarlaInteractionGUI(tk.Tk):
         self.camera_elevation_variable = tk.DoubleVar(value=getattr(self.config, "camera_elevation", 0.0))
         self.camera_tilt_variable = tk.DoubleVar(value=getattr(self.config, "camera_tilt", 0.0))
 
-        if getattr(self.config, "selected_map", "") in ALLOWED_CARLA_MAPS:
+        if getattr(self.config, "selected_map", "") in self.available_maps():
             default_map = self.config.selected_map
         else:
-            default_map = ALLOWED_CARLA_MAPS[0]
+            default_map = self.available_maps()[0]
         self.selected_map_variable = tk.StringVar(value=default_map)
 
-        if getattr(self.config, "selected_ego_vehicle", "") in ALLOWED_EGO_VEHICLES:
+        if getattr(self.config, "selected_ego_vehicle", "") in self.available_vehicles():
             default_ego_vehicle = self.config.selected_ego_vehicle
         else:
-            default_ego_vehicle = ALLOWED_EGO_VEHICLES[0]
+            default_ego_vehicle = self.available_vehicles()[0]
         self.selected_ego_vehicle_variable = tk.StringVar(value=default_ego_vehicle)
 
         self.recgen_seed_start_var = tk.IntVar(value=getattr(self.config, "recgen_seed_start", 0))
@@ -173,7 +191,46 @@ class CarlaInteractionGUI(tk.Tk):
         self.after(50, self._drain_log_queue)
 
         self._redirect_console()
+        self.carla_executable_variable.trace_add("write", self._on_carla_executable_changed)
         self._setup_autosave()
+
+    # ------------------------------------------------------------------
+    # CARLA version selection
+    # ------------------------------------------------------------------
+
+    def available_maps(self) -> list[str]:
+        """Maps offered for the current CARLA executable (all known ones for free text)."""
+        return maps_for(self.carla_executable_variable.get())
+
+    def available_vehicles(self) -> list[str]:
+        """Vehicle blueprints offered for the current CARLA executable (all known ones for free text)."""
+        return vehicles_for(self.carla_executable_variable.get())
+
+    def available_controlled_actors(self) -> dict[str, str]:
+        """'Add controlled actor' buttons (label -> blueprint filter) for the current CARLA executable."""
+        return controlled_actors_for(self.carla_executable_variable.get())
+
+    def register_version_listener(self, listener: Callable[[], None]) -> None:
+        """Call `listener` now and whenever the CARLA executable changes (e.g. to refresh map choices)."""
+        self._version_listeners.append(listener)
+        listener()
+
+    def _on_carla_executable_changed(self, *_):
+        """Follow a catalogued image with its Python API, maps and vehicles."""
+        executable = self.carla_executable_variable.get()
+        python_api = python_api_for(executable)
+        if python_api:
+            self.carla_python_api_variable.set(python_api)
+
+        maps = self.available_maps()
+        if self.selected_map_variable.get() not in maps:
+            self.selected_map_variable.set(maps[0])
+        vehicles = self.available_vehicles()
+        for variable in (self.selected_ego_vehicle_variable, self.manual_spawn_traffic_vehicle_type_variable):
+            if variable.get() not in vehicles:
+                variable.set(vehicles[0])
+        for listener in self._version_listeners:
+            listener()
 
     # ------------------------------------------------------------------
     # Worker lifecycle
@@ -274,6 +331,7 @@ class CarlaInteractionGUI(tk.Tk):
         """
         config = self.config
         config.carla_executable = self.carla_executable_variable.get().strip()
+        config.carla_python_api = self.carla_python_api_variable.get().strip()
         config.recording_extension = self.normalize_extension(self.recording_extension_variable.get())
         config.manual_output_dir = self.manual_output_dir_variable.get().strip()
         config.default_recordings_folder = self.default_recordings_folder_variable.get().strip()
@@ -355,6 +413,7 @@ class CarlaInteractionGUI(tk.Tk):
         """Persist the config whenever any bound variable changes."""
         for variable in (
                 self.carla_executable_variable,
+                self.carla_python_api_variable,
                 self.recording_extension_variable,
                 self.manual_output_dir_variable,
                 self.default_recordings_folder_variable,
@@ -438,7 +497,9 @@ class CarlaInteractionGUI(tk.Tk):
         """
         Validate that the given variables point to existing paths.
 
-        specs: list of (label, variable, kind) where kind in {"file","dir","any"}.
+        specs: list of (label, variable, kind) where kind in {"file","dir","any","carla"}.
+        "carla" checks a CARLA executable (start script or docker image, see
+        carla_versions) together with the selected CARLA Python API.
         Shows a messagebox and returns False on the first invalid item.
         """
         for label, var, kind in specs:
@@ -446,6 +507,13 @@ class CarlaInteractionGUI(tk.Tk):
                 value = var.get().strip()
             except Exception:
                 value = str(var).strip()
+
+            if kind == "carla":
+                error = validate_target(value) or validate_python_api(self.carla_python_api_variable.get())
+                if error:
+                    messagebox.showerror("Invalid CARLA executable", error)
+                    return False
+                continue
 
             if not value:
                 messagebox.showerror("Missing", f"{label} required.")

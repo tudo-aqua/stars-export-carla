@@ -5,7 +5,7 @@ from typing import List
 
 from carla import World, Client
 from carla import WorldSnapshot, Vehicle, Walker, WeatherParameters
-from carla.libcarla import TrafficLight
+from carla import TrafficLight
 
 from carla_data_classes.dynamic import (
     DataWeatherParameters,

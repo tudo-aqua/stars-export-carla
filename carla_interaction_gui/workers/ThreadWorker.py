@@ -6,6 +6,8 @@ from pathlib import Path
 
 import psutil
 
+from carla_interaction_gui.carla_launcher import restart_carla
+from carla_interaction_gui.carla_versions import python_api_env
 from carla_interaction_gui.config_data import Config
 
 
@@ -59,12 +61,34 @@ class ThreadWorker(threading.Thread):
                 return str(c)
         return None
 
+    def _restart_carla(self):
+        """
+        restart_carla() for workers running in the GUI process: the map is
+        loaded from a runner subprocess afterwards, since only subprocesses
+        may import the CARLA Python API (see _start_and_stream).
+        """
+        restart_carla(
+            self.cfg.carla_executable,
+            log=self.log,
+            render_quality_low=self.cfg.render_quality_low,
+            render_off_screen=self.cfg.render_off_screen,
+        )
+        map_name = self.cfg.selected_map
+        if map_name and not self.cancelled:
+            runner = self._resolve_runner()
+            if not runner:
+                return self.log(f"!! Could not locate {self.RUNNER}")
+            self._start_and_stream([sys.executable, runner, "set_map", "--map", map_name])
+        return None
+
     def _start_and_stream(self, cmd: list[str], *, cwd: str | None = None):
-        creation = {}
-        if sys.platform.startswith("win"):
-            creation["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-        else:
-            creation["preexec_fn"] = os.setsid
+        # The child imports the CARLA Python API selected in the GUI, matching
+        # the server version; it is copied out of its docker image on first use.
+        try:
+            env = python_api_env(self.cfg.carla_python_api, self.log)
+        except Exception as e:
+            self.log(f"!! [CARLA] Could not provide CARLA Python API '{self.cfg.carla_python_api}': {e}")
+            return
 
         # Python block-buffers stdout by default when it isn't a real
         # terminal (as here, piped for streaming into the GUI log) - so
@@ -75,7 +99,6 @@ class ThreadWorker(threading.Thread):
         # like where the crash happened when it may actually be much
         # further along. Force the child to flush every line immediately
         # so the log always reflects its true, most recent state.
-        env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
 
         self.log(">> [Runner] " + " ".join(cmd))
@@ -87,7 +110,7 @@ class ThreadWorker(threading.Thread):
             text=True,
             cwd=cwd,
             env=env,
-            **creation
+            preexec_fn=os.setsid,
         )
         try:
             assert self._proc.stdout is not None

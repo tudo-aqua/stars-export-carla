@@ -39,7 +39,7 @@ class VideoTab(ttk.Frame):
             row, text="Folder...",
             command=lambda: app.open_directory_dialog(app.video_input_path_variable)
         ).pack(side="left", padx=2)
-        # If CARLA runs in a docker container (see carla_run.sh) whose
+        # If CARLA runs in a docker container (see CARLA_DOCKER_RUN_ARGS in gui/constants.py) whose
         # mounted recordings folder differs from the path this process sees
         # the file above at, give the container-side equivalent here so the
         # replay (which runs server-side) uses the right path - same idea as
@@ -136,7 +136,7 @@ class VideoTab(ttk.Frame):
         """
         app = self.app
         if not app.validate_paths([
-            ("CARLA executable", app.carla_executable_variable, "file"),
+            ("CARLA executable", app.carla_executable_variable, "carla"),
             ("Input recording", app.video_input_path_variable, ("dir", "file")),
             ("Output folder", app.video_output_path_variable, "dir"),
         ]):

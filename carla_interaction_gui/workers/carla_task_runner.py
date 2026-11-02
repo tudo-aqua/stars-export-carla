@@ -11,7 +11,7 @@ import traceback
 import zipfile
 from typing import List
 
-from carla_interaction_gui.carla_launcher import restart_and_connect, kill_carla
+from carla_interaction_gui.carla_launcher import restart_and_connect, kill_carla, set_map
 from data_av_static import MapRasterizer
 from helpers.carla_monitor import CarlaMonitor
 from helpers.json_helper import JSONHelper
@@ -58,7 +58,7 @@ def run_transform(args):
         def _to_docker_path(recording_path: str) -> str:
             """
             Recording paths are read by the CARLA *server*, which - when it
-            runs inside a docker container (see carla_run.sh) - can only see
+            runs inside a docker container (see CARLA_DOCKER_RUN_ARGS in gui/constants.py) - can only see
             them under the container's own mount path, not the host path
             this process (and its os.path.isdir/os.listdir folder-mode
             discovery above) actually sees them at. If the user has given
@@ -240,7 +240,7 @@ def run_transform(args):
             # A directory-shaped path can end up here if it only exists on
             # the CARLA *server's* side (e.g. a docker container's mounted
             # volume, such as the manual-driving recordings under
-            # '/workspace/recordings/' from carla_run.sh) - this host process
+            # '/workspace/recordings/' from CARLA_DOCKER_RECORDINGS_CONTAINER_DIR) - this host process
             # can't see it with os.path.isdir, so it falls through to here
             # instead of the folder/batch branch above. CARLA's native
             # client doesn't validate this and can segfault the whole
@@ -523,7 +523,7 @@ def run_record_video(args):
         safety_box_style = SafetyBoxStyle[args.safety_box_style] if args.render_safety_boxes else None
 
         # --docker-mount-path is the container-side directory --input's file
-        # lives under (e.g. carla_run.sh's '/workspace/recordings/' mount) -
+        # lives under (e.g. CARLA_DOCKER_RECORDINGS_CONTAINER_DIR, '/workspace/recordings/' mount) -
         # join it with --input's own basename rather than treating it as the
         # file's exact full path, since handing CARLA's native client a bare
         # directory instead of a file (e.g. if the mount path itself was
@@ -859,12 +859,17 @@ def run_recgen(args):
         raise last_error
 
 
+def run_set_map(args):
+    """Load a map into the already running server (used by workers living in the GUI process)."""
+    return 0 if set_map(args.map, log=print) else 1
+
+
 def main():
     p = argparse.ArgumentParser("carla_task_runner")
     sub = p.add_subparsers(dest="task", required=True)
 
     def add_common(sp):
-        sp.add_argument("--carla-exe", required=True, help="Path to CARLA executable")
+        sp.add_argument("--carla-exe", required=True, help="CARLA start script (.sh) or docker image name")
         sp.add_argument("--offscreen", action="store_true", default=False)
         sp.add_argument("--quality-low", action="store_true", default=False)
         sp.add_argument("--map-name", default="", help="Optional map to load")
@@ -877,7 +882,7 @@ def main():
     pt.add_argument("--docker-mount-path", dest="docker_mount_path", default="",
                      help="Container-side path corresponding to --input, if CARLA runs in a "
                           "docker container whose mounted recordings folder differs from the "
-                          "path this process sees --input at (see carla_run.sh)")
+                          "path this process sees --input at")
     # NEW: CLI to control sampling
     pt.add_argument("--recording-ext", dest="recording_ext", default="",
                     help="Recording file extension to pick up in flat-folder batch mode "
@@ -905,7 +910,7 @@ def main():
     pv.add_argument("--docker-mount-path", dest="docker_mount_path", default="",
                      help="Container-side path corresponding to --input, if CARLA runs in a "
                           "docker container whose mounted recordings folder differs from the "
-                          "path this process sees --input at (see carla_run.sh)")
+                          "path this process sees --input at")
     pv.add_argument("--output", required=True, help="Output folder (images/mp4)")
     pv.add_argument("--width", type=int, required=True)
     pv.add_argument("--height", type=int, required=True)
@@ -986,6 +991,11 @@ def main():
 
     # Duration (minutes)
     pr.add_argument("--length-of-run", type=float, default=5.0)
+
+    # set_map (expects server to be running)
+    psm = sub.add_parser("set_map", help="Load a map into the running world")
+    psm.add_argument("--map", required=True)
+    psm.set_defaults(_fn=run_set_map)
 
     args = p.parse_args()
     return args._fn(args)

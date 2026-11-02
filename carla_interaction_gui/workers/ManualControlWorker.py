@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from carla_interaction_gui.carla_launcher import restart_carla, kill_carla
+from carla_interaction_gui.carla_launcher import kill_carla
 from carla_interaction_gui.config_data import Config
 from carla_interaction_gui.workers.ThreadWorker import ThreadWorker
 
@@ -40,13 +40,7 @@ class ManualControlWorker(ThreadWorker):
     def run(self):
         if self.restart_before:
             self.log(">> [CARLA] Rebooting CARLA")
-            restart_carla(
-                self.cfg.carla_executable,
-                log=self.log,
-                render_quality_low=self.cfg.render_quality_low,
-                render_off_screen=self.cfg.render_off_screen,
-                map_name=self.cfg.selected_map,
-            )
+            self._restart_carla()
             if self.cancelled:
                 return
 
