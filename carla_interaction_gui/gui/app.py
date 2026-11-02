@@ -15,7 +15,7 @@ from carla_interaction_gui.carla_versions import (
     validate_target, vehicles_for,
 )
 from carla_interaction_gui.config_data import Config, load, save
-from carla_interaction_gui.gui.constants import CARLA_DOCKER_VERSIONS
+from carla_interaction_gui.gui.constants import CARLA_DEFAULT_DOCKER_IMAGE
 from helpers.camera_recorder.CameraPosition import CameraPosition
 from carla_interaction_gui.gui.tabs.manual_tab import ManualTab
 from carla_interaction_gui.gui.tabs.maps_tab import MapsTab
@@ -49,10 +49,10 @@ class CarlaInteractionGUI(tk.Tk):
         self.config: Config = load()
 
         # A saved start script that's gone (e.g. the former carla_run.sh) falls
-        # back to the first catalogued docker image.
+        # back to the default docker image.
         carla_executable = self.config.carla_executable
         if not carla_executable or (is_start_script(carla_executable) and not os.path.isfile(carla_executable)):
-            carla_executable = next(iter(CARLA_DOCKER_VERSIONS))
+            carla_executable = CARLA_DEFAULT_DOCKER_IMAGE
         self.carla_executable_variable = tk.StringVar(value=carla_executable)
         carla_python_api = python_api_for(carla_executable) or self.config.carla_python_api
         if carla_python_api not in python_api_versions():

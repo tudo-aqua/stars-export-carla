@@ -111,11 +111,22 @@ ALL_CONTROLLED_ACTORS = {
 #   start_script    - server start script inside the container's working dir
 #                     (CarlaUE4.sh for UE4 builds, CarlaUnreal.sh for UE5).
 #   python_api_dir  - folder inside the image holding the PythonAPI wheels;
-#                     the matching wheel is copied out of it on first use.
+#                     the matching wheel is copied out of it on first use
+#                     (or downloaded from PyPI if the image has none for
+#                     this Python version).
 #   maps            - maps shipped with that image, offered in the map lists.
 #   vehicles        - drivable vehicle blueprints, offered in the vehicle lists.
 #   controlled_actors - "Add controlled actor" buttons, see CONTROLLED_ACTORS.
 CARLA_DOCKER_VERSIONS = {
+    "carlasim/carla:0.9.15": {
+        "python_api": "0.9.15",
+        "start_script": "CarlaUE4.sh",
+        # Ships wheels for Python 2.7/3.7 only; ensure_python_api falls back to PyPI.
+        "python_api_dir": "/home/carla/PythonAPI/carla/dist",
+        "maps": ALLOWED_NON_LAYERED_MAPS,
+        "vehicles": ALLOWED_EGO_VEHICLES,
+        "controlled_actors": CONTROLLED_ACTORS,
+    },
     "carlasim/carla:0.9.16": {
         "python_api": "0.9.16",
         "start_script": "CarlaUE4.sh",
@@ -133,6 +144,9 @@ CARLA_DOCKER_VERSIONS = {
         "controlled_actors": CONTROLLED_ACTORS_0_10,
     },
 }
+
+# Preselected when no (existing) CARLA executable is configured.
+CARLA_DEFAULT_DOCKER_IMAGE = "carlasim/carla:0.9.16"
 
 # Every map/vehicle of every catalogued version, offered when the CARLA executable is
 # a free-text docker image or a shell script whose version is unknown.
